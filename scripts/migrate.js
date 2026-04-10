@@ -55,7 +55,7 @@ async function main() {
       }
       const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
       process.stdout.write(`  run   ${file} ... `);
-      await conn.query(sql);
+      await runStatements(conn, sql, file);
       await conn.query("INSERT INTO schema_migrations (filename) VALUES (?)", [file]);
       console.log("OK");
       ran++;
@@ -128,3 +128,34 @@ main().catch((err) => {
   console.error("Migration gagal:", err.message);
   process.exit(1);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Jalankan setiap statement SQL satu per satu.
+// Error berikut di-skip karena artinya objek sudah ada (idempotent):
+//   1060 ER_DUP_FIELDNAME   — ADD COLUMN yang sudah ada
+//   1061 ER_DUP_KEYNAME     — ADD INDEX/KEY yang sudah ada
+//   1050 ER_TABLE_EXISTS    — CREATE TABLE (tanpa IF NOT EXISTS)
+//   1091 ER_CANT_DROP_FIELD — DROP COLUMN/INDEX yang sudah tidak ada
+// ─────────────────────────────────────────────────────────────────────────────
+const SKIP_ERRNO = new Set([1060, 1061, 1050, 1091]);
+
+async function runStatements(conn, sql, filename) {
+  // Split pada titik-koma yang berada di posisi "atas" (bukan di dalam string/komentar)
+  const statements = sql
+    .split(/;\s*(?=(?:[^'"]*['"][^'"]*['"])*[^'"]*$)/m)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const stmt of statements) {
+    try {
+      await conn.query(stmt);
+    } catch (err) {
+      if (SKIP_ERRNO.has(err.errno)) {
+        // Tulis warning tapi lanjutkan
+        process.stdout.write(`\n    warn  [${filename}] ${err.message} — skipped`);
+      } else {
+        throw err;
+      }
+    }
+  }
+}
