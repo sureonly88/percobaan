@@ -1,0 +1,452 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
+import { canProcessPayment } from "@/lib/rbac";
+import { LunasinApiError, lunasinAdvice } from "@/lib/lunasin-api";
+import pool from "@/lib/db";
+import { RowDataPacket } from "mysql2";
+import { logTransactionEventSafe } from "@/lib/transaction-events";
+import { notifyLowBalance } from "@/lib/notifications";
+
+function safeJsonParse<T>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function findIdempotencyKeyByTransactionCode(transactionCode?: string): Promise<string | null> {
+  if (!transactionCode) return null;
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT idempotency_key
+       FROM transaction_events
+      WHERE transaction_code = ?
+        AND idempotency_key IS NOT NULL
+        AND idempotency_key <> ''
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1`,
+    [transactionCode]
+  );
+
+  return rows[0]?.idempotency_key ? String(rows[0].idempotency_key) : null;
+}
+
+async function syncPaymentRequestFromLunasinAdvice(idempotencyKey: string) {
+  const [requestRows] = await pool.query<RowDataPacket[]>(
+    `SELECT loket_code,
+            CAST(request_payload AS CHAR) AS request_payload,
+            CAST(response_payload AS CHAR) AS response_payload
+       FROM payment_requests
+      WHERE idempotency_key = ?
+      LIMIT 1`,
+    [idempotencyKey]
+  );
+
+  const requestRow = requestRows[0];
+  if (!requestRow) return null;
+
+  const requestPayload = safeJsonParse<Record<string, unknown>>(requestRow.request_payload);
+  const responsePayload = safeJsonParse<Record<string, unknown>>(requestRow.response_payload) || {};
+  const existingResults = Array.isArray(responsePayload.results)
+    ? (responsePayload.results as Array<Record<string, unknown>>)
+    : [];
+
+  let transactionCodes = existingResults
+    .map((item) => String(item.transactionCode || ""))
+    .filter(Boolean);
+
+  if (transactionCodes.length === 0) {
+    const [eventRows] = await pool.query<RowDataPacket[]>(
+      `SELECT DISTINCT transaction_code
+         FROM transaction_events
+        WHERE idempotency_key = ?
+          AND transaction_code IS NOT NULL
+          AND transaction_code <> ''`,
+      [idempotencyKey]
+    );
+    transactionCodes = eventRows
+      .map((row) => String(row.transaction_code || ""))
+      .filter(Boolean);
+  }
+
+  if (transactionCodes.length === 0) return null;
+
+  const placeholders = transactionCodes.map(() => "?").join(", ");
+  const [txRows] = await pool.query<RowDataPacket[]>(
+    `SELECT transaction_code, cust_id, nama, kode_produk, periode,
+            rp_total, advice_attempts, processing_status,
+            provider_error_code, provider_error_message,
+            CAST(provider_response AS CHAR) AS provider_response
+       FROM lunasin_trans
+      WHERE transaction_code IN (${placeholders})`,
+    transactionCodes
+  );
+
+  const txMap = new Map<string, RowDataPacket>();
+  for (const row of txRows) {
+    txMap.set(String(row.transaction_code), row);
+  }
+
+  const updatedResults = transactionCodes.map((code) => {
+    const tx = txMap.get(code);
+    const existing = existingResults.find((item) => String(item.transactionCode || "") === code) || {};
+    const providerResponse = safeJsonParse<Record<string, unknown>>(tx?.provider_response);
+    const finalStatus = tx?.processing_status === "SUCCESS"
+      ? "SUCCESS"
+      : tx?.processing_status === "FAILED"
+        ? "FAILED"
+        : "PENDING";
+
+    return {
+      ...existing,
+      idpel: String(existing.idpel || tx?.cust_id || ""),
+      transactionCode: code,
+      success: tx?.processing_status === "SUCCESS",
+      error: tx?.processing_status === "FAILED"
+        ? String(tx?.provider_error_message || existing.error || "Pembayaran gagal (advice)")
+        : tx?.processing_status === "PENDING"
+          ? "Transaksi pending, silakan lakukan advice manual"
+          : undefined,
+      errorCode: tx?.processing_status === "FAILED"
+        ? String(tx?.provider_error_code || existing.errorCode || "LUNASIN_FAILED")
+        : tx?.processing_status === "PENDING"
+          ? "LUNASIN_PENDING"
+          : undefined,
+      total: Number(tx?.rp_total || existing.total || 0),
+      nama: String(tx?.nama || existing.nama || ""),
+      kodeProduk: String(tx?.kode_produk || existing.kodeProduk || ""),
+      periode: String(tx?.periode || existing.periode || ""),
+      adviceAttempts: Number(tx?.advice_attempts || 0),
+      finalStatus,
+      providerData: providerResponse?.data || existing.providerData,
+    };
+  });
+
+  const successCount = updatedResults.filter((item) => item.success).length;
+  const pendingCount = updatedResults.filter((item) => item.finalStatus === "PENDING").length;
+  const failedCount = updatedResults.filter((item) => item.finalStatus === "FAILED").length;
+  const totalCount = updatedResults.length;
+
+  const finalStatus = successCount === totalCount
+    ? "SUCCESS"
+    : pendingCount > 0
+      ? "PENDING"
+      : successCount > 0
+        ? "PARTIAL_SUCCESS"
+        : "FAILED";
+
+  const message = finalStatus === "SUCCESS"
+    ? `${successCount} tagihan berhasil dibayarkan`
+    : finalStatus === "PENDING"
+      ? pendingCount === totalCount
+        ? `${pendingCount} tagihan masih pending advice`
+        : `${successCount}/${totalCount} berhasil, ${pendingCount} masih pending, ${failedCount} gagal`
+      : finalStatus === "PARTIAL_SUCCESS"
+        ? `${successCount}/${totalCount} tagihan berhasil, ${failedCount} gagal`
+        : `Semua ${totalCount} tagihan gagal diproses`;
+
+  const firstFailed = updatedResults.find((item) => item.finalStatus === "FAILED");
+
+  const updatedResponsePayload = {
+    ...responsePayload,
+    success: finalStatus === "SUCCESS",
+    partialSuccess: finalStatus === "PARTIAL_SUCCESS",
+    pending: finalStatus === "PENDING",
+    message,
+    results: updatedResults,
+    loketCode: responsePayload.loketCode || requestRow.loket_code || requestPayload?.loketCode,
+    loketName: responsePayload.loketName || requestPayload?.loketName,
+    biayaAdmin: responsePayload.biayaAdmin ?? requestPayload?.biayaAdmin ?? 0,
+    paidAt: finalStatus === "SUCCESS" ? new Date().toISOString() : responsePayload.paidAt,
+    idempotencyKey,
+  };
+
+  const errorCode = finalStatus === "SUCCESS"
+    ? null
+    : finalStatus === "PENDING"
+      ? "LUNASIN_PENDING"
+      : String(firstFailed?.errorCode || "LUNASIN_FAILED");
+
+  const errorMessage = finalStatus === "SUCCESS"
+    ? null
+    : finalStatus === "PENDING"
+      ? "Sebagian transaksi masih menunggu advice"
+      : String(firstFailed?.error || "Pembayaran Lunasin gagal");
+
+  await pool.execute(
+    `UPDATE payment_requests
+        SET status = ?,
+            response_payload = ?,
+            error_code = ?,
+            error_message = ?,
+            updated_at = NOW()
+      WHERE idempotency_key = ?`,
+    [
+      finalStatus,
+      JSON.stringify(updatedResponsePayload),
+      errorCode,
+      errorMessage,
+      idempotencyKey,
+    ]
+  );
+
+  return {
+    finalStatus,
+    successCount,
+    failedCount,
+    pendingCount,
+    totalCount,
+    errorCode,
+    errorMessage,
+  };
+}
+
+/* ── GET: List pending Lunasin transactions that need advice ── */
+export async function GET(req: NextRequest) {
+  const token = await getToken({ req });
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!canProcessPayment(token.role as string)) {
+    return NextResponse.json({ error: "Anda tidak memiliki akses" }, { status: 403 });
+  }
+
+  const role = String(token.role || "kasir");
+  const loketCode = String(token.loketCode || "");
+  const canSeeAll = role === "admin" || role === "supervisor";
+
+  try {
+    const loketFilter = !canSeeAll && loketCode ? " AND loket_code = ?" : "";
+    const params = !canSeeAll && loketCode ? [loketCode] : [];
+
+    const [rows] = await pool.query<RowDataPacket[]>(`
+      SELECT transaction_code, transaction_date, cust_id, nama, kode_produk, id_trx,
+             rp_amount, rp_admin, rp_total, loket_name, loket_code, username,
+             provider_rc, provider_error_code, provider_error_message,
+             advice_attempts, created_at, updated_at
+      FROM lunasin_trans
+      WHERE processing_status = 'PENDING'
+        AND provider_error_code = 'LUNASIN_PENDING'
+        ${loketFilter}
+      ORDER BY transaction_date DESC
+      LIMIT 50
+    `, params);
+
+    return NextResponse.json({ transactions: rows });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Gagal mengambil data";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const token = await getToken({ req });
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!canProcessPayment(token.role as string)) {
+    return NextResponse.json({ error: "Anda tidak memiliki akses" }, { status: 403 });
+  }
+
+  const body = await req.json();
+  const { transactionCode, idpel, kodeProduk, idTrx, input2, input3 } = body as {
+    transactionCode?: string;
+    idpel: string;
+    kodeProduk: string;
+    idTrx: string;
+    input2?: string;
+    input3?: string;
+  };
+
+  if (!idpel || !kodeProduk || !idTrx) {
+    return NextResponse.json({ error: "Parameter idpel, kodeProduk, dan idTrx wajib diisi" }, { status: 400 });
+  }
+
+  const username = String(token.username || token.name || "");
+  const relatedIdempotencyKey = transactionCode
+    ? await findIdempotencyKeyByTransactionCode(transactionCode)
+    : null;
+
+  try {
+    const result = await lunasinAdvice({
+      idpel: idpel.trim(),
+      kodeProduk,
+      idTrx,
+      input2: input2 || "",
+      input3: input3 || "",
+    });
+
+    // Log advice result
+    try {
+      await pool.execute(
+        "INSERT INTO log_inquery (jenis, log, created_at, user_login) VALUES (?, ?, NOW(), ?)",
+        [
+          `LUNASIN_ADVICE_${result.isSuccess ? "SUCCESS" : result.isFailed ? "FAILED" : "PENDING"}`,
+          JSON.stringify({ idpel, kodeProduk, idTrx, response: result.rawResponse }),
+          username,
+        ]
+      );
+    } catch {
+      // Non-critical
+    }
+
+    await logTransactionEventSafe({
+      idempotencyKey: relatedIdempotencyKey,
+      transactionCode: transactionCode || null,
+      provider: "LUNASIN",
+      eventType: result.isSuccess ? "ADVICE_SUCCESS" : result.isFailed ? "ADVICE_FAILED" : "ADVICE_PENDING",
+      severity: result.isSuccess ? "INFO" : result.isFailed ? "ERROR" : "WARN",
+      username,
+      custId: idpel.trim(),
+      message: `Advice Lunasin: ${result.isSuccess ? "sukses" : result.isFailed ? "gagal" : "masih pending"}`,
+      payload: { kodeProduk, idTrx, transactionCode, data: result.data, rawResponse: result.rawResponse },
+    });
+
+    let paymentRequestSync: {
+      finalStatus: string;
+      successCount: number;
+      failedCount: number;
+      pendingCount: number;
+      totalCount: number;
+      errorCode: string | null;
+      errorMessage: string | null;
+    } | null = null;
+
+    // Update lunasin_trans if transactionCode provided
+    if (transactionCode) {
+      if (result.isSuccess) {
+        await pool.execute(
+          `UPDATE lunasin_trans
+              SET flag_transaksi = 'LUNAS',
+                  processing_status = 'SUCCESS',
+                  provider_error_code = NULL,
+                  provider_error_message = NULL,
+                  provider_rc = ?,
+                  provider_response = ?,
+                  refnum_lunasin = ?,
+                  token_pln = ?,
+                  advice_attempts = COALESCE(advice_attempts, 0) + 1,
+                  paid_at = NOW(),
+                  failed_at = NULL,
+                  updated_at = NOW()
+            WHERE transaction_code = ? AND processing_status = 'PENDING'`,
+          [
+            result.rawResponse?.rc || null,
+            JSON.stringify(result.rawResponse || null),
+            result.data?.refnum_lunasin || null,
+            result.data?.token || null,
+            transactionCode,
+          ]
+        );
+
+        // Deduct saldo from loket
+        try {
+          const [txRows] = await pool.query<RowDataPacket[]>(
+            "SELECT rp_total, loket_code, loket_name FROM lunasin_trans WHERE transaction_code = ? LIMIT 1",
+            [transactionCode]
+          );
+          if (txRows.length > 0) {
+            const txLoketCode = txRows[0].loket_code;
+            const txTotal = Number(txRows[0].rp_total || 0);
+            await pool.execute("UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?", [txTotal, txLoketCode]);
+
+            const [balRows] = await pool.query<RowDataPacket[]>(
+              "SELECT pulsa FROM lokets WHERE loket_code = ? LIMIT 1",
+              [txLoketCode]
+            );
+            if (balRows.length > 0) {
+              notifyLowBalance({
+                loketCode: txLoketCode,
+                loketName: txRows[0].loket_name || txLoketCode,
+                currentBalance: Number(balRows[0].pulsa || 0),
+              });
+            }
+          }
+        } catch {
+          // non-critical
+        }
+      } else if (result.isFailed) {
+        await pool.execute(
+          `UPDATE lunasin_trans
+              SET flag_transaksi = 'GAGAL',
+                  processing_status = 'FAILED',
+                  provider_error_code = 'LUNASIN_FAILED',
+                  provider_error_message = 'Pembayaran gagal (advice)',
+                  provider_rc = ?,
+                  provider_response = ?,
+                  advice_attempts = COALESCE(advice_attempts, 0) + 1,
+                  paid_at = NULL,
+                  failed_at = NOW(),
+                  updated_at = NOW()
+            WHERE transaction_code = ? AND processing_status = 'PENDING'`,
+          [
+            result.rawResponse?.rc || null,
+            JSON.stringify(result.rawResponse || null),
+            transactionCode,
+          ]
+        );
+      } else {
+        // Still pending, just increment advice_attempts
+        await pool.execute(
+          `UPDATE lunasin_trans
+              SET advice_attempts = COALESCE(advice_attempts, 0) + 1,
+                  updated_at = NOW()
+            WHERE transaction_code = ? AND processing_status = 'PENDING'`,
+          [transactionCode]
+        );
+      }
+
+      if (relatedIdempotencyKey) {
+        paymentRequestSync = await syncPaymentRequestFromLunasinAdvice(relatedIdempotencyKey);
+
+        if (paymentRequestSync) {
+          await logTransactionEventSafe({
+            idempotencyKey: relatedIdempotencyKey,
+            transactionCode,
+            provider: "LUNASIN",
+            eventType: "PAYMENT_REQUEST_UPDATED_BY_ADVICE",
+            severity: paymentRequestSync.finalStatus === "FAILED"
+              ? "ERROR"
+              : paymentRequestSync.finalStatus === "PENDING"
+                ? "WARN"
+                : "INFO",
+            username,
+            custId: idpel.trim(),
+            message: `Monitoring payment request diperbarui oleh proses advice (${paymentRequestSync.finalStatus})`,
+            providerErrorCode: paymentRequestSync.errorCode,
+            payload: paymentRequestSync,
+          });
+        }
+      }
+    }
+
+    return NextResponse.json({
+      success: result.isSuccess,
+      failed: result.isFailed,
+      pending: result.isPending,
+      data: result.data,
+      transactionCode,
+      idempotencyKey: relatedIdempotencyKey,
+      paymentRequestStatus: paymentRequestSync?.finalStatus || null,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Gagal melakukan advice";
+    const errorCode = err instanceof LunasinApiError ? err.code : "UNKNOWN_ERROR";
+
+    await logTransactionEventSafe({
+      idempotencyKey: relatedIdempotencyKey,
+      transactionCode: transactionCode || null,
+      provider: "LUNASIN",
+      eventType: "ADVICE_ERROR",
+      severity: "ERROR",
+      username,
+      custId: idpel.trim(),
+      providerErrorCode: errorCode,
+      message,
+      payload: { kodeProduk, idTrx, transactionCode },
+    });
+
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+}

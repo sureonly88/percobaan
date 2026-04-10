@@ -1,0 +1,8 @@
+{
+  "port": 6789,
+  "printerName": "EPSON LX-310",
+  "printMode": "ps",
+  "portMapping": "LPT3:",
+  "columns": 80,
+  "feedLines": 4
+}

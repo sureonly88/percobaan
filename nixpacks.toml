@@ -1,0 +1,17 @@
+# nixpacks.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Konfigurasi build Nixpacks untuk Dokploy.
+# Gunakan ini jika build type di Dokploy dipilih "Nixpacks" (bukan Dockerfile).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"

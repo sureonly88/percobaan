@@ -1,0 +1,12 @@
+{
+  "name": "pedami-print-bridge",
+  "version": "1.0.0",
+  "description": "Print bridge untuk Epson LX-310 / LX-350 dot matrix — Pedami Payment",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
