@@ -145,7 +145,10 @@ export async function POST(req: NextRequest) {
   }
 
   const username = String(token.username || token.email || token.name || "");
-  const baseUrl = req.nextUrl.origin;
+  // Gunakan http://localhost:PORT untuk internal call agar selalu bisa resolve
+  // di dalam Docker container, terlepas dari domain publik yang diakses client.
+  const internalPort = process.env.PORT || "3000";
+  const baseUrl = `http://localhost:${internalPort}`;
   const cookieHeader = req.headers.get("cookie") || undefined;
 
   try {
