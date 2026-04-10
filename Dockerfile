@@ -36,6 +36,11 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static    ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public          ./public
+# Migration script + SQL files
+COPY --from=builder --chown=nextjs:nodejs /app/scripts         ./scripts
+COPY --from=builder --chown=nextjs:nodejs /app/database        ./database
+# mysql2 bindings needed by migrate.js at runtime
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules    ./node_modules
 
 USER nextjs
 
@@ -44,4 +49,4 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "node scripts/migrate.js && node server.js"]

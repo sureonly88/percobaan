@@ -14,4 +14,4 @@ cmds = ["npm ci"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "npm start"
+cmd = "npm run migrate && npm start"
