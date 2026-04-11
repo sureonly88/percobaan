@@ -50,15 +50,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Hooks must be called before any conditional returns
   useStuckTransactionDetector();
 
-  // Redirect to login when unauthenticated
+  // Redirect to login when unauthenticated (skip public pages)
   useEffect(() => {
-    if (status === "unauthenticated" && pathname !== "/login") {
+    const isPublic = ["/login", "/topup/finish", "/topup/unfinish", "/topup/error"].some(p => pathname.startsWith(p));
+    if (status === "unauthenticated" && !isPublic) {
       router.replace("/login");
     }
   }, [status, router, pathname]);
 
-  // Login page — render without shell
-  if (pathname === "/login") {
+  // Public pages — render without shell or auth checks
+  const publicPaths = ["/login", "/topup/finish", "/topup/unfinish", "/topup/error"];
+  if (publicPaths.some(p => pathname.startsWith(p))) {
     return <>{children}</>;
   }
 
