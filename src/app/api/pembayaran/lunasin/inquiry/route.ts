@@ -31,21 +31,28 @@ export async function POST(req: NextRequest) {
   const username = token.username || token.name || "";
   const loketCode = token.loketCode || "";
 
+  // Normalize short product codes from mobile to full Lunasin product codes
+  const PRODUCT_CODE_MAP: Record<string, string> = {
+    "pdam":   "pdam-kota-banjarmasin",
+    "bpjs":   "bpjs-kesehatan",
+    "telkom": "telkom-telepon",
+  };
+  let resolvedKodeProduk = PRODUCT_CODE_MAP[kodeProduk] ?? kodeProduk;
+
   // PLN products require a tier suffix (e.g. "pln-postpaid-3000").
   // If caller sends only the base code (e.g. from mobile), resolve the tier
   // from the loket's pln_admin_tier setting and append it automatically.
-  let resolvedKodeProduk = kodeProduk;
   const PLN_BASE_CODES = ["pln-postpaid", "pln-prepaid", "pln-nonrek"];
-  if (PLN_BASE_CODES.includes(kodeProduk) && loketCode) {
+  if (PLN_BASE_CODES.includes(resolvedKodeProduk) && loketCode) {
     try {
       const [rows] = await pool.query<import("mysql2").RowDataPacket[]>(
         "SELECT pln_admin_tier FROM lokets WHERE loket_code = ? LIMIT 1",
         [loketCode]
       );
       const tier = rows[0]?.pln_admin_tier ?? 3000;
-      resolvedKodeProduk = `${kodeProduk}-${tier}`;
+      resolvedKodeProduk = `${resolvedKodeProduk}-${tier}`;
     } catch {
-      resolvedKodeProduk = `${kodeProduk}-3000`;
+      resolvedKodeProduk = `${resolvedKodeProduk}-3000`;
     }
   }
 

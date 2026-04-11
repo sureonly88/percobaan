@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { canProcessPayment } from "@/lib/rbac";
 import { PdamApiError, pdamInquiry, parsePdamNumber } from "@/lib/pdam-api";
 import { CircuitOpenError } from "@/lib/circuit-breaker";
 import pool from "@/lib/db";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
+import { getAuthToken, unauthorized } from "@/lib/api-auth";
 
 export async function POST(req: NextRequest) {
-  const token = await getToken({ req });
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!canProcessPayment(token.role as string)) {
+  const token = await getAuthToken(req);
+  if (!token) return unauthorized();
+  if (!canProcessPayment(token.role)) {
     return NextResponse.json({ error: "Anda tidak memiliki akses untuk inquiry" }, { status: 403 });
   }
 

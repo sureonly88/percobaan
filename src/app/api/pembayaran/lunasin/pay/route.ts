@@ -225,7 +225,15 @@ export async function POST(req: NextRequest) {
       multiPaymentId = mprResult.insertId;
     }
 
+    // Normalize short product codes from mobile to full Lunasin product codes
+    const PRODUCT_CODE_MAP: Record<string, string> = {
+      "pdam":   "pdam-kota-banjarmasin",
+      "bpjs":   "bpjs-kesehatan",
+      "telkom": "telkom-telepon",
+    };
+
     for (const bill of bills) {
+      bill.kodeProduk = PRODUCT_CODE_MAP[bill.kodeProduk] ?? bill.kodeProduk;
       const transactionCode = `LNS${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, "0")}`;
 
       // Phase 1: Persist pending row into multi_payment_items (skip when called from orchestrator)
