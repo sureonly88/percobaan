@@ -110,6 +110,9 @@ export async function GET(request: NextRequest) {
       if (r.providerResponse) {
         try { provData = typeof r.providerResponse === "string" ? JSON.parse(r.providerResponse) : r.providerResponse; } catch { /* ignore */ }
       }
+      // provider_response stores the full LunasinResponse wrapper ({ rc, data: { tarif, refnum, ... } })
+      // Actual data fields live inside .data — unwrap it so pv() lookups work correctly
+      const provDetail = (provData.data as Record<string, unknown> | undefined) ?? provData;
 
       return {
         id: r.id,
@@ -132,7 +135,7 @@ export async function GET(request: NextRequest) {
         failedAt: r.failedAt ?? null,
         kodeProduk: r.kodeProduk ?? null,
         // Provider response detail (prioritized, richer data from API provider)
-        providerDetail: Object.keys(provData).length > 0 ? provData : null,
+        providerDetail: Object.keys(provDetail).length > 0 ? provDetail : null,
         // Metadata (inquiry-time data, fallback)
         metadata: Object.keys(meta).length > 0 ? meta : null,
       };

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
+import { getAuthToken } from "@/lib/api-auth";
 
 function categorizeError(errorCode: string | null, lastEventType: string | null): string {
   if (errorCode === "MANUALLY_RESOLVED" || lastEventType === "PAYMENT_MANUALLY_RESOLVED") {
@@ -42,10 +41,13 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { idempotencyKey: string } }
 ) {
-  const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const authToken = await getAuthToken(_request);
+  const role = authToken?.role;
   const check = denyIfUnauthorized(role, "/api/monitoring", "GET");
-  if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
+  if (!check.allowed) return NextResponse.json(check.response, { status: authToken ? 403 : 401 });
+
+  const isKasir = role === "kasir";
+  const kasirLoketCode = isKasir ? (authToken?.loketCode ?? null) : null;
 
   const idempotencyKey = decodeURIComponent(params.idempotencyKey || "").trim();
   if (!idempotencyKey) {
@@ -98,6 +100,11 @@ export async function GET(
 
     const requestRow = requestRows[0];
     if (!requestRow) {
+      return NextResponse.json({ error: "Transaksi tidak ditemukan" }, { status: 404 });
+    }
+
+    // Kasir hanya boleh lihat transaksi loket mereka sendiri
+    if (kasirLoketCode && requestRow.loket_code !== kasirLoketCode) {
       return NextResponse.json({ error: "Transaksi tidak ditemukan" }, { status: 404 });
     }
 
@@ -226,6 +233,8 @@ export async function GET(
       bills = mpiRows.map((row) => {
         const meta = safeJsonParse<Record<string, unknown>>(row.metadata_json) || {};
         const provRes = safeJsonParse<Record<string, unknown>>(row.provider_response) || {};
+        // provider_response stores the full LunasinResponse wrapper; actual data fields live inside .data
+        const provResData = (provRes.data as Record<string, unknown>) ?? provRes;
         const provider = String(row.provider || "").toUpperCase();
 
         const base: Record<string, unknown> = {
@@ -252,7 +261,7 @@ export async function GET(
           paidAt: row.paid_at,
           failedAt: row.failed_at,
           adviceAttempts: Number(row.advice_attempts || 0),
-          refnumLunasin: provRes.refnum_lunasin || meta.refnum_lunasin || null,
+          refnumLunasin: provResData.refnum_lunasin || meta.refnum_lunasin || null,
         };
 
         // PDAM-specific fields from metadata

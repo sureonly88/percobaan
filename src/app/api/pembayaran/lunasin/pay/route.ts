@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
-import { getToken } from "next-auth/jwt";
 import { canProcessPayment } from "@/lib/rbac";
 import { LunasinApiError, lunasinPayment } from "@/lib/lunasin-api";
+import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
 import pool from "@/lib/db";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
@@ -49,13 +49,9 @@ function safeJsonParse<T>(value: string | null): T | null {
 }
 
 export async function POST(req: NextRequest) {
-  const token = await getToken({ req });
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!canProcessPayment(token.role as string)) {
-    return NextResponse.json({ error: "Anda tidak memiliki akses untuk pembayaran" }, { status: 403 });
-  }
+  const token = await getAuthToken(req);
+  if (!token) return unauthorized();
+  if (!canProcessPayment(token.role)) return forbidden("Anda tidak memiliki akses untuk pembayaran");
 
   const body = await req.json();
   const { bills, loketCode, loketName, biayaAdmin, idempotencyKey, skipMultiPayment } = body as {
@@ -77,7 +73,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "idempotencyKey tidak valid" }, { status: 400 });
   }
 
-  const username = (token.username || token.email || token.name || "") as string;
+  const username = token.username || token.name || "";
   const idempotencyKeyTrimmed = idempotencyKey.trim();
 
   try {
@@ -106,7 +102,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Validate saldo
-  const totalPembayaran = bills.reduce((sum, b) => sum + b.total + (biayaAdmin || 0), 0);
+  // bill.total sudah mencakup admin fee (total = rpAmount + admin), jadi biayaAdmin tidak perlu ditambahkan lagi
+  const totalPembayaran = bills.reduce((sum, b) => sum + b.total, 0);
   if (saldoLoket < totalPembayaran) {
     return NextResponse.json(
       { error: `Saldo loket tidak mencukupi. Saldo: Rp ${saldoLoket.toLocaleString("id-ID")}, Total: Rp ${totalPembayaran.toLocaleString("id-ID")}` },
@@ -235,15 +232,15 @@ export async function POST(req: NextRequest) {
       if (!skipMultiPayment && multiPaymentId) {
         try {
           const metadata = {
-            id_trx: bill.idTrx,
-            periode: bill.periode || "",
-            jum_bill: bill.jumBill || "1",
-            tarif: bill.tarif || "",
-            daya: bill.daya || "",
-            input2: bill.input2 || "",
-            input3: bill.input3 || "",
+            id_trx:      bill.idTrx,
+            periode:     bill.periode  || "",
+            jum_bill:    bill.jumBill  || "1",
+            tarif:       bill.tarif    || "",
+            daya:        bill.daya     || "",
+            input2:      bill.input2   || "",
+            input3:      bill.input3   || "",
             jenis_loket: jenisLoket,
-            source: "loket",
+            source:      "loket",
           };
           await pool.execute(
             `INSERT INTO multi_payment_items
@@ -252,9 +249,12 @@ export async function POST(req: NextRequest) {
              VALUES (?, ?, 'LUNASIN', ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
             [
               multiPaymentId, `LNS-${transactionCode}`,
-              bill.kodeProduk.startsWith("PLN") ? "PLN" : bill.kodeProduk.startsWith("BPJS") ? "BPJS" :
-              bill.kodeProduk.startsWith("TELKOM") ? "TELKOM" : bill.kodeProduk.startsWith("HP") ? "PULSA" :
-              bill.kodeProduk.startsWith("PAKETDATA") ? "PAKET_DATA" : bill.kodeProduk.startsWith("PDAM") ? "PDAM" : "LAINNYA",
+              bill.kodeProduk.toLowerCase().startsWith("pln") ? (bill.kodeProduk.toLowerCase().includes("prepaid") || bill.kodeProduk.toLowerCase().includes("prabayar") ? "PLN_PREPAID" : bill.kodeProduk.toLowerCase().includes("nonrek") ? "PLN_NONTAGLIS" : "PLN_POSTPAID") :
+              bill.kodeProduk.toLowerCase().startsWith("bpjs") ? "BPJS" :
+              bill.kodeProduk.toLowerCase().startsWith("telkom") ? "TELKOM" :
+              bill.kodeProduk.toLowerCase().startsWith("hp") ? "PULSA" :
+              bill.kodeProduk.toLowerCase().startsWith("paketdata") ? "PAKET_DATA" :
+              bill.kodeProduk.toLowerCase().startsWith("pdam") ? "PDAM" : "LAINNYA",
               bill.idpel, bill.nama,
               bill.kodeProduk, bill.periode || "",
               bill.rpAmount, bill.admin, bill.total,
@@ -334,7 +334,7 @@ export async function POST(req: NextRequest) {
                       failed_at = NULL
                 WHERE transaction_code = ? AND status = 'PENDING'`,
               [
-                JSON.stringify(payResult.rawResponse || null),
+                JSON.stringify(payResult.data || null),
                 transactionCode,
               ]
             );
@@ -353,8 +353,8 @@ export async function POST(req: NextRequest) {
             providerData: payResult.data as unknown as Record<string, unknown>,
           });
 
-          // Deduct saldo
-          const billTotal = bill.total + (biayaAdmin || 0);
+          // Deduct saldo (bill.total sudah mencakup admin fee)
+          const billTotal = bill.total;
           try {
             await pool.execute("UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?", [billTotal, loketCode]);
             try {
@@ -403,7 +403,7 @@ export async function POST(req: NextRequest) {
                       advice_attempts = 0
                 WHERE transaction_code = ? AND status = 'PENDING'`,
               [
-                JSON.stringify(payResult.rawResponse || null),
+                JSON.stringify(payResult.data || null),
                 transactionCode,
               ]
             );

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { canProcessPayment } from "@/lib/rbac";
 import { orchestrateMultiPayment } from "@/lib/multipay/orchestrator";
 import { MultiPaymentRequestInput } from "@/lib/multipay/types";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
+import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
 
 interface MultiPaymentListRow extends RowDataPacket {
   multi_payment_code: string;
@@ -24,17 +24,9 @@ interface MultiPaymentListRow extends RowDataPacket {
 }
 
 async function authorize(req: NextRequest) {
-  const token = await getToken({ req });
-  if (!token) {
-    return { ok: false as const, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  if (!canProcessPayment(token.role as string)) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Anda tidak memiliki akses untuk pembayaran" }, { status: 403 }),
-    };
-  }
-
+  const token = await getAuthToken(req);
+  if (!token) return { ok: false as const, response: unauthorized() };
+  if (!canProcessPayment(token.role)) return { ok: false as const, response: forbidden("Anda tidak memiliki akses untuk pembayaran") };
   return { ok: true as const, token };
 }
 
@@ -144,7 +136,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Informasi loket wajib diisi" }, { status: 400 });
   }
 
-  const username = String(token.username || token.email || token.name || "");
+  const username = token.username || token.name || "";
   // Gunakan http://localhost:PORT untuk internal call agar selalu bisa resolve
   // di dalam Docker container, terlepas dari domain publik yang diakses client.
   const internalPort = process.env.PORT || "3000";

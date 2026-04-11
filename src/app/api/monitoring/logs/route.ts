@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
+import { getAuthToken } from "@/lib/api-auth";
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const authToken = await getAuthToken(request);
+  const role = authToken?.role;
   const check = denyIfUnauthorized(role, "/api/monitoring", "GET");
-  if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
+  if (!check.allowed) return NextResponse.json(check.response, { status: authToken ? 403 : 401 });
 
   const { searchParams } = new URL(request.url);
   const idempotencyKey = searchParams.get("idempotencyKey");

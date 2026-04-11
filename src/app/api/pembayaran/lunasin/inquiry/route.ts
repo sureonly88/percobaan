@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { canProcessPayment } from "@/lib/rbac";
 import { LunasinApiError, lunasinInquiry } from "@/lib/lunasin-api";
 import pool from "@/lib/db";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
+import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
 
 export async function POST(req: NextRequest) {
-  const token = await getToken({ req });
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!canProcessPayment(token.role as string)) {
-    return NextResponse.json({ error: "Anda tidak memiliki akses untuk inquiry" }, { status: 403 });
-  }
+  const token = await getAuthToken(req);
+  if (!token) return unauthorized();
+  if (!canProcessPayment(token.role)) return forbidden("Anda tidak memiliki akses untuk inquiry");
 
   const body = await req.json();
   const { idpel, kodeProduk, input2, input3 } = body as {
@@ -32,7 +28,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nomor pelanggan tidak valid" }, { status: 400 });
   }
 
-  const username = String(token.username || token.name || "");
+  const username = token.username || token.name || "";
+  const loketCode = token.loketCode || "";
+
+  // PLN products require a tier suffix (e.g. "pln-postpaid-3000").
+  // If caller sends only the base code (e.g. from mobile), resolve the tier
+  // from the loket's pln_admin_tier setting and append it automatically.
+  let resolvedKodeProduk = kodeProduk;
+  const PLN_BASE_CODES = ["pln-postpaid", "pln-prepaid", "pln-nonrek"];
+  if (PLN_BASE_CODES.includes(kodeProduk) && loketCode) {
+    try {
+      const [rows] = await pool.query<import("mysql2").RowDataPacket[]>(
+        "SELECT pln_admin_tier FROM lokets WHERE loket_code = ? LIMIT 1",
+        [loketCode]
+      );
+      const tier = rows[0]?.pln_admin_tier ?? 3000;
+      resolvedKodeProduk = `${kodeProduk}-${tier}`;
+    } catch {
+      resolvedKodeProduk = `${kodeProduk}-3000`;
+    }
+  }
 
   try {
     await logTransactionEventSafe({
@@ -41,13 +56,13 @@ export async function POST(req: NextRequest) {
       username,
       custId: idpel.trim(),
       provider: "LUNASIN",
-      message: `Memulai inquiry Lunasin produk ${kodeProduk}`,
-      payload: { idpel: idpel.trim(), kodeProduk, input2, input3 },
+      message: `Memulai inquiry Lunasin produk ${resolvedKodeProduk}`,
+      payload: { idpel: idpel.trim(), kodeProduk: resolvedKodeProduk, input2, input3 },
     });
 
     const result = await lunasinInquiry({
       idpel: idpel.trim(),
-      kodeProduk,
+      kodeProduk: resolvedKodeProduk,
       input2: input2 || "",
       input3: input3 || "",
     });
@@ -62,8 +77,8 @@ export async function POST(req: NextRequest) {
       await pool.execute(
         "INSERT INTO log_inquery (jenis, log, created_at, user_login) VALUES (?, ?, NOW(), ?)",
         [
-          `LUNASIN_INQUIRY_${kodeProduk.toUpperCase()}`,
-          JSON.stringify({ idpel: idpel.trim(), kodeProduk, response: result.rawResponse }),
+          `LUNASIN_INQUIRY_${resolvedKodeProduk.toUpperCase()}`,
+          JSON.stringify({ idpel: idpel.trim(), kodeProduk: resolvedKodeProduk, response: result.rawResponse }),
           username,
         ]
       );
@@ -77,10 +92,10 @@ export async function POST(req: NextRequest) {
       username,
       custId: idpel.trim(),
       provider: "LUNASIN",
-      message: `Inquiry Lunasin berhasil untuk produk ${kodeProduk}`,
+      message: `Inquiry Lunasin berhasil untuk produk ${resolvedKodeProduk}`,
       payload: {
         idpel: idpel.trim(),
-        kodeProduk,
+        kodeProduk: resolvedKodeProduk,
         idTrx: result.idTrx,
         billCount,
         periods,
@@ -93,6 +108,7 @@ export async function POST(req: NextRequest) {
       success: true,
       data: result.data,
       idTrx: result.idTrx,
+      kodeProduk: resolvedKodeProduk,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Gagal melakukan inquiry";
@@ -108,7 +124,7 @@ export async function POST(req: NextRequest) {
       message,
       payload: {
         idpel: idpel.trim(),
-        kodeProduk,
+        kodeProduk: resolvedKodeProduk,
         rawResponse: err instanceof LunasinApiError ? err.rawResponse ?? null : null,
       },
     });

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
+import { getAuthToken } from "@/lib/api-auth";
 
 function categorizeError(errorCode: string | null, lastEventType: string | null): string {
   if (errorCode === "MANUALLY_RESOLVED" || lastEventType === "PAYMENT_MANUALLY_RESOLVED") {
@@ -38,10 +37,13 @@ function formatTrendDate(value: string): string {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const authToken = await getAuthToken(request);
+  const role = authToken?.role;
   const check = denyIfUnauthorized(role, "/api/monitoring", "GET");
-  if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
+  if (!check.allowed) return NextResponse.json(check.response, { status: authToken ? 403 : 401 });
+
+  const isKasir = role === "kasir";
+  const kasirLoketCode = isKasir ? (authToken?.loketCode ?? null) : null;
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status"); // PENDING, SUCCESS, PARTIAL_SUCCESS, FAILED, or null for all
@@ -57,6 +59,8 @@ export async function GET(request: NextRequest) {
   try {
     const providerClause = providerFilter && providerFilter !== "ALL" ? " AND provider = ?" : "";
     const providerParams = providerClause ? [providerFilter] : [];
+    const kasirClause = kasirLoketCode ? " AND loket_code = ?" : "";
+    const kasirParams: string[] = kasirLoketCode ? [kasirLoketCode] : [];
 
     // --- Summary, stuck, metrics, topError, retries, trend, errorCategories in parallel ---
     const [
@@ -79,17 +83,17 @@ export async function GET(request: NextRequest) {
             END
           ), 0) as bill_count
         FROM payment_requests
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
         GROUP BY status
-      `, providerParams),
+      `, [...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT COUNT(*) as count
         FROM payment_requests
         WHERE status = 'PENDING'
           AND COALESCE(error_code, '') <> 'LUNASIN_PENDING'
           AND created_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)
-          ${providerClause}
-      `, providerParams),
+          ${providerClause}${kasirClause}
+      `, [...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT
           COUNT(*) AS total_count,
@@ -100,17 +104,17 @@ export async function GET(request: NextRequest) {
           SUM(CASE WHEN error_code LIKE 'NETWORK_%' THEN 1 ELSE 0 END) AS network_failures,
           SUM(CASE WHEN error_code LIKE 'PDAM_%' OR error_code LIKE 'LUNASIN_%' OR error_code LIKE 'HTTP_%' OR error_code REGEXP '^[0-9]{4}$' THEN 1 ELSE 0 END) AS provider_failures
         FROM payment_requests
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}
-      `, providerParams),
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
+      `, [...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT error_code, COUNT(*) AS count
         FROM payment_requests
         WHERE error_code IS NOT NULL AND error_code <> ''
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}
+          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
         GROUP BY error_code
         ORDER BY count DESC, error_code ASC
         LIMIT 1
-      `, providerParams),
+      `, [...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT COALESCE(SUM(GREATEST(CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.attempts')) AS UNSIGNED) - 1, 0)), 0) AS total_retries
         FROM transaction_events
@@ -121,17 +125,17 @@ export async function GET(request: NextRequest) {
       pool.query<RowDataPacket[]>(`
         SELECT DATE(created_at) AS trx_date, status, COUNT(*) AS count
         FROM payment_requests
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)${providerClause}
+        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)${providerClause}${kasirClause}
         GROUP BY DATE(created_at), status
         ORDER BY trx_date ASC
-      `, providerParams),
+      `, [...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT error_code, COUNT(*) AS count
         FROM payment_requests
         WHERE error_code IS NOT NULL AND error_code <> ''
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}
+          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
         GROUP BY error_code
-      `, providerParams),
+      `, [...providerParams, ...kasirParams]),
     ]);
 
     const summary: Record<string, { count: number; billCount: number }> = {
@@ -306,6 +310,11 @@ export async function GET(request: NextRequest) {
       params.push(`%${username}%`);
     }
 
+    if (kasirLoketCode) {
+      listQuery += " AND pr.loket_code = ?";
+      params.push(kasirLoketCode);
+    }
+
     if (providerClause) {
       listQuery += " AND pr.provider = ?";
       params.push(providerFilter as string);
@@ -433,10 +442,10 @@ export async function GET(request: NextRequest) {
 
 // Force-resolve a stuck PENDING transaction
 export async function PATCH(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const authToken = await getAuthToken(req);
+  const role = authToken?.role;
   const check = denyIfUnauthorized(role, "/api/monitoring", "PATCH");
-  if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
+  if (!check.allowed) return NextResponse.json(check.response, { status: authToken ? 403 : 401 });
 
   const body = await req.json();
   const { id, action } = body as { id: number; action: "resolve_stuck" };
@@ -446,8 +455,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const actor = (session?.user as { username?: string; email?: string; name?: string } | undefined);
-    const actorName = actor?.username || actor?.email || actor?.name || "";
+    const actorName = authToken?.username || authToken?.name || "";
 
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT id, status, created_at, idempotency_key, loket_code, username, provider

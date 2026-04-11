@@ -4,22 +4,43 @@ import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
+import { getAuthToken } from "@/lib/api-auth";
 
 // GET: list saldo history + loket saldo info
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  // Support Bearer token (mobile) alongside cookie session (web)
+  const authToken = await getAuthToken(request);
+  let role: string | undefined;
+  let sessionLoketCode: string | undefined;
+
+  if (authToken) {
+    role = authToken.role;
+    sessionLoketCode = authToken.loketCode ?? undefined;
+  } else {
+    const session = await getServerSession(authOptions);
+    role = (session?.user as { role?: string })?.role;
+  }
+
   const check = denyIfUnauthorized(role, "/api/saldo", "GET");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
   const { searchParams } = new URL(request.url);
-  const loketCode = searchParams.get("loketCode");
+  // Non-admin roles: always scope to their own loket
+  const isAdmin = role === "admin";
+  const loketCode = isAdmin
+    ? (searchParams.get("loketCode") ?? null)
+    : (sessionLoketCode ?? searchParams.get("loketCode") ?? null);
 
   try {
-    // Get all active lokets with saldo
-    const [lokets] = await pool.query<RowDataPacket[]>(
-      "SELECT id, loket_code, nama, pulsa FROM lokets WHERE status = 'aktif' ORDER BY nama ASC"
-    );
+    // Get lokets — admin sees all, kasir/supervisor sees only their own
+    let loketsQuery = "SELECT id, loket_code, nama, pulsa FROM lokets WHERE status = 'aktif'";
+    const loketsParams: string[] = [];
+    if (!isAdmin && loketCode) {
+      loketsQuery += " AND loket_code = ?";
+      loketsParams.push(loketCode);
+    }
+    loketsQuery += " ORDER BY nama ASC";
+    const [lokets] = await pool.query<RowDataPacket[]>(loketsQuery, loketsParams);
 
     // Get saldo history
     let historyQuery = `

@@ -70,8 +70,8 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     PUT: ["admin"],
   },
   "/api/saldo": {
-    GET: ["admin"],
-    POST: ["admin"],
+    GET: ["admin", "supervisor", "kasir"],
+    POST: ["admin", "kasir"],
   },
   "/api/biaya-admin": {
     GET: ["admin"],
@@ -105,8 +105,11 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     PATCH: ["admin", "supervisor"],
   },
   "/api/monitoring": {
-    GET: ["admin", "supervisor"],
+    GET: ["admin", "supervisor", "kasir"],
     PATCH: ["admin"],
+  },
+  "/api/v1/transactions": {
+    GET: ["admin", "supervisor", "kasir"],
   },
   "/api/users": {
     GET: ["admin"],
