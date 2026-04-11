@@ -1,11 +1,10 @@
 "use client";
-export const dynamic = "force-dynamic";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function TopupErrorPage() {
+function ErrorContent() {
   const params = useSearchParams();
   const orderId = params.get("order_id") ?? "";
   const statusCode = params.get("status_code") ?? "";
@@ -62,5 +61,13 @@ export default function TopupErrorPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function TopupErrorPage() {
+  return (
+    <Suspense fallback={<div className="min-h-[70vh] flex items-center justify-center"><div className="w-10 h-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin" /></div>}>
+      <ErrorContent />
+    </Suspense>
   );
 }
