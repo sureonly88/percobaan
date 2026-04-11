@@ -36,6 +36,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Manajemen Pelanggan", href: "/pelanggan", icon: "group" },
       { label: "Manajemen Loket", href: "/loket", icon: "store" },
       { label: "Update Saldo Loket", href: "/saldo", icon: "account_balance_wallet" },
+      { label: "Top-up Saldo", href: "/topup", icon: "add_card" },
     ],
   },
   {

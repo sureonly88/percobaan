@@ -47,13 +47,13 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string }> = {
 const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
     "/", "/pembayaran", "/advice-lunasin", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
-    "/loket", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/pengaturan", "/monitoring", "/notifikasi", "/provider",
+    "/loket", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
   ],
   supervisor: [
     "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin",
   ],
   kasir: [
-    "/", "/pembayaran", "/advice-lunasin", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/riwayat", "/pelanggan", "/pengaturan", "/notifikasi",
+    "/", "/pembayaran", "/advice-lunasin", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/riwayat", "/pelanggan", "/pengaturan", "/notifikasi", "/topup",
   ],
   switcher: [
     "/provider/docs",
@@ -127,6 +127,12 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor", "kasir"],
     POST: ["admin"],
     PATCH: ["admin", "supervisor", "kasir"],
+  },
+  "/api/topup": {
+    GET: ["admin", "supervisor", "kasir"],
+  },
+  "/api/topup/create": {
+    POST: ["admin", "kasir"],
   },
 };
 
