@@ -17,12 +17,13 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 
-const SECRET = process.env.MOBILE_JWT_SECRET || process.env.NEXTAUTH_SECRET || "";
 const ACCESS_TTL_S  = 8 * 60 * 60;       // 8 jam
 const REFRESH_TTL_S = 30 * 24 * 60 * 60; // 30 hari
 
-if (!SECRET) {
-  throw new Error("MOBILE_JWT_SECRET atau NEXTAUTH_SECRET wajib diset");
+function getSecret(): string {
+  const s = process.env.MOBILE_JWT_SECRET || process.env.NEXTAUTH_SECRET || "";
+  if (!s) throw new Error("MOBILE_JWT_SECRET atau NEXTAUTH_SECRET wajib diset");
+  return s;
 }
 
 // ── Minimal JWT (HS256, tidak perlu library eksternal) ──────────────────────
@@ -32,20 +33,22 @@ function b64url(input: string) {
 }
 
 function signJwt(payload: Record<string, unknown>): string {
+  const secret  = getSecret();
   const header  = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const body    = b64url(JSON.stringify(payload));
   const data    = `${header}.${body}`;
-  const sig     = createHmac("sha256", SECRET).update(data).digest("base64url");
+  const sig     = createHmac("sha256", secret).update(data).digest("base64url");
   return `${data}.${sig}`;
 }
 
 function verifyJwt(token: string): Record<string, unknown> {
+  const secret = getSecret();
   const parts = token.split(".");
   if (parts.length !== 3) throw new Error("Token tidak valid");
 
   const [header, body, sig] = parts;
   const data     = `${header}.${body}`;
-  const expected = createHmac("sha256", SECRET).update(data).digest("base64url");
+  const expected = createHmac("sha256", secret).update(data).digest("base64url");
 
   // Timing-safe compare
   const sigBuf      = Buffer.from(sig,      "base64url");
