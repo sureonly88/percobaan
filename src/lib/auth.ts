@@ -35,6 +35,18 @@ export const authOptions: AuthOptions = {
           const isValid = await bcrypt.compare(credentials.password, user.password);
           if (!isValid) return null;
 
+          // Block pending / rejected users from logging in
+          if (user.status === "pending") {
+            throw new Error("Akun Anda masih menunggu persetujuan admin. Silakan tunggu konfirmasi.");
+          }
+          if (user.status === "ditolak") {
+            const note = user.catatan_tolak ? ` Alasan: ${user.catatan_tolak}` : "";
+            throw new Error(`Pendaftaran Anda tidak disetujui.${note}`);
+          }
+          if (user.status === "nonaktif") {
+            throw new Error("Akun Anda telah dinonaktifkan. Hubungi admin loket Anda.");
+          }
+
           // Reset rate limit on successful login
           resetRateLimit(rateLimitKey);
 
@@ -44,8 +56,10 @@ export const authOptions: AuthOptions = {
             email: user.username,
             username: user.username,
             role: user.role,
+            loketId: user.loket_id || null,
             loketCode: user.loket_code || null,
             loketName: user.loket_name || null,
+            isLoketAdmin: user.is_loket_admin === 1,
           };
         } catch {
           return null;
@@ -59,8 +73,10 @@ export const authOptions: AuthOptions = {
         token.name = (user as { name?: string }).name || (user as { username?: string }).username || token.name;
         token.role = (user as { role?: string }).role;
         token.username = (user as { username?: string; email?: string }).username || (user as { email?: string }).email;
+        token.loketId = (user as { loketId?: number | null }).loketId ?? null;
         token.loketCode = (user as { loketCode?: string }).loketCode;
         token.loketName = (user as { loketName?: string }).loketName;
+        token.isLoketAdmin = (user as { isLoketAdmin?: boolean }).isLoketAdmin ?? false;
       }
       return token;
     },
@@ -71,8 +87,10 @@ export const authOptions: AuthOptions = {
         (session.user as { role?: string }).role = token.role as string;
         (session.user as { id?: string }).id = token.sub;
         (session.user as { username?: string }).username = (token.username as string) || session.user.email || undefined;
+        (session.user as { loketId?: number | null }).loketId = token.loketId as number | null;
         (session.user as { loketCode?: string }).loketCode = token.loketCode as string;
         (session.user as { loketName?: string }).loketName = token.loketName as string;
+        (session.user as { isLoketAdmin?: boolean }).isLoketAdmin = token.isLoketAdmin as boolean ?? false;
       }
       return session;
     },

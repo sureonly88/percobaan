@@ -2,8 +2,8 @@ import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 import { canAccessPage } from "@/lib/rbac";
 
-// Public paths that don't require authentication (e.g. Midtrans redirect pages)
-const PUBLIC_PATHS = ["/topup/finish", "/topup/unfinish", "/topup/error"];
+// Public paths that don't require authentication
+const PUBLIC_PATHS = ["/topup/finish", "/topup/unfinish", "/topup/error", "/register"];
 
 export default withAuth(
   function middleware(req) {
@@ -30,6 +30,7 @@ export default withAuth(
         const path = req.nextUrl.pathname;
         // Allow public paths without a session token
         if (PUBLIC_PATHS.some(p => path.startsWith(p))) return true;
+        if (path.startsWith("/api/auth/register")) return true;
         return !!token;
       },
     },
@@ -41,6 +42,6 @@ export default withAuth(
 
 export const config = {
   matcher: [
-    "/((?!login|api/auth|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|register|api/auth|_next/static|_next/image|favicon.ico).*)",
   ],
 };

@@ -8,6 +8,7 @@ import { getAccessiblePages, normalizeRole, ROLE_LABELS } from "@/lib/rbac";
 
 type NavItem = { label: string; href: string; icon: string };
 type NavGroup = { category: string; items: NavItem[] };
+type BadgeMap = Record<string, number>;
 
 const NAV_GROUPS: NavGroup[] = [
   {
@@ -35,6 +36,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Manajemen Pelanggan", href: "/pelanggan", icon: "group" },
       { label: "Manajemen Loket", href: "/loket", icon: "store" },
+      { label: "Anggota Loket", href: "/loket/members", icon: "manage_accounts" },
       { label: "Update Saldo Loket", href: "/saldo", icon: "account_balance_wallet" },
       { label: "Top-up Saldo", href: "/topup", icon: "add_card" },
     ],
@@ -44,6 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Biaya Admin", href: "/biaya-admin", icon: "payments" },
       { label: "Manajemen User", href: "/users", icon: "admin_panel_settings" },
+      { label: "Pendaftaran Agen", href: "/users/registrations", icon: "how_to_reg" },
       { label: "API Provider", href: "/provider", icon: "api" },
       { label: "Dokumentasi API", href: "/provider/docs", icon: "menu_book" },
       { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
@@ -51,7 +54,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-function NavDropdown({ group, isActive }: { group: NavGroup; isActive: boolean }) {
+function NavDropdown({ group, isActive, badgeMap = {} }: { group: NavGroup; isActive: boolean; badgeMap?: BadgeMap }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
@@ -95,7 +98,12 @@ function NavDropdown({ group, isActive }: { group: NavGroup; isActive: boolean }
                 }`}
               >
                 <span className="material-symbols-outlined text-lg">{item.icon}</span>
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {badgeMap[item.href] ? (
+                  <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                    {badgeMap[item.href] > 99 ? "99+" : badgeMap[item.href]}
+                  </span>
+                ) : null}
               </Link>
             );
           })}
@@ -109,6 +117,7 @@ export function AppTopNav() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const sessionUser = session?.user as {
     name?: string | null;
@@ -139,6 +148,23 @@ export function AppTopNav() {
     })).filter((group) => group.items.length > 0);
   }, [accessiblePages]);
 
+  // Fetch pending registrations count for admin badge
+  useEffect(() => {
+    if (normalizedRole !== "admin") return;
+    async function fetchPending() {
+      try {
+        const res = await fetch("/api/admin/registrations?status=pending&pageSize=1");
+        if (res.ok) {
+          const d = await res.json();
+          setPendingCount(d.pendingCount ?? 0);
+        }
+      } catch { /* ignore */ }
+    }
+    fetchPending();
+    const id = setInterval(fetchPending, 60_000);
+    return () => clearInterval(id);
+  }, [normalizedRole]);
+
   // Close mobile menu on route change
   useEffect(() => {
     setMobileOpen(false);
@@ -161,7 +187,8 @@ export function AppTopNav() {
           <div className="hidden lg:flex items-center gap-0.5">
             {filteredNavGroups.map((group) => {
               const groupActive = group.items.some((item) => pathname === item.href);
-              return <NavDropdown key={group.category} group={group} isActive={groupActive} />;
+              const badgeMap: BadgeMap = pendingCount > 0 ? { "/users/registrations": pendingCount } : {};
+            return <NavDropdown key={group.category} group={group} isActive={groupActive} badgeMap={badgeMap} />;
             })}
           </div>
         </div>
@@ -224,7 +251,12 @@ export function AppTopNav() {
                     }`}
                   >
                     <span className="material-symbols-outlined text-lg">{item.icon}</span>
-                    {item.label}
+                    <span className="flex-1">{item.label}</span>
+                    {pendingCount > 0 && item.href === "/users/registrations" && (
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                        {pendingCount > 99 ? "99+" : pendingCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

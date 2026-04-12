@@ -52,14 +52,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Redirect to login when unauthenticated (skip public pages)
   useEffect(() => {
-    const isPublic = ["/login", "/topup/finish", "/topup/unfinish", "/topup/error"].some(p => pathname.startsWith(p));
+    const isPublic = ["/login", "/register", "/topup/finish", "/topup/unfinish", "/topup/error"].some(p => pathname.startsWith(p));
     if (status === "unauthenticated" && !isPublic) {
       router.replace("/login");
     }
   }, [status, router, pathname]);
 
   // Public pages — render without shell or auth checks
-  const publicPaths = ["/login", "/topup/finish", "/topup/unfinish", "/topup/error"];
+  const publicPaths = ["/login", "/register", "/topup/finish", "/topup/unfinish", "/topup/error"];
   if (publicPaths.some(p => pathname.startsWith(p))) {
     return <>{children}</>;
   }

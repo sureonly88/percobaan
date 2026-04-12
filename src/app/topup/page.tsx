@@ -19,6 +19,8 @@ interface TopupRecord {
   totalBayar: number;
   status: string;
   paymentMethod: string | null;
+  snapUrl: string | null;
+  expiresAt: string | null;
   paidAt: string | null;
   createdAt: string;
 }
@@ -52,9 +54,26 @@ export default function TopupPage() {
       const res = await fetch(`/api/topup?page=${p}&pageSize=10`);
       if (res.ok) {
         const data = await res.json();
-        setHistory(data.topups || []);
+        const topups: TopupRecord[] = data.topups || [];
+        setHistory(topups);
         setTotalPages(data.pagination?.totalPages || 1);
         setPage(p);
+
+        // Auto-restore active banner if there's a pending topup and no active set yet
+        if (p === 1) {
+          const pending = topups.find(t => t.status === "PENDING" && t.snapUrl);
+          if (pending) {
+            setActive(prev => prev ? prev : {
+              orderId: pending.orderId,
+              nominal: pending.nominal,
+              status: "PENDING",
+              snapToken: "",
+              snapUrl: pending.snapUrl!,
+              expiresAt: pending.expiresAt ?? "",
+              midtransClientKey: "",
+            });
+          }
+        }
       }
     } catch {
       // ignore
@@ -342,6 +361,17 @@ export default function TopupPage() {
                           {h.username} · {h.loketCode}
                           {h.paymentMethod && ` · ${h.paymentMethod}`}
                         </p>
+                        {h.status === "PENDING" && h.snapUrl && (
+                          <a
+                            href={h.snapUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-bold text-amber-600 hover:text-amber-700 hover:underline"
+                          >
+                            <span className="material-symbols-outlined text-sm">open_in_new</span>
+                            Lanjutkan Pembayaran
+                          </a>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className={`text-sm font-black ${h.status === "SUCCESS" ? "text-emerald-600" : "text-slate-400"}`}>

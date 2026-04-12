@@ -47,13 +47,13 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string }> = {
 const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
     "/", "/pembayaran", "/advice-lunasin", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
-    "/loket", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
+    "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
   ],
   supervisor: [
     "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin",
   ],
   kasir: [
-    "/", "/pembayaran", "/advice-lunasin", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/riwayat", "/pelanggan", "/pengaturan", "/notifikasi", "/topup",
+    "/", "/pembayaran", "/laporan", "/tutup-kasir", "/pelanggan", "/pengaturan", "/notifikasi", "/topup", "/loket/members",
   ],
   switcher: [
     "/provider/docs",
@@ -68,6 +68,12 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor"],
     POST: ["admin"],
     PUT: ["admin"],
+  },
+  "/api/loket/members": {
+    GET: ["admin", "supervisor", "kasir"],
+    POST: ["admin", "kasir"],
+    PUT: ["admin", "kasir"],
+    DELETE: ["admin", "kasir"],
   },
   "/api/saldo": {
     GET: ["admin", "supervisor", "kasir"],
@@ -90,10 +96,10 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor", "kasir"],
   },
   "/api/rekonsiliasi": {
-    GET: ["admin", "supervisor", "kasir"],
+    GET: ["admin", "supervisor"],
   },
   "/api/rekonsiliasi/export": {
-    GET: ["admin", "supervisor", "kasir"],
+    GET: ["admin", "supervisor"],
   },
   "/api/tutup-kasir": {
     GET: ["admin", "supervisor", "kasir"],

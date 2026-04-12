@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
 
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT id, request_code, loket_code, username, nominal, fee, total_bayar,
-              status, payment_method, gateway_order_id, paid_at, created_at
+              status, payment_method, gateway_order_id, snap_url, expires_at, paid_at, created_at
        FROM topup_requests
        WHERE ${where}
        ORDER BY created_at DESC
@@ -117,6 +117,8 @@ export async function GET(request: NextRequest) {
         totalBayar: Number(r.total_bayar),
         status: r.status,
         paymentMethod: r.payment_method,
+        snapUrl: r.snap_url,
+        expiresAt: r.expires_at,
         paidAt: r.paid_at,
         createdAt: r.created_at,
       })),

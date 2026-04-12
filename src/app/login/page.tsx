@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Image from "next/image";
 
 export default function LoginPage() {
@@ -228,7 +229,14 @@ export default function LoginPage() {
           </form>
 
           {/* Footer */}
-          <p className="text-center text-xs text-slate-400 mt-10">
+          <p className="text-center text-sm text-slate-500 mt-6">
+            Belum punya akun?{" "}
+            <Link href="/register" className="text-indigo-600 font-bold hover:underline">
+              Daftar di sini
+            </Link>
+          </p>
+
+          <p className="text-center text-xs text-slate-400 mt-6">
             &copy; {new Date().getFullYear()} Pedami Payment &mdash; Sistem Pembayaran Terpadu
           </p>
         </div>
