@@ -551,7 +551,7 @@ export async function POST(req: NextRequest) {
               nama: bill.nama,
               blth: bill.blth,
               attempts: paymentResult.attempts,
-              providerData: itemByBlth.get(bill.blth) || {
+              providerData: (itemByBlth.get(bill.blth) as Record<string, unknown> | undefined) || {
                 alamat: bill.alamat || "",
                 gol: bill.gol || "",
                 harga: String(bill.harga),
