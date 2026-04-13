@@ -121,7 +121,7 @@ export async function GET(request: NextRequest) {
           nama: r.customer_name,
           alamat: meta.alamat ?? "",
           blth: r.period_label,
-          hargaAir: Number(meta.harga_air ?? meta.hargaAir ?? 0),
+          hargaAir: Number(meta.harga_air ?? meta.hargaAir ?? meta.harga ?? 0),
           abodemen: Number(meta.abodemen ?? 0),
           materai: Number(meta.materai ?? 0),
           limbah: Number(meta.limbah ?? 0),
