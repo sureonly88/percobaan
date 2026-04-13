@@ -351,7 +351,6 @@ export default function PembayaranPage() {
         gol: bill.gol,
         idgol: bill.gol,
         harga: bill.harga,
-        harga_air: bill.harga,
         denda: bill.denda,
         materai: bill.materai,
         limbah: bill.limbah,
