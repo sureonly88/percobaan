@@ -127,8 +127,8 @@ export async function GET(request: NextRequest) {
           limbah: Number(meta.limbah ?? 0),
           retribusi: Number(meta.retribusi ?? 0),
           denda: Number(meta.denda ?? 0),
-          standLalu: Number(meta.stand_lalu ?? meta.standLalu ?? 0),
-          standKini: Number(meta.stand_kini ?? meta.standKini ?? 0),
+          standLalu: parseMetaNum(meta.stand_lalu ?? meta.standLalu),
+          standKini: parseMetaNum(meta.stand_kini ?? meta.standKini),
           subTotal: Number(r.amount),
           admin: Number(r.admin_fee),
           total: Number(r.total),
@@ -163,6 +163,14 @@ function parseJson(val: unknown): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+/** Parse a numeric value that may use Indonesian comma notation (e.g. "1600,79") */
+function parseMetaNum(val: unknown): number {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "number") return isNaN(val) ? 0 : val;
+  const n = parseFloat(String(val).replace(",", "."));
+  return isNaN(n) ? 0 : n;
 }
 
 // Category prefix map for Lunasin products

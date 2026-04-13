@@ -212,7 +212,7 @@ export async function POST(request: Request) {
       );
 
       // 9. Record in multi_payment_items for internal tracking
-      recordInternalTransaction(provider, custId, inquiryResult.items, totalAmount, transactionCode);
+      recordInternalTransaction(provider, custId, inquiryResult.items, totalAmount, transactionCode, payResult.data);
 
       // 10. Fire webhook
       sendWebhookIfConfigured(provider, transactionId, {
@@ -333,7 +333,9 @@ function recordInternalTransaction(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   items: any[],
   totalAmount: number,
-  transactionCode: string
+  transactionCode: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  paymentItems?: any[]
 ): void {
   const loketCode = provider.loket_code || `API-${provider.code}`;
   const loketName = provider.loket_name || loketCode;
@@ -357,25 +359,39 @@ function recordInternalTransaction(
       );
       const parentId = parentResult.insertId;
 
+      // Build lookup map from payment response (authoritative data after payment)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payItemByBlth = new Map<string, any>();
+      if (paymentItems) {
+        for (const pi of paymentItems) {
+          if (pi.thbln) payItemByBlth.set(pi.thbln, pi);
+        }
+      }
+
       // 2. Create item per bill period
-      for (const item of items) {
-        const subTotal = parsePdamNumber(item.sub_tot);
-        const itemTotal = parsePdamNumber(item.total);
-        const itemAdmin = parsePdamNumber(item.byadmin);
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        // Prefer authoritative payment response data over inquiry data
+        const resp = payItemByBlth.get(item.thbln) ?? item;
+        const subTotal = parsePdamNumber(resp.sub_tot ?? item.sub_tot);
+        const itemTotal = parsePdamNumber(resp.total ?? item.total);
+        // Admin fee is a flat provider charge — apply to first item only so SUM = adminFee
+        const itemAdminFee = idx === 0 ? adminFee : 0;
+        const itemGrandTotal = itemTotal + itemAdminFee;
         const metadata = {
-          alamat: item.alamat || "",
-          idgol: item.gol || "",
-          harga_air: parsePdamNumber(item.harga),
+          alamat: resp.alamat || item.alamat || "",
+          idgol: resp.gol || item.gol || "",
+          harga_air: parsePdamNumber(resp.harga ?? item.harga),
           abodemen: 0,
-          materai: parsePdamNumber(item.materai),
-          limbah: parsePdamNumber(item.limbah),
-          retribusi: parsePdamNumber(item.retribusi),
-          denda: parsePdamNumber(item.denda),
-          stand_lalu: item.stand_l || "0",
-          stand_kini: item.stand_i || "0",
-          beban_tetap: parsePdamNumber(item.biaya_tetap),
-          biaya_meter: parsePdamNumber(item.biaya_meter),
-          diskon: parsePdamNumber(item.diskon),
+          materai: parsePdamNumber(resp.materai ?? item.materai),
+          limbah: parsePdamNumber(resp.limbah ?? item.limbah),
+          retribusi: parsePdamNumber(resp.retribusi ?? item.retribusi),
+          denda: parsePdamNumber(resp.denda ?? item.denda),
+          stand_lalu: resp.stand_l || item.stand_l || "0",
+          stand_kini: resp.stand_i || item.stand_i || "0",
+          beban_tetap: parsePdamNumber(resp.biaya_tetap ?? item.biaya_tetap),
+          biaya_meter: parsePdamNumber(resp.biaya_meter ?? item.biaya_meter),
+          diskon: parsePdamNumber(resp.diskon ?? item.diskon),
           jenis_loket: "API_PROVIDER",
           source: `provider:${provider.code}`,
         };
@@ -383,12 +399,13 @@ function recordInternalTransaction(
         await pool.execute(
           `INSERT INTO multi_payment_items
             (multi_payment_id, item_code, provider, service_type, customer_id, customer_name,
-             period_label, amount, admin_fee, total, status, transaction_code,
-             metadata_json, paid_at)
-           VALUES (?, ?, 'PDAM', 'PDAM', ?, ?, ?, ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
-          [parentId, `PROV-${custId}-${item.thbln || Date.now()}`,
-           custId, item.nama || "", item.thbln || "",
-           subTotal, itemAdmin, itemTotal, transactionCode,
+             product_code, period_label, amount, admin_fee, total, status, transaction_code,
+             provider_response, metadata_json, paid_at)
+           VALUES (?, ?, 'PDAM', 'PDAM_NATIVE', ?, ?, 'pdam', ?, ?, ?, ?, 'SUCCESS', ?, ?, ?, NOW())`,
+          [parentId, `PROV-${custId}-${resp.thbln || item.thbln || Date.now()}`,
+           custId, resp.nama || item.nama || "", resp.thbln || item.thbln || "",
+           subTotal, itemAdminFee, itemGrandTotal, transactionCode,
+           paymentItems ? JSON.stringify(resp) : null,
            JSON.stringify(metadata)]
         );
       }
