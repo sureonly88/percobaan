@@ -87,7 +87,7 @@ function mapLegacyResponseToResults(items: ProviderExecutionItem[], response: { 
       transactionCode: result.transactionCode ? String(result.transactionCode) : undefined,
       errorCode: result.errorCode ? String(result.errorCode) : undefined,
       error: result.error ? String(result.error) : undefined,
-      providerData: {
+      providerData: (result.providerData as Record<string, unknown> | undefined) || {
         blth,
         attempts: result.attempts,
       },

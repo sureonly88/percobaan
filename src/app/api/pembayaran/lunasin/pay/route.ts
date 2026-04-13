@@ -240,11 +240,13 @@ export async function POST(req: NextRequest) {
       if (!skipMultiPayment && multiPaymentId) {
         try {
           const metadata = {
-            id_trx:      bill.idTrx,
+            nama:        bill.nama,
+            kodeProduk:  bill.kodeProduk,
+            idTrx:       bill.idTrx,
             periode:     bill.periode  || "",
-            jum_bill:    bill.jumBill  || "1",
             tarif:       bill.tarif    || "",
             daya:        bill.daya     || "",
+            jumBill:     bill.jumBill  || "1",
             input2:      bill.input2   || "",
             input3:      bill.input3   || "",
             jenis_loket: jenisLoket,
@@ -444,6 +446,7 @@ export async function POST(req: NextRequest) {
             nama: bill.nama,
             kodeProduk: bill.kodeProduk,
             finalStatus: "PENDING",
+            providerData: payResult.data as unknown as Record<string, unknown>,
           });
         }
       } catch (err: unknown) {

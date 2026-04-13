@@ -3,6 +3,7 @@ import { canProcessPayment } from "@/lib/rbac";
 import { PdamApiError, pdamInquiry, parsePdamNumber } from "@/lib/pdam-api";
 import { CircuitOpenError } from "@/lib/circuit-breaker";
 import pool from "@/lib/db";
+import { RowDataPacket } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { getAuthToken, unauthorized } from "@/lib/api-auth";
 
@@ -27,6 +28,23 @@ export async function POST(req: NextRequest) {
 
   try {
     const username = String(token.username || token.name || "");
+    const loketCode = String(token.loketCode || "");
+
+    // Fetch loket admin fee
+    let adminFeePerBill = 0;
+    if (loketCode) {
+      try {
+        const [loketRows] = await pool.query<RowDataPacket[]>(
+          "SELECT biaya_admin FROM lokets WHERE loket_code = ? LIMIT 1",
+          [loketCode]
+        );
+        if (loketRows.length > 0) {
+          adminFeePerBill = Number(loketRows[0].biaya_admin || 0);
+        }
+      } catch {
+        // Non-critical
+      }
+    }
 
     await logTransactionEventSafe({
       eventType: "INQUIRY_REQUEST",
@@ -93,7 +111,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ success: true, data: normalized });
+    return NextResponse.json({ success: true, data: normalized, adminFee: adminFeePerBill });
   } catch (err: unknown) {
     if (err instanceof CircuitOpenError) {
       return NextResponse.json({ error: err.message }, { status: 503 });

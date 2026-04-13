@@ -97,33 +97,34 @@ export async function GET(
         updatedAt:            row.updated_at,
       };
 
-      // PLN-specific fields
+      // PLN-specific fields — sourced from provider_response
       if (provider === "LUNASIN" && serviceType.startsWith("PLN")) {
-        item.tarif    = meta.tarif   ?? provData.tarif   ?? null;
-        item.daya     = meta.daya    ?? provData.daya    ?? null;
-        item.token    = provData.token  ?? meta.token   ?? null;  // PLN Prepaid token listrik
-        item.stroom   = provData.stroom ?? meta.stroom  ?? null;
-        item.rpToken  = provData.rp_token ?? null;                // Nominal token
+        item.tarif    = provData.tarif   ?? null;
+        item.daya     = provData.daya    ?? null;
+        item.token    = provData.token   ?? null;
+        item.stroom   = provData.stroom  ?? null;
+        item.rpToken  = provData.rp_token ?? null;
         item.nometer  = provData.nometer  ?? null;
         item.refnum   = provData.refnum   ?? provData.refnum_lunasin ?? null;
-        item.periode  = meta.periode ?? row.period_label ?? null;
+        item.periode  = provData.periode ?? row.period_label ?? null;
       }
 
-      // PDAM-specific fields
+      // PDAM-specific fields — sourced from provider_response (raw PDAM API response per bill)
       if (provider === "PDAM" || serviceType === "PDAM") {
-        item.hargaAir    = Number(meta.harga_air   ?? 0);
-        item.abodemen    = Number(meta.abodemen    ?? 0);
-        item.materai     = Number(meta.materai     ?? 0);
-        item.limbah      = Number(meta.limbah      ?? 0);
-        item.retribusi   = Number(meta.retribusi   ?? 0);
-        item.denda       = Number(meta.denda       ?? 0);
-        item.standLalu   = Number(meta.stand_lalu  ?? 0);
-        item.standKini   = Number(meta.stand_kini  ?? 0);
-        item.golongan    = meta.idgol ?? null;
-        item.bebanTetap  = Number(meta.beban_tetap ?? 0);
-        item.biayaMeter  = Number(meta.biaya_meter ?? 0);
-        item.diskon      = Number(meta.diskon      ?? 0);
-        item.periode     = meta.periode ?? row.period_label ?? null;
+        item.alamat      = String(provData.alamat ?? "");
+        item.golongan    = String(provData.gol ?? "");
+        item.hargaAir    = Number(provData.harga ?? 0);
+        item.abodemen    = Number(provData.byadmin ?? 0);
+        item.materai     = Number(provData.materai ?? 0);
+        item.limbah      = Number(provData.limbah ?? 0);
+        item.retribusi   = Number(provData.retribusi ?? 0);
+        item.denda       = Number(provData.denda ?? 0);
+        item.standLalu   = provData.stand_l ?? "0";
+        item.standKini   = provData.stand_i ?? "0";
+        item.bebanTetap  = Number(provData.biaya_tetap ?? 0);
+        item.biayaMeter  = Number(provData.biaya_meter ?? 0);
+        item.diskon      = Number(provData.diskon ?? 0);
+        item.periode     = provData.thbln ?? row.period_label ?? null;
       }
 
       return item;

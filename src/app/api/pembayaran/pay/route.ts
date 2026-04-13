@@ -103,6 +103,7 @@ export async function POST(req: NextRequest) {
   // Fetch jenis loket from cache (rarely changes), saldo fresh from DB
   let jenisLoket = "SWITCHING";
   let saldoLoket = 0;
+  let biayaAdminLoket = biayaAdmin || 0;
   try {
     const loketInfo = await cached(
       `loket:${loketCode}`,
@@ -117,20 +118,21 @@ export async function POST(req: NextRequest) {
     );
     jenisLoket = loketInfo;
 
-    // Saldo must always be fresh
+    // Saldo and biaya_admin must always be fresh
     const [balRows] = await pool.query<RowDataPacket[]>(
-      "SELECT pulsa FROM lokets WHERE loket_code = ? LIMIT 1",
+      "SELECT pulsa, biaya_admin FROM lokets WHERE loket_code = ? LIMIT 1",
       [loketCode]
     );
     if (balRows.length > 0) {
       saldoLoket = Number(balRows[0].pulsa || 0);
+      biayaAdminLoket = Number(balRows[0].biaya_admin || 0);
     }
   } catch {
     // fallback to default
   }
 
   // Validate saldo loket
-  const totalPembayaran = bills.reduce((sum, b) => sum + b.subTotal + (biayaAdmin || 0), 0);
+  const totalPembayaran = bills.reduce((sum, b) => sum + b.subTotal + (biayaAdminLoket || 0), 0);
   if (saldoLoket < totalPembayaran) {
     return NextResponse.json(
       { error: `Saldo loket tidak mencukupi. Saldo: Rp ${saldoLoket.toLocaleString("id-ID")}, Total: Rp ${totalPembayaran.toLocaleString("id-ID")}` },
@@ -253,6 +255,7 @@ export async function POST(req: NextRequest) {
     nama: string;
     blth: string;
     attempts?: number;
+    providerData?: Record<string, unknown>;
   }> = [];
 
   try {
@@ -281,7 +284,7 @@ export async function POST(req: NextRequest) {
           multiPaymentCode, idempotencyKeyTrimmed, loketCode, loketName || "", username,
           bills.length,
           bills.reduce((s, b) => s + b.subTotal, 0),
-          bills.length * (biayaAdmin || 0),
+          bills.length * biayaAdminLoket,
           totalPembayaran,
         ]
       );
@@ -320,7 +323,7 @@ export async function POST(req: NextRequest) {
               [
                 multiPaymentId, `PDAM-${transactionCode}-${bill.blth}`,
                 bill.idpel, bill.nama, bill.blth,
-                bill.subTotal, biayaAdmin || 0, bill.subTotal + (biayaAdmin || 0),
+                bill.subTotal, biayaAdminLoket, bill.subTotal + biayaAdminLoket,
                 transactionCode, JSON.stringify(metadata),
               ]
             );
@@ -494,21 +497,46 @@ export async function POST(req: NextRequest) {
                     JSON.stringify(resp),
                     JSON.stringify(updatedMetadata),
                     respSubTotal,
-                    respSubTotal + (biayaAdmin || 0),
+                    respSubTotal + biayaAdminLoket,
                     transactionCode,
                     bill.blth,
                   ]
                 );
               } else {
+                // No per-bill data from PDAM API — save raw response as provider_response
+                const fallbackResp = {
+                  alamat: bill.alamat || "",
+                  gol: bill.gol || "",
+                  harga: String(bill.harga),
+                  byadmin: "0",
+                  materai: String(bill.materai),
+                  limbah: String(bill.limbah),
+                  retribusi: String(bill.retribusi),
+                  denda: String(bill.denda),
+                  stand_l: String(bill.standLalu),
+                  stand_i: String(bill.standKini),
+                  biaya_tetap: String(bill.bebanTetap),
+                  biaya_meter: String(bill.biayaMeter),
+                  diskon: String(bill.diskon),
+                  thbln: bill.blth,
+                  total: String(bill.subTotal),
+                  nama: bill.nama,
+                  _source: "bill_fallback",
+                };
                 await pool.execute(
                   `UPDATE multi_payment_items
                       SET status = 'SUCCESS',
+                          provider_response = ?,
                           paid_at = NOW(),
                           failed_at = NULL
                     WHERE transaction_code = ?
                       AND period_label = ?
                       AND status = 'PENDING'`,
-                  [transactionCode, bill.blth]
+                  [
+                    JSON.stringify(fallbackResp),
+                    transactionCode,
+                    bill.blth,
+                  ]
                 );
               }
             }
@@ -519,15 +547,34 @@ export async function POST(req: NextRequest) {
               idpel: bill.idpel,
               transactionCode,
               success: true,
-              total: bill.total,
+              total: bill.subTotal + biayaAdminLoket,
               nama: bill.nama,
               blth: bill.blth,
               attempts: paymentResult.attempts,
+              providerData: itemByBlth.get(bill.blth) || {
+                alamat: bill.alamat || "",
+                gol: bill.gol || "",
+                harga: String(bill.harga),
+                byadmin: "0",
+                materai: String(bill.materai),
+                limbah: String(bill.limbah),
+                retribusi: String(bill.retribusi),
+                denda: String(bill.denda),
+                stand_l: String(bill.standLalu),
+                stand_i: String(bill.standKini),
+                biaya_tetap: String(bill.bebanTetap),
+                biaya_meter: String(bill.biayaMeter),
+                diskon: String(bill.diskon),
+                thbln: bill.blth,
+                total: String(bill.subTotal),
+                nama: bill.nama,
+                _source: "bill_fallback",
+              },
             });
           }
 
           // Deduct saldo loket
-          const groupTotal = pelBills.reduce((sum, b) => sum + b.subTotal + (biayaAdmin || 0), 0);
+          const groupTotal = pelBills.reduce((sum, b) => sum + b.subTotal + biayaAdminLoket, 0);
           try {
             await pool.execute(
               "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?",
@@ -595,7 +642,7 @@ export async function POST(req: NextRequest) {
               success: false,
               error: "Pembayaran ke provider berhasil, tetapi pencatatan lokal gagal. Mohon hubungi admin.",
               errorCode: "DB_FINALIZE_FAILED",
-              total: bill.total,
+              total: bill.subTotal + biayaAdminLoket,
               nama: bill.nama,
               blth: bill.blth,
               attempts: paymentResult.attempts,
@@ -663,7 +710,7 @@ export async function POST(req: NextRequest) {
             success: false,
             error: message,
             errorCode,
-            total: bill.total,
+            total: bill.subTotal + biayaAdminLoket,
             nama: bill.nama,
             blth: bill.blth,
             attempts,
@@ -690,7 +737,7 @@ export async function POST(req: NextRequest) {
       results,
       loketCode,
       loketName,
-      biayaAdmin,
+      biayaAdmin: biayaAdminLoket,
       paidAt,
       idempotencyKey: idempotencyKeyTrimmed,
     };

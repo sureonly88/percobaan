@@ -112,6 +112,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       transaksi: rows.map((r) => {
+        const prov = parseJson(r.provider_response);
         const meta = parseJson(r.metadata_json);
         return {
           id: r.id,
@@ -119,28 +120,28 @@ export async function GET(request: NextRequest) {
           transactionDate: r.transaction_date,
           custId: r.customer_id,
           nama: r.customer_name,
-          alamat: meta.alamat ?? "",
+          alamat: String(prov.alamat ?? ""),
           blth: r.period_label,
-          hargaAir: Number(meta.harga_air ?? meta.hargaAir ?? meta.harga ?? 0),
-          abodemen: Number(meta.abodemen ?? 0),
-          materai: Number(meta.materai ?? 0),
-          limbah: Number(meta.limbah ?? 0),
-          retribusi: Number(meta.retribusi ?? 0),
-          denda: Number(meta.denda ?? 0),
-          standLalu: parseMetaNum(meta.stand_lalu ?? meta.standLalu),
-          standKini: parseMetaNum(meta.stand_kini ?? meta.standKini),
+          hargaAir: parseMetaNum(prov.harga),
+          abodemen: parseMetaNum(prov.byadmin),
+          materai: parseMetaNum(prov.materai),
+          limbah: parseMetaNum(prov.limbah),
+          retribusi: parseMetaNum(prov.retribusi),
+          denda: parseMetaNum(prov.denda),
+          standLalu: parseMetaNum(prov.stand_l),
+          standKini: parseMetaNum(prov.stand_i),
           subTotal: Number(r.amount),
           admin: Number(r.admin_fee),
           total: Number(r.total),
           username: r.username,
           loketName: r.loket_name,
           loketCode: r.loket_code,
-          idgol: meta.idgol ?? "",
+          idgol: String(prov.gol ?? meta.idgol ?? ""),
           jenisLoket: meta.jenis_loket ?? meta.jenisLoket ?? "",
-          bebanTetap: Number(meta.beban_tetap ?? meta.bebanTetap ?? 0),
-          biayaMeter: Number(meta.biaya_meter ?? meta.biayaMeter ?? 0),
+          bebanTetap: parseMetaNum(prov.biaya_tetap),
+          biayaMeter: parseMetaNum(prov.biaya_meter),
           flagTransaksi: r.status,
-          diskon: Number(meta.diskon ?? 0),
+          diskon: parseMetaNum(prov.diskon),
         };
       }),
       total,
@@ -261,6 +262,9 @@ async function getPlnTransaksi(opts: {
     transaksi: rows.map((r) => {
       const meta = parseJson(r.metadata_json);
       const prov = parseJson(r.provider_response);
+      const provData = (prov.data && typeof prov.data === "object" && !Array.isArray(prov.data))
+        ? (prov.data as Record<string, unknown>)
+        : prov;
       return {
         id: r.id,
         transactionCode: r.transaction_code,
@@ -268,17 +272,17 @@ async function getPlnTransaksi(opts: {
         custId: r.customer_id,
         nama: r.customer_name,
         kodeProduk: r.product_code,
-        idTrx: meta.id_trx ?? meta.idTrx ?? "",
+        idTrx: String(provData.id_trx ?? provData.idTrx ?? meta.id_trx ?? meta.idTrx ?? ""),
         periode: r.period_label ?? "",
-        jumBill: Number(meta.jum_bill ?? meta.jumBill ?? prov.jum_bill ?? 0),
-        tarif: String(meta.tarif ?? prov.tarif ?? ""),
-        daya: String(meta.daya ?? prov.daya ?? ""),
-        standMeter: String(meta.stand_meter ?? meta.standMeter ?? prov.nometer ?? ""),
+        jumBill: Number(provData.jum_bill ?? provData.jumBill ?? 0),
+        tarif: String(provData.tarif ?? ""),
+        daya: String(provData.daya ?? ""),
+        standMeter: String(provData.stand_meter ?? provData.nometer ?? ""),
         rpAmount: Number(r.amount ?? 0),
         rpAdmin: Number(r.admin_fee ?? 0),
         rpTotal: Number(r.total ?? 0),
-        refnumLunasin: String(meta.refnum_lunasin ?? meta.refnumLunasin ?? prov.refnum_lunasin ?? ""),
-        tokenPln: String(meta.token_pln ?? meta.tokenPln ?? prov.token ?? ""),
+        refnumLunasin: String(provData.refnum_lunasin ?? provData.refnumLunasin ?? ""),
+        tokenPln: String(provData.token ?? ""),
         username: r.username,
         loketName: r.loket_name,
         loketCode: r.loket_code,
