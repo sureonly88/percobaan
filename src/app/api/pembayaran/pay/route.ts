@@ -316,7 +316,7 @@ export async function POST(req: NextRequest) {
               `INSERT INTO multi_payment_items
                 (multi_payment_id, item_code, provider, service_type, customer_id, customer_name,
                  period_label, amount, admin_fee, total, status, transaction_code, metadata_json)
-               VALUES (?, ?, 'PDAM', 'PDAM_NATIVE', ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,[
+               VALUES (?, ?, 'PDAM', 'PDAM_NATIVE', ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
               [
                 multiPaymentId, `PDAM-${transactionCode}-${bill.blth}`,
                 bill.idpel, bill.nama, bill.blth,
