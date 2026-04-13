@@ -144,7 +144,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 
     const [result] = await pool.execute<ResultSetHeader>(
       `INSERT INTO \`${tableName}\` (${colList}) VALUES (${placeholders})`,
-      insertVals
+      insertVals as (string | number | boolean | null)[]
     );
 
     return NextResponse.json({ success: true, insertId: result.insertId });
@@ -185,7 +185,7 @@ export async function PUT(req: NextRequest, { params }: { params: Params }) {
       [
         ...setCols.map(c => (data[c] === "" ? null : data[c])),
         ...whereCols.map(c => where[c]),
-      ]
+      ] as (string | number | boolean | null)[]
     );
 
     return NextResponse.json({ success: true });
@@ -216,7 +216,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Params }) {
 
     await pool.execute(
       `DELETE FROM \`${tableName}\` WHERE ${whereClause}`,
-      whereCols.map(c => where[c])
+      whereCols.map(c => where[c]) as (string | number | boolean | null)[]
     );
 
     return NextResponse.json({ success: true });
