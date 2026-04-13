@@ -36,7 +36,7 @@ function toLegacyPdamBill(item: ProviderExecutionItem): LegacyPdamBill | null {
     nama: item.customerName || String(metadata.nama || ""),
     alamat: String(metadata.alamat || ""),
     blth,
-    gol: String(metadata.gol || ""),
+    gol: String(metadata.gol || metadata.idgol || ""),
     harga: Number(metadata.harga || item.amount || 0),
     denda: Number(metadata.denda || 0),
     materai: Number(metadata.materai || 0),

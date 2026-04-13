@@ -136,9 +136,11 @@ function pvLunasin(item: PlnTransaksiData, ...keys: string[]): string | null {
 const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text" }> = [
   { key: ["tarif"], label: "Tarif" },
   { key: ["daya"], label: "Daya (VA)" },
-  { key: ["stand_meter", "standMeter", "nometer"], label: "Stand Meter / No Meter" },
+  { key: ["nometer"], label: "No. Meter" },
+  { key: ["stand_meter", "standMeter"], label: "Stand Meter" },
   { key: ["kwh"], label: "kWh" },
   { key: ["jum_bill", "jumBill"], label: "Jumlah Tagihan" },
+  { key: ["jum_tunggakan"], label: "Jumlah Tunggakan" },
   { key: ["rp_amount"], label: "Tagihan Listrik", format: "rupiah" },
   { key: ["rp_admin"], label: "Biaya Admin", format: "rupiah" },
   { key: ["rp_materai"], label: "Materai", format: "rupiah" },
@@ -147,8 +149,6 @@ const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | 
   { key: ["rp_angsuran"], label: "Angsuran", format: "rupiah" },
   { key: ["rp_token"], label: "Nilai Token", format: "rupiah" },
   { key: ["rp_total"], label: "Total", format: "rupiah" },
-  { key: ["saldo_terpotong"], label: "Saldo Terpotong", format: "rupiah" },
-  { key: ["nometer"], label: "No. Meter" },
   { key: ["refnum"], label: "Ref Number" },
   { key: ["refnum_lunasin"], label: "Ref Lunasin" },
   { key: ["tgl_lunas"], label: "Tgl Lunas" },
@@ -1241,13 +1241,16 @@ export default function PelangganPage() {
                     ["Denda", detailData.denda],
                     ["Beban Tetap", detailData.bebanTetap],
                     ["Biaya Meter", detailData.biayaMeter],
-                    ["Diskon", detailData.diskon],
-                  ] as const).map(([label, val]) => val > 0 && (
+                  ] as const).map(([label, val]) => (
                     <div key={label} className="flex justify-between text-sm">
                       <span className="text-slate-500">{label}</span>
                       <span className="font-medium">{formatRupiah(val)}</span>
                     </div>
                   ))}
+                  <div className="flex justify-between text-sm">
+                    <span className="text-emerald-600 dark:text-emerald-400">Diskon</span>
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400">- {formatRupiah(detailData.diskon)}</span>
+                  </div>
                   <hr className="border-slate-200 dark:border-slate-700" />
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-500">Sub Total</span>

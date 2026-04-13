@@ -48,6 +48,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
     "/", "/pembayaran", "/advice-lunasin", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
+    "/db-manage",
   ],
   supervisor: [
     "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin",

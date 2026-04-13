@@ -50,6 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "API Provider", href: "/provider", icon: "api" },
       { label: "Dokumentasi API", href: "/provider/docs", icon: "menu_book" },
       { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
+      { label: "DB Manager", href: "/db-manage", icon: "database" },
     ],
   },
 ];

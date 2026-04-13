@@ -169,9 +169,11 @@ function pv(item: DetailItem, ...keys: string[]): string | null {
 const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text" }> = [
   { key: ["tarif"], label: "Tarif" },
   { key: ["daya"], label: "Daya (VA)" },
+  { key: ["nometer"], label: "No. Meter" },
   { key: ["stand_meter", "standMeter"], label: "Stand Meter" },
   { key: ["kwh"], label: "kWh" },
   { key: ["jum_bill", "jumBill"], label: "Jumlah Tagihan" },
+  { key: ["jum_tunggakan"], label: "Jumlah Tunggakan" },
   { key: ["rp_amount"], label: "Tagihan Listrik", format: "rupiah" },
   { key: ["rp_admin"], label: "Biaya Admin", format: "rupiah" },
   { key: ["rp_materai"], label: "Materai", format: "rupiah" },
@@ -180,8 +182,6 @@ const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | 
   { key: ["rp_angsuran"], label: "Angsuran", format: "rupiah" },
   { key: ["rp_token"], label: "Nilai Token", format: "rupiah" },
   { key: ["rp_total"], label: "Total", format: "rupiah" },
-  { key: ["saldo_terpotong"], label: "Saldo Terpotong", format: "rupiah" },
-  { key: ["nometer"], label: "No. Meter" },
   { key: ["refnum"], label: "Ref Number" },
   { key: ["refnum_lunasin"], label: "Ref Lunasin" },
   { key: ["tgl_lunas"], label: "Tgl Lunas" },
@@ -189,10 +189,9 @@ const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | 
 ];
 
 /* Known field labels for PDAM metadata */
-const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text" }> = [
+const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text"; discount?: boolean }> = [
   { key: ["alamat"], label: "Alamat" },
   { key: ["gol", "idgol"], label: "Golongan" },
-  { key: ["blth"], label: "Bulan/Tahun" },
   { key: ["harga", "harga_air", "hargaAir"], label: "Harga Air", format: "rupiah" },
   { key: ["abodemen"], label: "Abodemen", format: "rupiah" },
   { key: ["bebanTetap", "beban_tetap"], label: "Beban Tetap", format: "rupiah" },
@@ -200,25 +199,32 @@ const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "te
   { key: ["retribusi"], label: "Retribusi", format: "rupiah" },
   { key: ["limbah"], label: "Limbah", format: "rupiah" },
   { key: ["denda"], label: "Denda", format: "rupiah" },
-  { key: ["diskon"], label: "Diskon", format: "rupiah" },
+  { key: ["diskon"], label: "Diskon", format: "rupiah", discount: true },
   { key: ["biayaMeter", "biaya_meter"], label: "Biaya Meter", format: "rupiah" },
-  { key: ["standLalu", "stand_lalu"], label: "Stand Lalu" },
-  { key: ["standKini", "stand_kini"], label: "Stand Kini" },
+  { key: ["stand_l", "standLalu", "stand_lalu"], label: "Stand Lalu" },
+  { key: ["stand_i", "standKini", "stand_kini"], label: "Stand Kini" },
+  { key: ["pakai"], label: "Pemakaian (m³)" },
   { key: ["subTotal", "sub_total"], label: "Sub Total", format: "rupiah" },
   { key: ["jenis_loket", "jenisLoket"], label: "Jenis Loket" },
 ];
 
-function getDetailFields(item: DetailItem): Array<{ label: string; value: string }> {
+function getDetailFields(item: DetailItem): Array<{ label: string; value: string; discount?: boolean }> {
   const fields = item.jenis === "PDAM" ? PDAM_FIELDS : LUNASIN_FIELDS;
-  const result: Array<{ label: string; value: string }> = [];
+  const isPdam = item.jenis === "PDAM";
+  const result: Array<{ label: string; value: string; discount?: boolean }> = [];
   for (const f of fields) {
     const raw = pv(item, ...f.key);
     if (raw == null) continue;
     const num = parseFloat(raw);
-    // Skip zero-value rupiah fields
-    if (f.format === "rupiah" && !isNaN(num) && num === 0) continue;
-    const display = f.format === "rupiah" && !isNaN(num) ? formatRupiah(num) : raw;
-    result.push({ label: f.label, value: display });
+    // For non-PDAM items, skip zero-value rupiah fields
+    if (!isPdam && f.format === "rupiah" && !isNaN(num) && num === 0) continue;
+    let display: string;
+    if (f.format === "rupiah" && !isNaN(num)) {
+      display = f.discount ? `- ${formatRupiah(num)}` : formatRupiah(num);
+    } else {
+      display = raw;
+    }
+    result.push({ label: f.label, value: display, discount: f.discount });
   }
   return result;
 }
@@ -1257,8 +1263,8 @@ export default function LaporanPage() {
                             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                               {fields.map((f, idx) => (
                                 <tr key={idx} className={idx % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-800/30"}>
-                                  <td className="px-3 py-2 text-slate-400 font-medium w-1/3">{f.label}</td>
-                                  <td className="px-3 py-2 font-medium">{f.value}</td>
+                                  <td className={`px-3 py-2 font-medium w-1/3 ${f.discount ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}`}>{f.label}</td>
+                                  <td className={`px-3 py-2 font-medium ${f.discount ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{f.value}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1293,8 +1299,8 @@ export default function LaporanPage() {
                           <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                             {fields.map((f, idx) => (
                               <tr key={idx} className={idx % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-800/30"}>
-                                <td className="px-3 py-2 text-slate-400 font-medium w-1/3">{f.label}</td>
-                                <td className="px-3 py-2 font-medium">{f.value}</td>
+                                <td className={`px-3 py-2 font-medium w-1/3 ${f.discount ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}`}>{f.label}</td>
+                                <td className={`px-3 py-2 font-medium ${f.discount ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{f.value}</td>
                               </tr>
                             ))}
                           </tbody>

@@ -349,6 +349,7 @@ export default function PembayaranPage() {
         alamat: bill.alamat,
         blth: bill.thbln,
         gol: bill.gol,
+        idgol: bill.gol,
         harga: bill.harga,
         denda: bill.denda,
         materai: bill.materai,
