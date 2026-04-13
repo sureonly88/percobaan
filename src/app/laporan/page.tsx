@@ -166,7 +166,7 @@ function pv(item: DetailItem, ...keys: string[]): string | null {
 }
 
 /* Known field labels for Lunasin provider_response */
-const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text" }> = [
+const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text"; discount?: boolean }> = [
   { key: ["tarif"], label: "Tarif" },
   { key: ["daya"], label: "Daya (VA)" },
   { key: ["nometer"], label: "No. Meter" },
