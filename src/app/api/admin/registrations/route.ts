@@ -168,8 +168,8 @@ export async function PUT(req: NextRequest) {
     const loketCode = `L${user.username.toUpperCase().slice(0, 8)}${id}`;
 
     const [loketResult] = await conn.query<ResultSetHeader>(
-      `INSERT INTO lokets (nama, loket_code, status, pulsa, biaya_admin, pln_admin_tier)
-       VALUES (?, ?, 'aktif', 0, 0, 3000)`,
+      `INSERT INTO lokets (nama, loket_code, status, pulsa, biaya_admin, pln_admin_tier, jenis)
+       VALUES (?, ?, 'aktif', 0, 2500, 3000, 'KASIR')`,
       [`Loket ${user.name || user.username}`, loketCode]
     );
 
