@@ -352,7 +352,7 @@ export async function POST(req: NextRequest) {
   let notFoundCount  = 0;
   const groupResults: { transactionCode: string; tanggal: string; finalizedCount: number; notFound: boolean; error?: string }[] = [];
 
-  for (const [, group] of groups) {
+  for (const group of Array.from(groups.values())) {
     const trxCode = group.items[0].transaction_code;
     try {
       const res = await processAdviceTransaction(group.items, idpel, group.tanggal, username);
