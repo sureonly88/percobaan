@@ -700,18 +700,34 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // Phase 2b: finalize failed in DB
+        // Phase 2b: timeout/network errors → PENDING_ADVICE (payable via reqlpptanggal)
+        //            hard errors (business logic) → FAILED
+        const isAdviceable = err instanceof PdamApiError && err.retryable;
         if (!skipMultiPayment) {
-          await pool.execute(
-            `UPDATE multi_payment_items
-                SET status = 'FAILED',
-                    provider_error_code = ?,
-                    provider_error_message = ?,
-                    failed_at = NOW()
-              WHERE transaction_code = ?
-                AND status = 'PENDING'`,
-            [errorCode, message, transactionCode]
-          );
+          if (isAdviceable) {
+            const tglTransaksi = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+            await pool.execute(
+              `UPDATE multi_payment_items
+                  SET status = 'PENDING_ADVICE',
+                      provider_error_code = ?,
+                      provider_error_message = ?,
+                      metadata_json = JSON_SET(IFNULL(metadata_json, '{}'), '$.advice_tanggal', ?)
+                WHERE transaction_code = ?
+                  AND status = 'PENDING'`,
+              [errorCode, message, tglTransaksi, transactionCode]
+            );
+          } else {
+            await pool.execute(
+              `UPDATE multi_payment_items
+                  SET status = 'FAILED',
+                      provider_error_code = ?,
+                      provider_error_message = ?,
+                      failed_at = NOW()
+                WHERE transaction_code = ?
+                  AND status = 'PENDING'`,
+              [errorCode, message, transactionCode]
+            );
+          }
         }
 
         for (const bill of pelBills) {
@@ -719,8 +735,10 @@ export async function POST(req: NextRequest) {
             idpel: bill.idpel,
             transactionCode,
             success: false,
-            error: message,
-            errorCode,
+            error: isAdviceable
+              ? `${message} — transaksi dalam status PENDING ADVICE, dapat diproses ulang via menu Advice`
+              : message,
+            errorCode: isAdviceable ? "PENDING_ADVICE" : errorCode,
             total: bill.subTotal + biayaAdminLoket,
             nama: bill.nama,
             blth: bill.blth,

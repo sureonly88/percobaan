@@ -1,0 +1,429 @@
+#!/usr/bin/env node
+/**
+ * Simulasi pembayaran PLN Non-Rekening
+ *
+ * Mensimulasikan alur lengkap seolah-olah kasir melakukan:
+ *   1. Inquiry → data dari Lunasin
+ *   2. Payment → berhasil (RC 0000)
+ *
+ * Memasukkan data ke tabel:
+ *   - log_inquery         (inquiry log)
+ *   - payment_requests    (idempotency lock)
+ *   - multi_payment_requests
+ *   - multi_payment_items
+ *   - transaction_events  (INQUIRY_REQUEST, PAYMENT_REQUEST_CREATED, PAYMENT_PROVIDER_SUCCESS)
+ *   - lunasin_trans       (legacy/laporan)
+ *
+ * Loket & kasir diambil dari DB (default pertama yg ditemukan aktif).
+ * Bisa override via env: LOKET_CODE, KASIR_USERNAME
+ *
+ * Usage:
+ *   node scripts/simulate-pln-nonrek.js
+ */
+
+const mysql = require("mysql2/promise");
+const crypto = require("crypto");
+
+// ─── Data Inquiry & Payment dari Lunasin ────────────────────────────────────
+const INQUIRY = {
+  rc: "0000",
+  rc_msg: "Sukses",
+  tipe_pesan: "inquiry",
+  kode_loket: "ABC00123",
+  input1: "5281293165125",
+  id_trx: "158997790078304",
+  kode_produk: "pln-nonrek-3000",
+  data: {
+    nama: "IRWAN AMIR",
+    jum_bill: "1",
+    refnum_lunasin: "62fda5d5fecdd41078f8aa221e33aa99",
+    rp_amount: "572000",
+    rp_admin: "3000",
+    rp_total: "575000",
+    noreg: "5281293165125",
+    idpel: "540000000123",
+    tgl_reg: "20201130",
+    jenis_reg: "TAMBAH DAYA",
+  },
+};
+
+const PAYMENT_RESPONSE = {
+  rc: "0000",
+  rc_msg: "Sukses",
+  tipe_pesan: "payment",
+  kode_loket: "ABC00123",
+  input1: "5281293165125",
+  id_trx: "158997790078304",
+  kode_produk: "pln-nonrek-3000",
+  data: {
+    nama: "IRWAN AMIR",
+    jum_bill: "1",
+    refnum_lunasin: "62fda5d5fecdd41078f8aa221e33aa99",
+    rp_amount: "572000",
+    rp_admin: "3000",
+    rp_total: "575000",
+    saldo_terpotong: "575000",
+    sisa_saldo: "1251235",
+    tgl_lunas: "2020-12-07 19:52:34",
+    noreg: "5281293165125",
+    idpel: "540000000123",
+    tgl_reg: "20201130",
+    jenis_reg: "TAMBAH DAYA",
+    refnum: "0OPT210Z5F68BCDA75E4C5CE1B2DD67A",
+    pesan_biller:
+      "Informasi Hubungi Call Center 123 Atau hubungi PLN Terdekat",
+  },
+};
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function generateTransactionCode() {
+  return `LNS${Date.now()}${Math.floor(Math.random() * 1000)
+    .toString()
+    .padStart(3, "0")}`;
+}
+
+function generateIdempotencyKey() {
+  return crypto.randomUUID();
+}
+
+function buildRequestHash(payload) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex");
+}
+
+async function main() {
+  const conn = await mysql.createConnection({
+    host: process.env.DB_HOST || "127.0.0.1",
+    port: Number(process.env.DB_PORT) || 3306,
+    user: process.env.DB_USER || "yakinyakin",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "pedami_payment",
+  });
+
+  console.log("╔══════════════════════════════════════════════════════════════╗");
+  console.log("║         Simulasi Pembayaran PLN Non-Rekening                 ║");
+  console.log("╚══════════════════════════════════════════════════════════════╝\n");
+
+  try {
+    // ── 1. Resolve Loket ────────────────────────────────────────────────────
+    const loketCodeEnv = process.env.LOKET_CODE;
+    let loket;
+    if (loketCodeEnv) {
+      const [[row]] = await conn.query(
+        "SELECT loket_code, nama, biaya_admin, jenis, pulsa FROM lokets WHERE loket_code = ? LIMIT 1",
+        [loketCodeEnv]
+      );
+      loket = row;
+    } else {
+      const [[row]] = await conn.query(
+        "SELECT loket_code, nama, biaya_admin, jenis, pulsa FROM lokets WHERE status = 'aktif' ORDER BY id ASC LIMIT 1"
+      );
+      loket = row;
+    }
+
+    if (!loket) {
+      console.error("❌ Tidak ada loket aktif di database. Jalankan migrate.js terlebih dahulu.");
+      process.exit(1);
+    }
+
+    // ── 2. Resolve Kasir ────────────────────────────────────────────────────
+    const kasirUsernameEnv = process.env.KASIR_USERNAME;
+    let kasirUsername;
+    if (kasirUsernameEnv) {
+      kasirUsername = kasirUsernameEnv;
+    } else {
+      const [[userRow]] = await conn.query(
+        "SELECT username FROM users WHERE loket_id = (SELECT id FROM lokets WHERE loket_code = ? LIMIT 1) AND status = 'aktif' LIMIT 1",
+        [loket.loket_code]
+      );
+      kasirUsername = userRow?.username || "admin";
+    }
+
+    console.log(`🏪 Loket     : ${loket.loket_code} — ${loket.nama}`);
+    console.log(`👤 Kasir     : ${kasirUsername}`);
+    console.log(`💰 Saldo     : Rp ${Number(loket.pulsa).toLocaleString("id-ID")}`);
+    console.log("");
+
+    const idpel      = INQUIRY.data.idpel;
+    const nama       = INQUIRY.data.nama;
+    const kodeProduk = INQUIRY.kode_produk;
+    const idTrx      = INQUIRY.id_trx;
+    const rpAmount   = Number(INQUIRY.data.rp_amount);
+    const rpAdmin    = Number(INQUIRY.data.rp_admin);
+    const rpTotal    = Number(INQUIRY.data.rp_total);
+
+    console.log(`📋 Pelanggan : ${nama} (${idpel})`);
+    console.log(`📦 Produk    : ${kodeProduk}`);
+    console.log(`🏷️  No. Reg   : ${INQUIRY.data.noreg}`);
+    console.log(`📅 Tgl Reg   : ${INQUIRY.data.tgl_reg}`);
+    console.log(`🔧 Jenis Reg : ${INQUIRY.data.jenis_reg}`);
+    console.log(`💵 Tagihan   : Rp ${rpAmount.toLocaleString("id-ID")}`);
+    console.log(`💵 Admin     : Rp ${rpAdmin.toLocaleString("id-ID")}`);
+    console.log(`💵 Total     : Rp ${rpTotal.toLocaleString("id-ID")}`);
+    console.log("");
+
+    // ── 3. Cek saldo ────────────────────────────────────────────────────────
+    if (Number(loket.pulsa) < rpTotal) {
+      console.error(
+        `❌ Saldo loket tidak cukup. Saldo: Rp ${Number(loket.pulsa).toLocaleString("id-ID")}, Total: Rp ${rpTotal.toLocaleString("id-ID")}`
+      );
+      process.exit(1);
+    }
+
+    const idempotencyKey  = generateIdempotencyKey();
+    const transactionCode = generateTransactionCode();
+    const multiPayCode    = `LNS-SIM-${Date.now()}`;
+    const now             = new Date();
+
+    // ── 4. Log inquiry ──────────────────────────────────────────────────────
+    await conn.execute(
+      "INSERT INTO log_inquery (jenis, log, created_at, user_login) VALUES (?, ?, NOW(), ?)",
+      [
+        "PLN_NONREK_INQUIRY_SIM",
+        JSON.stringify({ idpel, response: INQUIRY }),
+        kasirUsername,
+      ]
+    );
+    console.log("✅ [1/6] log_inquery — inquiry tercatat");
+
+    // ── 5. payment_requests (idempotency lock) ──────────────────────────────
+    const requestPayload = {
+      provider: "LUNASIN",
+      bills: [{
+        idpel,
+        nama,
+        kodeProduk,
+        idTrx,
+        total: rpTotal,
+        admin: rpAdmin,
+        rpAmount,
+        jenis_reg: INQUIRY.data.jenis_reg,
+        noreg: INQUIRY.data.noreg,
+        tgl_reg: INQUIRY.data.tgl_reg,
+      }],
+      loketCode: loket.loket_code,
+      loketName: loket.nama,
+      biayaAdmin: rpAdmin,
+    };
+    const requestHash = buildRequestHash(requestPayload);
+
+    await conn.execute(
+      `INSERT INTO payment_requests
+        (idempotency_key, request_hash, status, provider, loket_code, username, request_payload, created_at, updated_at)
+       VALUES (?, ?, 'PENDING', 'LUNASIN', ?, ?, ?, NOW(), NOW())`,
+      [idempotencyKey, requestHash, loket.loket_code, kasirUsername, JSON.stringify(requestPayload)]
+    );
+    console.log(`✅ [2/6] payment_requests — key: ${idempotencyKey}`);
+
+    // ── 6. multi_payment_requests ───────────────────────────────────────────
+    const [mprResult] = await conn.execute(
+      `INSERT INTO multi_payment_requests
+        (multi_payment_code, idempotency_key, status, loket_code, loket_name, username,
+         total_items, total_amount, total_admin, grand_total, paid_amount, change_amount, paid_at)
+       VALUES (?, ?, 'SUCCESS', ?, ?, ?, 1, ?, ?, ?, 0, 0, NOW())`,
+      [
+        multiPayCode,
+        idempotencyKey,
+        loket.loket_code,
+        loket.nama,
+        kasirUsername,
+        rpAmount,
+        rpAdmin,
+        rpTotal,
+      ]
+    );
+    const multiPaymentId = mprResult.insertId;
+    console.log(`✅ [3/6] multi_payment_requests — id: ${multiPaymentId}, code: ${multiPayCode}`);
+
+    // ── 7. multi_payment_items ──────────────────────────────────────────────
+    const metadata = {
+      nama,
+      kodeProduk,
+      idTrx,
+      periode: "",
+      tarif: "",
+      daya: "",
+      jumBill: INQUIRY.data.jum_bill,
+      input2: "",
+      input3: "",
+      jenis_loket: loket.jenis || "KASIR",
+      source: "simulasi",
+      noreg: INQUIRY.data.noreg,
+      tgl_reg: INQUIRY.data.tgl_reg,
+      jenis_reg: INQUIRY.data.jenis_reg,
+    };
+
+    const itemCode = `LNS-${transactionCode}`;
+    await conn.execute(
+      `INSERT INTO multi_payment_items
+        (multi_payment_id, item_code, provider, service_type, customer_id, customer_name,
+         product_code, period_label, provider_ref, amount, admin_fee, total, status,
+         transaction_code, provider_response, advice_attempts, metadata_json, paid_at)
+       VALUES (?, ?, 'LUNASIN', 'PLN_NONTAGLIS', ?, ?, ?, ?, ?, ?, ?, ?, 'SUCCESS', ?, ?, 0, ?, NOW())`,
+      [
+        multiPaymentId,
+        itemCode,
+        idpel,
+        nama,
+        kodeProduk,
+        INQUIRY.data.jenis_reg,   // period_label → jenis_reg lebih bermakna
+        idTrx,                    // provider_ref
+        rpAmount,
+        rpAdmin,
+        rpTotal,
+        transactionCode,
+        JSON.stringify(PAYMENT_RESPONSE.data),
+        JSON.stringify(metadata),
+      ]
+    );
+    console.log(`✅ [4/6] multi_payment_items — item_code: ${itemCode}, trx: ${transactionCode}`);
+
+    // ── 8. lunasin_trans (tabel laporan legacy) ─────────────────────────────
+    await conn.execute(
+      `INSERT INTO lunasin_trans
+        (transaction_code, transaction_date, cust_id, nama, kode_produk, id_trx,
+         periode, jum_bill, rp_amount, rp_admin, rp_total,
+         refnum_lunasin, username, loket_name, loket_code, jenis_loket,
+         processing_status, provider_rc, provider_response,
+         advice_attempts, paid_at, created_at, updated_at)
+       VALUES (?, NOW(), ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SUCCESS', '0000', ?, 0, NOW(), NOW(), NOW())`,
+      [
+        transactionCode,
+        idpel,
+        nama,
+        kodeProduk,
+        idTrx,
+        INQUIRY.data.jum_bill,
+        rpAmount,
+        rpAdmin,
+        rpTotal,
+        PAYMENT_RESPONSE.data.refnum_lunasin,
+        kasirUsername,
+        loket.nama,
+        loket.loket_code,
+        loket.jenis || "KASIR",
+        JSON.stringify(PAYMENT_RESPONSE.data),
+      ]
+    );
+    console.log(`✅ [5/6] lunasin_trans — transaction_code: ${transactionCode}`);
+
+    // ── 9. transaction_events ───────────────────────────────────────────────
+    const events = [
+      {
+        event_type: "INQUIRY_REQUEST",
+        severity: "INFO",
+        message: `Simulasi inquiry PLN Non-Rekening untuk ${idpel}`,
+        payload: { idpel, kodeProduk, idTrx, source: "simulasi" },
+      },
+      {
+        event_type: "PAYMENT_REQUEST_CREATED",
+        severity: "INFO",
+        message: "Payment request Lunasin berhasil dibuat (simulasi)",
+        payload: { billsCount: 1, totalPembayaran: rpTotal },
+      },
+      {
+        event_type: "PAYMENT_PROVIDER_SUCCESS",
+        severity: "INFO",
+        message: `Payment Lunasin berhasil untuk ${kodeProduk} (simulasi)`,
+        payload: {
+          data: PAYMENT_RESPONSE.data,
+          transactionCode,
+          refnum: PAYMENT_RESPONSE.data.refnum,
+        },
+      },
+    ];
+
+    for (const ev of events) {
+      await conn.execute(
+        `INSERT INTO transaction_events
+          (idempotency_key, multi_payment_code, transaction_code, provider,
+           event_type, severity, message, payload_json, username, loket_code, cust_id, created_at)
+         VALUES (?, ?, ?, 'LUNASIN', ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          idempotencyKey,
+          multiPayCode,
+          transactionCode,
+          ev.event_type,
+          ev.severity,
+          ev.message,
+          JSON.stringify(ev.payload),
+          kasirUsername,
+          loket.loket_code,
+          idpel,
+        ]
+      );
+    }
+    console.log("✅ [6/6] transaction_events — 3 events tercatat");
+
+    // ── 10. Kurangi saldo loket & update payment_requests ───────────────────
+    await conn.execute(
+      "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?",
+      [rpTotal, loket.loket_code]
+    );
+
+    const responsePayload = {
+      success: true,
+      partialSuccess: false,
+      message: "Semua pembayaran berhasil",
+      results: [{
+        idpel,
+        transactionCode,
+        success: true,
+        total: rpTotal,
+        nama,
+        kodeProduk,
+        finalStatus: "SUCCESS",
+        providerData: PAYMENT_RESPONSE.data,
+      }],
+      loketCode: loket.loket_code,
+      loketName: loket.nama,
+      biayaAdmin: rpAdmin,
+      totalAdmin: rpAdmin,
+      grandTotal: rpTotal,
+      paidAt: now.toISOString(),
+      idempotencyKey,
+    };
+
+    await conn.execute(
+      `UPDATE payment_requests
+          SET status = 'SUCCESS', response_payload = ?, updated_at = NOW()
+        WHERE idempotency_key = ?`,
+      [JSON.stringify(responsePayload), idempotencyKey]
+    );
+
+    await conn.execute(
+      `UPDATE multi_payment_requests
+          SET status = 'SUCCESS', response_payload = ?, paid_at = NOW(), updated_at = NOW()
+        WHERE multi_payment_code = ?`,
+      [JSON.stringify(responsePayload), multiPayCode]
+    );
+
+    // ── Hasil akhir ──────────────────────────────────────────────────────────
+    const [[saldoBaru]] = await conn.query(
+      "SELECT pulsa FROM lokets WHERE loket_code = ? LIMIT 1",
+      [loket.loket_code]
+    );
+
+    console.log("\n════════════════════════════════════════════════════════════════");
+    console.log("  SIMULASI SELESAI — SEMUA DATA BERHASIL MASUK KE DATABASE");
+    console.log("════════════════════════════════════════════════════════════════");
+    console.log(`  Transaction Code : ${transactionCode}`);
+    console.log(`  Multi Pay Code   : ${multiPayCode}`);
+    console.log(`  Idempotency Key  : ${idempotencyKey}`);
+    console.log(`  Ref Lunasin      : ${PAYMENT_RESPONSE.data.refnum_lunasin}`);
+    console.log(`  Refnum Biller    : ${PAYMENT_RESPONSE.data.refnum}`);
+    console.log(`  Tgl Lunas        : ${PAYMENT_RESPONSE.data.tgl_lunas}`);
+    console.log(`  Saldo Loket Baru : Rp ${Number(saldoBaru.pulsa).toLocaleString("id-ID")}`);
+    console.log("════════════════════════════════════════════════════════════════\n");
+
+  } finally {
+    await conn.end();
+  }
+}
+
+main().catch((err) => {
+  console.error("❌ Simulasi gagal:", err.message || err);
+  process.exit(1);
+});

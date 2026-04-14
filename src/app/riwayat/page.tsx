@@ -360,6 +360,34 @@ export default function RiwayatPage() {
     }
   }
 
+  async function handleRunPdamAdvice(item: MultiPaymentDetailItem) {
+    if (!multiPayDetail) return;
+    if (!item.transactionCode) {
+      alert("Transaksi tidak memiliki kode untuk diproses advice.");
+      return;
+    }
+    setMultiPayActionLoading(item.itemCode);
+    try {
+      const res = await fetch("/api/pembayaran/pdam/advice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionCode: item.transactionCode, idpel: item.customerId }),
+      });
+      const json = await res.json() as { error?: string; message?: string };
+      if (!res.ok) {
+        alert(json.error || "Advice PDAM gagal");
+        return;
+      }
+      alert(json.message || "Advice PDAM berhasil!");
+      await handleOpenMultiPayDetail(multiPayDetail.multiPayment.multiPaymentCode);
+      await fetchLatestMultiPayments();
+    } catch {
+      alert("Advice PDAM gagal");
+    } finally {
+      setMultiPayActionLoading(null);
+    }
+  }
+
   return (
     <>
       <header className="flex justify-between items-center mb-8">
@@ -995,6 +1023,23 @@ export default function RiwayatPage() {
                       )}
                     </div>
                   </div>
+                  {item.provider === "PDAM" && item.status === "PENDING_ADVICE" && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                      <button
+                        type="button"
+                        onClick={() => void handleRunPdamAdvice(item)}
+                        disabled={Boolean(multiPayActionLoading)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-50"
+                      >
+                        {multiPayActionLoading === item.itemCode ? (
+                          <span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>
+                        ) : (
+                          <span className="material-symbols-outlined text-sm">sync</span>
+                        )}
+                        Advice PDAM
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

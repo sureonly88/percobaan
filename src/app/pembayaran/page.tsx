@@ -92,6 +92,26 @@ interface LunasinBill {
   tokenPln: string;
   input2: string;
   detail: Array<{ periode?: string; stand_meter?: string; rp_amount?: string; [key: string]: unknown }>;
+  // PLN Non-Rekening specific
+  noreg: string;
+  tgl_reg: string;
+  jenis_reg: string;
+  // BPJS-specific
+  nova: string;
+  novaKepalaKeluarga: string;
+  jumPeserta: string;
+  kodeCabang: string;
+  namaCabang: string;
+  sisaSaldoBpjs: string;
+  // Telkom & general Lunasin fields
+  refnum: string;
+  tglLunas: string;
+  // Pulsa & Paket Data specific
+  nomor: string;
+  denom: string;
+  namaProduk: string;
+  serialNumber: string;
+  masaBerlaku: string;
 }
 
 interface UnifiedCartItem {
@@ -374,7 +394,7 @@ export default function PembayaranPage() {
       customerId: bill.idpel,
       customerName: bill.nama,
       productCode: bill.kodeProduk,
-      periodLabel: bill.periode || bill.kodeProduk,
+      periodLabel: bill.periode || bill.jenis_reg || bill.kodeProduk,
       providerRef: bill.idTrx,
       amount: bill.rpAmount,
       adminFee: bill.rpAdmin,
@@ -390,6 +410,9 @@ export default function PembayaranPage() {
         input2: bill.input2,
         detail: bill.detail,
         standMeter: bill.standMeter,
+        noreg: bill.noreg,
+        tgl_reg: bill.tgl_reg,
+        jenis_reg: bill.jenis_reg,
       },
     }));
 
@@ -679,6 +702,26 @@ export default function PembayaranPage() {
         tokenPln: d.token || "",
         input2,
         detail: d.detail || [],
+        // PLN Non-Rekening specific
+        noreg: d.noreg || "",
+        tgl_reg: d.tgl_reg || "",
+        jenis_reg: d.jenis_reg || "",
+        // BPJS-specific
+        nova: d.nova || "",
+        novaKepalaKeluarga: d.nova_kepala_keluarga || "",
+        jumPeserta: d.jum_peserta || "",
+        kodeCabang: d.kode_cabang || "",
+        namaCabang: d.nama_cabang || "",
+        sisaSaldoBpjs: d.sisa || "",
+        // Telkom & general Lunasin
+        refnum: d.refnum || "",
+        tglLunas: d.tgl_lunas || "",
+        // Pulsa & Paket Data
+        nomor: d.nomor || "",
+        denom: d.denom || "",
+        namaProduk: d.nama_produk || "",
+        serialNumber: d.serial_number || "",
+        masaBerlaku: d.masa_berlaku || "",
       };
 
       setDaftarTagihanPln((prev) => [...prev, bill]);
@@ -715,7 +758,17 @@ export default function PembayaranPage() {
         customerId: bill.idpel,
         customerName: bill.nama,
         productCode: bill.kodeProduk,
-        periodLabel: bill.periode || bill.kodeProduk,
+        periodLabel: (() => {
+          if (bill.kodeProduk.startsWith("bpjs")) return `${bill.jumBill} Bulan`;
+          if (bill.kodeProduk.startsWith("telkom")) {
+            const n = Number(bill.jumBill) || 1;
+            return n > 1 ? `${n} Tagihan` : (bill.periode || bill.kodeProduk);
+          }
+          if (bill.kodeProduk.startsWith("pulsa") || bill.kodeProduk.startsWith("paketdata")) {
+            return bill.namaProduk || bill.denom ? `${bill.namaProduk || bill.kodeProduk}` : bill.kodeProduk;
+          }
+          return bill.jenis_reg || bill.periode || bill.kodeProduk;
+        })(),
         providerRef: bill.idTrx,
         amount: bill.rpAmount,
         adminFee: bill.rpAdmin,
@@ -725,6 +778,17 @@ export default function PembayaranPage() {
           periode: bill.periode, tarif: bill.tarif, daya: bill.daya,
           jumBill: bill.jumBill, input2: bill.input2, detail: bill.detail,
           standMeter: bill.standMeter,
+          // PLN Non-Rekening
+          noreg: bill.noreg, tgl_reg: bill.tgl_reg, jenis_reg: bill.jenis_reg,
+          // BPJS
+          nova: bill.nova, nova_kepala_keluarga: bill.novaKepalaKeluarga,
+          jum_peserta: bill.jumPeserta, kode_cabang: bill.kodeCabang,
+          nama_cabang: bill.namaCabang, sisa: bill.sisaSaldoBpjs,
+          // Telkom & general
+          refnum: bill.refnum, tgl_lunas: bill.tglLunas,
+          // Pulsa & Paket Data
+          nomor: bill.nomor, denom: bill.denom, nama_produk: bill.namaProduk,
+          serial_number: bill.serialNumber, masa_berlaku: bill.masaBerlaku,
         },
       }));
 
@@ -1197,6 +1261,26 @@ export default function PembayaranPage() {
             tokenPln: d.token || "",
             input2: item.input2 || "",
             detail: d.detail || [],
+            // PLN Non-Rekening
+            noreg: d.noreg || "",
+            tgl_reg: d.tgl_reg || "",
+            jenis_reg: d.jenis_reg || "",
+            // BPJS
+            nova: d.nova || "",
+            novaKepalaKeluarga: d.nova_kepala_keluarga || "",
+            jumPeserta: d.jum_peserta || "",
+            kodeCabang: d.kode_cabang || "",
+            namaCabang: d.nama_cabang || "",
+            sisaSaldoBpjs: d.sisa || "",
+            // Telkom & general
+            refnum: d.refnum || "",
+            tglLunas: d.tgl_lunas || "",
+            // Pulsa & Paket Data
+            nomor: d.nomor || "",
+            denom: d.denom || "",
+            namaProduk: d.nama_produk || "",
+            serialNumber: d.serial_number || "",
+            masaBerlaku: d.masa_berlaku || "",
           });
         }
       } catch {
@@ -2739,6 +2823,9 @@ export default function PembayaranPage() {
                           jumBill: String(pd.jum_bill || "1"),
                           tokenPln: String(pd.token || ""),
                           refnumLunasin: String(pd.refnum_lunasin || ""),
+                          noreg: String(pd.noreg || ""),
+                          tglReg: String(pd.tgl_reg || ""),
+                          jenisReg: String(pd.jenis_reg || ""),
                           rpAmount,
                           rpAdmin,
                           tagihan: rpAmount,
@@ -2756,6 +2843,19 @@ export default function PembayaranPage() {
                           refnum: String(pd.refnum || ""),
                           tglLunas: String(pd.tgl_lunas || ""),
                           pesanBiller: String(pd.pesan_biller || ""),
+                          // BPJS-specific
+                          nova: String(pd.nova || ""),
+                          novaKepalaKeluarga: String(pd.nova_kepala_keluarga || ""),
+                          jumPeserta: String(pd.jum_peserta || ""),
+                          kodeCabang: String(pd.kode_cabang || ""),
+                          namaCabang: String(pd.nama_cabang || ""),
+                          sisaSaldoBpjs: String(pd.sisa || ""),
+                          // Pulsa & Paket Data
+                          nomor: String(pd.nomor || ""),
+                          denom: String(pd.denom || ""),
+                          namaProduk: String(pd.nama_produk || ""),
+                          serialNumber: String(pd.serial_number || ""),
+                          masaBerlaku: String(pd.masa_berlaku || ""),
                         };
                       }
 

@@ -403,3 +403,103 @@ export async function pdamPaymentWithRetry(
   if (lastError) throw lastError;
   throw new PdamApiError("Pembayaran PDAM gagal", "UNKNOWN_ERROR", false);
 }
+
+// ─── Advice / Re-check ────────────────────────────────────────────────────────
+
+export interface PdamAdviceResultObj {
+  data: PdamInquiryItem[];
+  error_code: string;
+  message: string;
+  status: string;
+}
+
+export interface PdamAdviceResponse {
+  RequestLppTanggalResult: string | PdamAdviceResultObj;
+}
+
+export interface PdamAdviceExecutionResult {
+  data: PdamInquiryItem[];
+  rawResponse: PdamAdviceResponse;
+  httpStatus: number;
+}
+
+/**
+ * PDAM Advice — re-check payment status for a transaction that timed out.
+ * GET {PDAM_BASE_URL}/reqlpptanggal/?idpel=...&tanggal=YYYY-MM-DD&clientid=...&password=...
+ * The `tanggal` should be the date the original payment was attempted (YYYY-MM-DD format).
+ */
+export async function pdamAdvice(params: {
+  idpel: string;
+  tanggal: string;  // YYYY-MM-DD
+}): Promise<PdamAdviceExecutionResult> {
+  checkCircuit(PDAM_PROVIDER);
+
+  const url = `${PDAM_BASE_URL}/reqlpptanggal/?idpel=${encodeURIComponent(params.idpel)}&tanggal=${encodeURIComponent(params.tanggal)}&clientid=${PDAM_CLIENT_ID}&password=${PDAM_PASSWORD}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (error: unknown) {
+    recordFailure(PDAM_PROVIDER);
+    if (error instanceof DOMException && error.name === "AbortError") {
+      const timeoutError = new PdamApiError("PDAM advice timeout", "NETWORK_TIMEOUT", true);
+      timeoutError.httpStatus = 408;
+      throw timeoutError;
+    }
+    const message = error instanceof Error ? error.message : "PDAM network error";
+    const networkError = new PdamApiError(message, "NETWORK_ERROR", true);
+    networkError.httpStatus = 0;
+    throw networkError;
+  }
+
+  if (!res.ok) {
+    recordFailure(PDAM_PROVIDER);
+    const httpError = new PdamApiError(`PDAM Advice API error: HTTP ${res.status}`, `HTTP_${res.status}`, false);
+    httpError.httpStatus = res.status;
+    throw httpError;
+  }
+
+  const data: PdamAdviceResponse = await res.json();
+  const result = data.RequestLppTanggalResult;
+
+  if (typeof result === "object" && result !== null) {
+    const obj = result as PdamAdviceResultObj;
+    const errorCode = obj.error_code || "UNKNOWN";
+    const status = (obj.status || "").toLowerCase();
+
+    if (status === "success" && errorCode === "200") {
+      recordSuccess(PDAM_PROVIDER);
+      return {
+        data: Array.isArray(obj.data) ? obj.data : [],
+        rawResponse: data,
+        httpStatus: res.status,
+      };
+    }
+
+    const errMsg =
+      obj.message && obj.message.trim() !== "-"
+        ? obj.message.trim()
+        : PDAM_PAYMENT_ERROR_CODES[errorCode] || PDAM_ERROR_CODES[errorCode] || `Advice gagal (kode: ${errorCode})`;
+
+    const providerError = new PdamApiError(errMsg, `PDAM_${errorCode}`, false);
+    providerError.httpStatus = res.status;
+    providerError.rawResponse = data;
+    throw providerError;
+  }
+
+  if (typeof result === "string") {
+    const errMsg = PDAM_PAYMENT_ERROR_CODES[result] || PDAM_ERROR_CODES[result] || `Advice gagal (kode: ${result})`;
+    const providerError = new PdamApiError(errMsg, `PDAM_${result}`, false);
+    providerError.httpStatus = res.status;
+    providerError.rawResponse = data;
+    throw providerError;
+  }
+
+  const invalidError = new PdamApiError("Format response advice PDAM tidak dikenali", "INVALID_ADVICE_RESPONSE", false);
+  invalidError.httpStatus = res.status;
+  invalidError.rawResponse = data;
+  throw invalidError;
+}

@@ -46,12 +46,12 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string }> = {
 // Pages each role can access
 const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
-    "/", "/pembayaran", "/advice-lunasin", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
+    "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
     "/db-manage",
   ],
   supervisor: [
-    "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin",
+    "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin", "/advice-pdam",
   ],
   kasir: [
     "/", "/pembayaran", "/laporan", "/tutup-kasir", "/pelanggan", "/pengaturan", "/notifikasi", "/topup", "/loket/members",

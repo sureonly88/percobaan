@@ -49,6 +49,23 @@ export interface ReceiptBillItem {
   refnum?: string;
   tglLunas?: string;
   pesanBiller?: string;
+  // PLN Non-Rekening specific
+  noreg?: string;
+  tglReg?: string;
+  jenisReg?: string;
+  // BPJS-specific
+  nova?: string;
+  novaKepalaKeluarga?: string;
+  jumPeserta?: string;
+  kodeCabang?: string;
+  namaCabang?: string;
+  sisaSaldoBpjs?: string;
+  // Pulsa & Paket Data specific
+  nomor?: string;
+  denom?: string;
+  namaProduk?: string;
+  serialNumber?: string;
+  masaBerlaku?: string;
 }
 
 export interface ReceiptPrintData {
@@ -93,12 +110,29 @@ function fmtPeriode(thbln: string): string {
   return `${months[month - 1] || thbln.substring(4, 6)} ${year}`;
 }
 
+function fmtTglReg(yyyymmdd: string): string {
+  if (!yyyymmdd || yyyymmdd.length < 8) return yyyymmdd || "-";
+  const year  = yyyymmdd.substring(0, 4);
+  const month = parseInt(yyyymmdd.substring(4, 6), 10);
+  const day   = yyyymmdd.substring(6, 8);
+  const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+  return `${day} ${months[month - 1] ?? yyyymmdd.substring(4, 6)} ${year}`;
+}
+
+/** Format a comma-separated list of YYYYMM periods, e.g. "201107,201106,201105" → "Jul 2011, Jun 2011, Mei 2011" */
+function fmtPeriodeList(periodeStr: string): string {
+  if (!periodeStr) return "-";
+  return periodeStr.split(",").map((p) => fmtPeriode(p.trim())).join(", ");
+}
+
 function getProdukLabel(kodeProduk: string): string {
   if (kodeProduk.startsWith("pln-postpaid")) return "PLN Pascabayar";
   if (kodeProduk.startsWith("pln-prepaid")) return "PLN Prabayar (Token)";
   if (kodeProduk.startsWith("pln-nonrek")) return "PLN Non-Rekening";
   if (kodeProduk.startsWith("bpjs")) return "BPJS Kesehatan";
   if (kodeProduk.startsWith("telkom")) return "Telkom Telepon";
+  if (kodeProduk.startsWith("pulsa")) return "Pulsa";
+  if (kodeProduk.startsWith("paketdata")) return "Paket Data";
   if (kodeProduk.startsWith("pdam")) return "PDAM";
   return "";
 }
@@ -170,25 +204,64 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
     const pairs: [string, string][] = [];
     if (isPln) {
       const prod = getProdukLabel(b.kodeProduk || "");
-      if (prod) pairs.push(["Produk", prod]);
-      if (b.tarif || b.daya) pairs.push(["Tarif/Daya", `${b.tarif ?? ""}${b.daya ? "/" + b.daya + " VA" : ""}`]);
-      if (b.noMeter) pairs.push(["No Meter", b.noMeter]);
-      if (b.standMeter) pairs.push(["Stand Meter", b.standMeter]);
-      if (b.jumBill && b.jumBill !== "1" && b.jumBill !== "0") pairs.push(["Jml Tagihan", b.jumBill]);
-      if (b.periode && !b.kodeProduk?.startsWith("pln-prepaid")) pairs.push(["Periode", fmtPeriode(b.periode)]);
-      if ((b.rpAmount ?? 0) > 0) pairs.push(["Tagihan", fmtRp(b.rpAmount!)]);
-      if ((b.rpAdmin ?? 0) > 0) pairs.push(["Admin", fmtRp(b.rpAdmin!)]);
-      if (b.refnumLunasin) pairs.push(["Ref Lunasin", b.refnumLunasin]);
-      if (b.kwh) pairs.push(["kWh", b.kwh]);
-      if ((b.rpMaterai ?? 0) > 0) pairs.push(["Materai", fmtRp(b.rpMaterai!)]);
-      if ((b.rpPpn ?? 0) > 0) pairs.push(["PPN", fmtRp(b.rpPpn!)]);
-      if ((b.rpPju ?? 0) > 0) pairs.push(["PPJ", fmtRp(b.rpPju!)]);
-      if ((b.rpAngsuran ?? 0) > 0) pairs.push(["Angsuran", fmtRp(b.rpAngsuran!)]);
-      if ((b.rpToken ?? 0) > 0) pairs.push(["Nilai Token", fmtRp(b.rpToken!)]);
-      if ((b.rpTotal ?? 0) > 0) pairs.push(["Total", fmtRp(b.rpTotal!)]);
-      if (b.refnum) pairs.push(["Ref Number", b.refnum]);
-      if (b.tglLunas) pairs.push(["Tgl Lunas", b.tglLunas]);
-      if (b.pesanBiller) pairs.push(["Pesan Biller", b.pesanBiller.substring(0, 21)]);
+      const isNonrek = b.kodeProduk?.startsWith("pln-nonrek");
+      const isBpjs   = b.kodeProduk?.startsWith("bpjs");
+      const isTelkom = b.kodeProduk?.startsWith("telkom");
+      const isPulsa  = b.kodeProduk?.startsWith("pulsa") || b.kodeProduk?.startsWith("paketdata");
+      if (prod) pairs.push(["Produk", b.namaProduk || prod]);
+      if (isBpjs) {
+        if (b.nova)                                                 pairs.push(["No VA",        b.nova]);
+        if (b.novaKepalaKeluarga && b.novaKepalaKeluarga !== b.nova) pairs.push(["VA Kepala Kel", b.novaKepalaKeluarga]);
+        if (b.jumPeserta)   pairs.push(["Jml Peserta",  b.jumPeserta + " orang"]);
+        if (b.namaCabang)   pairs.push(["Cabang",       b.namaCabang]);
+        if (b.periode)      pairs.push(["Periode",      b.periode + " Bulan"]);
+        if (b.refnum)       pairs.push(["Ref Biller",   b.refnum]);
+        if (b.tglLunas)     pairs.push(["Tgl Lunas",    fmtTanggal(b.tglLunas)]);
+        if (b.pesanBiller)  pairs.push(["Info",         b.pesanBiller.substring(0, 60)]);
+      } else if (isNonrek) {
+        if (b.noreg)    pairs.push(["No Registrasi", b.noreg]);
+        if (b.tglReg)   pairs.push(["Tgl Registrasi", fmtTglReg(b.tglReg)]);
+        if (b.jenisReg) pairs.push(["Jenis Reg", b.jenisReg]);
+      } else if (isTelkom) {
+        const jum = Number(b.jumBill || 1);
+        if (jum > 1) pairs.push(["Jml Tagihan", String(jum) + " bulan"]);
+        if (b.periode) pairs.push(["Periode", fmtPeriodeList(b.periode)]);
+        if (b.refnum)  pairs.push(["Ref Biller", b.refnum]);
+        if (b.tglLunas) pairs.push(["Tgl Lunas", fmtTanggal(b.tglLunas)]);
+        if (b.refnumLunasin) pairs.push(["Ref Lunasin", b.refnumLunasin]);
+      } else if (isPulsa) {
+        if (b.nomor)             pairs.push(["No. HP",       b.nomor]);
+        if (b.denom)             pairs.push(["Denominasi",   "Rp " + Number(b.denom).toLocaleString("id-ID")]);
+        if (b.serialNumber)      pairs.push(["Serial No",    b.serialNumber]);
+        if (b.masaBerlaku)       pairs.push(["Masa Berlaku", b.masaBerlaku]);
+        if (b.tglLunas)          pairs.push(["Tgl Lunas",    fmtTanggal(b.tglLunas)]);
+        if (b.refnumLunasin)     pairs.push(["Ref Lunasin",  b.refnumLunasin]);
+      } else {
+        if (b.tarif || b.daya) pairs.push(["Tarif/Daya", `${b.tarif ?? ""}${b.daya ? "/" + b.daya + " VA" : ""}`]);
+        if (b.noMeter) pairs.push(["No Meter", b.noMeter]);
+        if (b.standMeter) pairs.push(["Stand Meter", b.standMeter]);
+        if (b.jumBill && b.jumBill !== "1" && b.jumBill !== "0") pairs.push(["Jml Tagihan", b.jumBill]);
+        if (b.periode && !b.kodeProduk?.startsWith("pln-prepaid")) pairs.push(["Periode", fmtPeriode(b.periode)]);
+      }
+      if (!isBpjs && !isTelkom && !isPulsa) {
+        if ((b.rpAmount ?? 0) > 0) pairs.push(["Tagihan", fmtRp(b.rpAmount!)]);
+        if ((b.rpAdmin ?? 0) > 0) pairs.push(["Admin", fmtRp(b.rpAdmin!)]);
+      }
+      if (!isBpjs && !isPulsa) {
+        if (b.refnumLunasin) pairs.push(["Ref Lunasin", b.refnumLunasin]);
+        if (b.kwh) pairs.push(["kWh", b.kwh]);
+        if ((b.rpMaterai ?? 0) > 0) pairs.push(["Materai", fmtRp(b.rpMaterai!)]);
+        if ((b.rpPpn ?? 0) > 0) pairs.push(["PPN", fmtRp(b.rpPpn!)]);
+        if ((b.rpPju ?? 0) > 0) pairs.push(["PPJ", fmtRp(b.rpPju!)]);
+        if ((b.rpAngsuran ?? 0) > 0) pairs.push(["Angsuran", fmtRp(b.rpAngsuran!)]);
+        if ((b.rpToken ?? 0) > 0) pairs.push(["Nilai Token", fmtRp(b.rpToken!)]);
+        if ((b.rpTotal ?? 0) > 0) pairs.push(["Total", fmtRp(b.rpTotal!)]);
+      }
+      if (!isBpjs && !isTelkom && !isPulsa) {
+        if (b.refnum) pairs.push(["Ref Number", b.refnum]);
+        if (b.tglLunas) pairs.push(["Tgl Lunas", b.tglLunas]);
+        if (b.pesanBiller) pairs.push(["Pesan Biller", b.pesanBiller.substring(0, 21)]);
+      }
     } else {
       const pemakaian = b.pemakaian ?? ((b.standKini ?? 0) - (b.standLalu ?? 0));
       if (b.gol) pairs.push(["Golongan", b.gol]);

@@ -17,6 +17,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Dashboard", href: "/", icon: "dashboard" },
       { label: "Multi-Payment", href: "/pembayaran", icon: "receipt_long" },
       { label: "Advice Lunasin", href: "/advice-lunasin", icon: "fact_check" },
+      { label: "Advice PDAM", href: "/advice-pdam", icon: "water_drop" },
       { label: "Monitoring", href: "/monitoring", icon: "monitor_heart" },
       { label: "Notifikasi", href: "/notifikasi", icon: "notifications" },
     ],
