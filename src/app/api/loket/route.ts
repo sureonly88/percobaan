@@ -78,6 +78,7 @@ export async function GET() {
         pulsa: Number(l.pulsa || 0),
         biayaAdmin: Number(l.biaya_admin ?? 0),
         plnAdminTier: Number(l.pln_admin_tier ?? 3000),
+        maxPdamTagihan: l.max_pdam_tagihan != null ? Number(l.max_pdam_tagihan) : null,
         isBlok: l.is_blok === 1,
         blokMessage: l.blok_message || "",
         byadmin: l.byadmin || "",
@@ -160,6 +161,10 @@ export async function PUT(request: NextRequest) {
     if (blokMessage !== undefined) { fields.push("blok_message = ?"); values.push(blokMessage); }
     if (byadmin !== undefined) { fields.push("byadmin = ?"); values.push(byadmin); }
     if (body.plnAdminTier !== undefined) { fields.push("pln_admin_tier = ?"); values.push(Number(body.plnAdminTier)); }
+    if (body.maxPdamTagihan !== undefined) {
+      fields.push("max_pdam_tagihan = ?");
+      values.push(body.maxPdamTagihan === null ? null : Number(body.maxPdamTagihan));
+    }
 
     if (fields.length === 0) {
       return NextResponse.json({ error: "Tidak ada data yang diubah" }, { status: 400 });

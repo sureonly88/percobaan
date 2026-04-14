@@ -120,12 +120,23 @@ export async function POST(req: NextRequest) {
 
     // Saldo and biaya_admin must always be fresh
     const [balRows] = await pool.query<RowDataPacket[]>(
-      "SELECT pulsa, biaya_admin FROM lokets WHERE loket_code = ? LIMIT 1",
+      "SELECT pulsa, biaya_admin, max_pdam_tagihan FROM lokets WHERE loket_code = ? LIMIT 1",
       [loketCode]
     );
     if (balRows.length > 0) {
       saldoLoket = Number(balRows[0].pulsa || 0);
       biayaAdminLoket = Number(balRows[0].biaya_admin || 0);
+      // Enforce per-loket PDAM tagihan limit
+      const maxPdamTagihan = balRows[0].max_pdam_tagihan != null ? Number(balRows[0].max_pdam_tagihan) : null;
+      if (maxPdamTagihan !== null && bills.length > maxPdamTagihan) {
+        return NextResponse.json(
+          {
+            error: `Tagihan memiliki ${bills.length} bulan tunggakan. Loket Anda hanya diizinkan memproses maksimal ${maxPdamTagihan} bulan tagihan sekaligus.`,
+            code: "PDAM_TAGIHAN_LIMIT_EXCEEDED",
+          },
+          { status: 422 }
+        );
+      }
     }
   } catch {
     // fallback to default

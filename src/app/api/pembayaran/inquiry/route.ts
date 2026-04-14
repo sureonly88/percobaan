@@ -30,16 +30,20 @@ export async function POST(req: NextRequest) {
     const username = String(token.username || token.name || "");
     const loketCode = String(token.loketCode || "");
 
-    // Fetch loket admin fee
+    // Fetch loket admin fee and max PDAM tagihan limit
     let adminFeePerBill = 0;
+    let maxPdamTagihan: number | null = null;
     if (loketCode) {
       try {
         const [loketRows] = await pool.query<RowDataPacket[]>(
-          "SELECT biaya_admin FROM lokets WHERE loket_code = ? LIMIT 1",
+          "SELECT biaya_admin, max_pdam_tagihan FROM lokets WHERE loket_code = ? LIMIT 1",
           [loketCode]
         );
         if (loketRows.length > 0) {
           adminFeePerBill = Number(loketRows[0].biaya_admin || 0);
+          maxPdamTagihan = loketRows[0].max_pdam_tagihan != null
+            ? Number(loketRows[0].max_pdam_tagihan)
+            : null;
         }
       } catch {
         // Non-critical
@@ -81,6 +85,19 @@ export async function POST(req: NextRequest) {
       angsuran: String(parsePdamNumber(item.angsuran)),
       diskon: String(parsePdamNumber(item.diskon)),
     }));
+
+    // Enforce per-loket max PDAM tagihan limit
+    if (maxPdamTagihan !== null && normalized.length > maxPdamTagihan) {
+      return NextResponse.json(
+        {
+          error: `Tagihan pelanggan ini memiliki ${normalized.length} bulan tunggakan. Loket Anda hanya diizinkan memproses maksimal ${maxPdamTagihan} bulan tagihan sekaligus.`,
+          code: "PDAM_TAGIHAN_LIMIT_EXCEEDED",
+          billCount: normalized.length,
+          maxAllowed: maxPdamTagihan,
+        },
+        { status: 422 }
+      );
+    }
 
     // Log the inquiry with full PDAM response
     try {

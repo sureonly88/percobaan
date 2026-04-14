@@ -17,6 +17,7 @@ interface LoketData {
   jenis: string;
   pulsa: number;
   biayaAdmin: number;
+  maxPdamTagihan: number | null;
   isBlok: boolean;
   blokMessage: string;
   byadmin: string;
@@ -52,6 +53,7 @@ export default function LoketPage() {
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({
     loketCode: "", nama: "", alamat: "", jenis: "KASIR", pulsa: 0, biayaAdmin: 2500,
+    maxPdamTagihan: null as number | null,
     isBlok: false, blokMessage: "", byadmin: "",
   });
   const [formError, setFormError] = useState("");
@@ -115,7 +117,7 @@ export default function LoketPage() {
   // Modal handlers
   const openAdd = () => {
     setEditMode(false);
-    setFormData({ loketCode: "", nama: "", alamat: "", jenis: "KASIR", pulsa: 0, biayaAdmin: 2500, isBlok: false, blokMessage: "", byadmin: "" });
+    setFormData({ loketCode: "", nama: "", alamat: "", jenis: "KASIR", pulsa: 0, biayaAdmin: 2500, maxPdamTagihan: null, isBlok: false, blokMessage: "", byadmin: "" });
     setFormError("");
     setModalOpen(true);
   };
@@ -125,6 +127,7 @@ export default function LoketPage() {
     setFormData({
       loketCode: l.loketCode, nama: l.nama, alamat: l.alamat,
       jenis: l.jenis || "KASIR", pulsa: l.pulsa || 0, biayaAdmin: l.biayaAdmin ?? 2500,
+      maxPdamTagihan: l.maxPdamTagihan ?? null,
       isBlok: l.isBlok || false, blokMessage: l.blokMessage || "", byadmin: l.byadmin || "",
     });
     setFormError("");
@@ -611,6 +614,43 @@ export default function LoketPage() {
                 <p className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1">
                   <span className="material-symbols-outlined text-xs">info</span>
                   Biaya admin dikelola melalui menu khusus
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                  Maks Tagihan PDAM <span className="font-normal text-slate-400">per transaksi</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    className="w-32 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="Contoh: 2"
+                    value={formData.maxPdamTagihan ?? ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        maxPdamTagihan: e.target.value === "" ? null : Math.max(1, parseInt(e.target.value, 10) || 1),
+                      })
+                    }
+                  />
+                  {formData.maxPdamTagihan !== null && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, maxPdamTagihan: null })}
+                      className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-sm">close</span>
+                      Hapus batas
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-xs">info</span>
+                  {formData.maxPdamTagihan
+                    ? `Loket ini hanya bisa memproses tagihan PDAM dengan maksimal ${formData.maxPdamTagihan} bulan tunggakan.`
+                    : "Kosongkan untuk tidak membatasi jumlah tagihan PDAM."}
                 </p>
               </div>
               <div>
