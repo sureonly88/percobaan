@@ -17,6 +17,9 @@ const nextConfig = {
       "@opentelemetry/sdk-trace-base",
       "@opentelemetry/sdk-trace-node",
       "@opentelemetry/sdk-metrics",
+      "@opentelemetry/api-logs",
+      "@opentelemetry/sdk-logs",
+      "@opentelemetry/exporter-logs-otlp-http",
     ],
   },
 

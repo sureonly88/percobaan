@@ -30,7 +30,10 @@ export async function register() {
   const { getNodeAutoInstrumentations }         = await import("@opentelemetry/auto-instrumentations-node");
   const { OTLPTraceExporter }                   = await import("@opentelemetry/exporter-trace-otlp-http");
   const { OTLPMetricExporter }                  = await import("@opentelemetry/exporter-metrics-otlp-http");
+  const { OTLPLogExporter }                     = await import("@opentelemetry/exporter-logs-otlp-http");
   const { PeriodicExportingMetricReader }       = await import("@opentelemetry/sdk-metrics");
+  const { LoggerProvider, BatchLogRecordProcessor } = await import("@opentelemetry/sdk-logs");
+  const { SeverityNumber }                          = await import("@opentelemetry/api-logs");
   const { resourceFromAttributes }              = await import("@opentelemetry/resources");
   const { SEMRESATTRS_SERVICE_NAME,
           SEMRESATTRS_SERVICE_VERSION,
@@ -49,6 +52,40 @@ export async function register() {
   const metricExporter = new OTLPMetricExporter({
     url: `${endpoint}/v1/metrics`,
   });
+
+  // --- Log exporter: intercept console.* dan kirim ke SigNoz ---
+  const logExporter = new OTLPLogExporter({
+    url: `${endpoint}/v1/logs`,
+  });
+
+  const loggerProvider = new LoggerProvider({
+    resource,
+    processors: [new BatchLogRecordProcessor(logExporter)],
+  });
+
+  const otelLogger = loggerProvider.getLogger(serviceName, "1.0.0");
+
+  const emitLog = (severity: number, severityText: string, args: unknown[]) => {
+    const body = args
+      .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
+      .join(" ");
+    otelLogger.emit({ severityNumber: severity, severityText, body, attributes: {} });
+  };
+
+  const orig = {
+    log:   console.log.bind(console),
+    info:  console.info.bind(console),
+    warn:  console.warn.bind(console),
+    error: console.error.bind(console),
+    debug: console.debug.bind(console),
+  };
+
+  console.log   = (...a) => { emitLog(SeverityNumber.INFO,  "INFO",  a); orig.log(...a);   };
+  console.info  = (...a) => { emitLog(SeverityNumber.INFO,  "INFO",  a); orig.info(...a);  };
+  console.warn  = (...a) => { emitLog(SeverityNumber.WARN,  "WARN",  a); orig.warn(...a);  };
+  console.error = (...a) => { emitLog(SeverityNumber.ERROR, "ERROR", a); orig.error(...a); };
+  console.debug = (...a) => { emitLog(SeverityNumber.DEBUG, "DEBUG", a); orig.debug(...a); };
+  // --- end log exporter ---
 
   const sdk = new NodeSDK({
     resource,
@@ -79,10 +116,10 @@ export async function register() {
 
   // Graceful shutdown
   process.on("SIGTERM", () => {
-    sdk.shutdown()
-      .then(() => console.log("[OTEL] SDK shut down successfully"))
-      .catch((err: unknown) => console.error("[OTEL] SDK shutdown error", err));
+    Promise.all([sdk.shutdown(), loggerProvider.shutdown()])
+      .then(() => orig.log("[OTEL] SDK shut down successfully"))
+      .catch((err: unknown) => orig.error("[OTEL] SDK shutdown error", err));
   });
 
-  console.log(`[OTEL] Tracing started → ${endpoint} (service: ${serviceName})`);
+  console.log(`[OTEL] Tracing + Logs started → ${endpoint} (service: ${serviceName})`);
 }
