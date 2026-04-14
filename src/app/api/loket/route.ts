@@ -149,7 +149,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const fields: string[] = [];
-    const values: (string | number)[] = [];
+    const values: (string | number | null)[] = [];
 
     if (nama !== undefined) { fields.push("nama = ?"); values.push(nama); }
     if (alamat !== undefined) { fields.push("alamat = ?"); values.push(alamat); }
