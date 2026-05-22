@@ -99,3 +99,36 @@ export interface PaymentProviderAdapter {
   readonly provider: MultiPaymentProvider;
   pay(items: ProviderExecutionItem[], ctx: ProviderExecutionContext): Promise<ProviderExecutionResult[]>;
 }
+
+/**
+ * Progress events emitted by the orchestrator during multi-payment processing.
+ * Consumed via SSE on the client to show real-time progress to the cashier.
+ */
+export type MultiPaymentProgressEvent =
+  | {
+      type: "start";
+      multiPaymentCode: string;
+      totalItems: number;
+      providers: Array<{ provider: MultiPaymentProvider; itemCount: number }>;
+    }
+  | {
+      type: "provider_start";
+      provider: MultiPaymentProvider;
+      itemCount: number;
+      /** Estimated worst-case duration in milliseconds (for client timer hints) */
+      estimatedMaxMs: number;
+    }
+  | {
+      type: "provider_done";
+      provider: MultiPaymentProvider;
+      results: ProviderExecutionResult[];
+      elapsedMs: number;
+    }
+  | {
+      type: "done";
+      response: MultiPaymentResponse;
+    }
+  | {
+      type: "error";
+      message: string;
+    };

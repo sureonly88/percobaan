@@ -4,6 +4,8 @@ import {
   MultiPaymentRequestInput,
   MultiPaymentResponse,
   MultiPaymentRequestStatus,
+  MultiPaymentProgressEvent,
+  MultiPaymentProvider,
   ProviderExecutionItem,
   ProviderExecutionResult,
 } from "@/lib/multipay/types";
@@ -18,6 +20,33 @@ import { getProviderAdapter } from "@/lib/multipay/providers";
 interface MultiPaymentRuntimeContext {
   baseUrl: string;
   cookieHeader?: string;
+  /**
+   * Optional callback invoked at each stage of orchestration.
+   * Used by the SSE route to stream progress to the client.
+   * Errors thrown from this callback are swallowed to avoid breaking the payment flow.
+   */
+  onProgress?: (event: MultiPaymentProgressEvent) => void;
+}
+
+/**
+ * Worst-case wall-clock duration per provider (used as a client UX hint).
+ * PDAM: 1x payment (30s) + 2x advice (15s each) + delays ~3s = ~63s
+ * Lunasin: 1x payment (30s) + 3x advice (30s each) + delays ~12s = ~132s
+ */
+function estimateMaxMsForProvider(provider: MultiPaymentProvider, itemCount: number): number {
+  const perItem = provider === "LUNASIN" ? 132_000 : 63_000;
+  // Items within a single provider batch are processed by the legacy endpoint;
+  // we conservatively scale by item count so the client timer doesn't underestimate.
+  return perItem * Math.max(1, itemCount);
+}
+
+function emit(ctx: MultiPaymentRuntimeContext, event: MultiPaymentProgressEvent) {
+  if (!ctx.onProgress) return;
+  try {
+    ctx.onProgress(event);
+  } catch {
+    // Never let progress emission break the payment flow.
+  }
 }
 
 function generateMultiPaymentCode() {
@@ -119,11 +148,31 @@ export async function orchestrateMultiPayment(
     itemsByProvider.set(item.provider, grouped);
   }
 
+  emit(runtimeContext, {
+    type: "start",
+    multiPaymentCode,
+    totalItems: items.length,
+    providers: Array.from(itemsByProvider.entries()).map(([provider, list]) => ({
+      provider: provider as MultiPaymentProvider,
+      itemCount: list.length,
+    })),
+  });
+
   const results: ProviderExecutionResult[] = [];
   for (const [provider, providerItems] of Array.from(itemsByProvider.entries())) {
+    const providerTyped = provider as MultiPaymentProvider;
+    const startedAt = Date.now();
+    emit(runtimeContext, {
+      type: "provider_start",
+      provider: providerTyped,
+      itemCount: providerItems.length,
+      estimatedMaxMs: estimateMaxMsForProvider(providerTyped, providerItems.length),
+    });
+
+    let batchResults: ProviderExecutionResult[];
     try {
-      const adapter = getProviderAdapter(provider as ProviderExecutionItem["provider"]);
-      const providerResults = await adapter.pay(providerItems, {
+      const adapter = getProviderAdapter(providerTyped);
+      batchResults = await adapter.pay(providerItems, {
         multiPaymentCode,
         idempotencyKey: input.idempotencyKey,
         loketCode: input.loketCode,
@@ -132,23 +181,28 @@ export async function orchestrateMultiPayment(
         baseUrl: runtimeContext.baseUrl,
         cookieHeader: runtimeContext.cookieHeader,
       });
-      results.push(...providerResults);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown provider error";
-      results.push(
-        ...providerItems.map((item) => ({
-          itemCode: item.itemCode,
-          provider: item.provider,
-          serviceType: item.serviceType,
-          customerId: item.customerId,
-          customerName: item.customerName,
-          success: false,
-          status: "FAILED" as const,
-          errorCode: "MULTIPAY_PROVIDER_EXCEPTION",
-          error: `Provider ${provider} threw: ${errorMessage}`,
-        })),
-      );
+      batchResults = providerItems.map((item) => ({
+        itemCode: item.itemCode,
+        provider: item.provider,
+        serviceType: item.serviceType,
+        customerId: item.customerId,
+        customerName: item.customerName,
+        success: false,
+        status: "FAILED" as const,
+        errorCode: "MULTIPAY_PROVIDER_EXCEPTION",
+        error: `Provider ${provider} threw: ${errorMessage}`,
+      }));
     }
+
+    results.push(...batchResults);
+    emit(runtimeContext, {
+      type: "provider_done",
+      provider: providerTyped,
+      results: batchResults,
+      elapsedMs: Date.now() - startedAt,
+    });
   }
 
   await updateMultiPaymentItems(multiPaymentId, results);
@@ -205,5 +259,6 @@ export async function orchestrateMultiPayment(
     },
   });
 
+  emit(runtimeContext, { type: "done", response });
   return response;
 }

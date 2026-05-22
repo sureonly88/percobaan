@@ -46,12 +46,12 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string }> = {
 // Pages each role can access
 const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
-    "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
+    "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
     "/db-manage",
   ],
   supervisor: [
-    "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin", "/advice-pdam",
+    "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin", "/advice-pdam", "/pending-transaksi",
   ],
   kasir: [
     "/", "/pembayaran", "/laporan", "/tutup-kasir", "/pelanggan", "/pengaturan", "/notifikasi", "/topup", "/loket/members",
@@ -140,6 +140,10 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
   },
   "/api/topup/create": {
     POST: ["admin", "kasir"],
+  },
+  "/api/pembayaran/stale-pending": {
+    GET: ["admin", "supervisor"],
+    PATCH: ["admin", "supervisor"],
   },
 };
 

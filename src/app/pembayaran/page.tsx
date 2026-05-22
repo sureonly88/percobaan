@@ -7,6 +7,103 @@ import { formatRupiah } from "@/data/mock";
 import { printReceipt } from "@/lib/print-receipt";
 import type { CustomerFavorite, FavoriteGroup } from "@/types";
 import { PULSA_OPERATORS, DATA_OPERATORS, PULSA_NOMINALS, DATA_PACKAGES, PDAM_KALIMANTAN } from "@/data/lunasin-products";
+import type { MultiPaymentProgressEvent, MultiPaymentResponse } from "@/lib/multipay/types";
+
+/**
+ * Stream multi-payment progress via SSE.
+ * POSTs to /api/pembayaran/multipay?stream=1 and reads SSE chunks from the
+ * response body. Invokes onEvent for each progress event and resolves with the
+ * final MultiPaymentResponse (from the `done` event).
+ *
+ * Throws on HTTP error, network error, malformed stream, or `error` event.
+ */
+async function streamMultipay(
+  body: unknown,
+  onEvent: (event: MultiPaymentProgressEvent) => void,
+): Promise<{ ok: true; response: MultiPaymentResponse } | { ok: false; status: number; error: string }> {
+  const res = await fetch("/api/pembayaran/multipay?stream=1", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      if (j?.error) message = String(j.error);
+    } catch {
+      /* ignore */
+    }
+    return { ok: false, status: res.status, error: message };
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: MultiPaymentResponse | null = null;
+  let errorMessage: string | null = null;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by a blank line.
+    let sepIndex: number;
+    while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, sepIndex);
+      buffer = buffer.slice(sepIndex + 2);
+      // Skip comments (lines starting with ':') and empty events.
+      const dataLines = rawEvent
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).replace(/^ /, ""));
+      if (dataLines.length === 0) continue;
+      const payload = dataLines.join("\n");
+      try {
+        const event = JSON.parse(payload) as MultiPaymentProgressEvent;
+        if (event.type === "done") {
+          finalResponse = event.response;
+        } else if (event.type === "error") {
+          errorMessage = event.message;
+        }
+        onEvent(event);
+      } catch {
+        // Malformed JSON; ignore single bad event.
+      }
+    }
+  }
+
+  if (errorMessage) return { ok: false, status: 500, error: errorMessage };
+  if (!finalResponse) return { ok: false, status: 500, error: "Stream berakhir tanpa hasil akhir" };
+  return { ok: true, response: finalResponse };
+}
+
+/** Convert a progress event into a short human-readable label for the UI. */
+function progressEventToLabel(event: MultiPaymentProgressEvent): string {
+  switch (event.type) {
+    case "start": {
+      const breakdown = event.providers
+        .map((p) => `${p.itemCount} ${p.provider}`)
+        .join(" + ");
+      return `Memulai pembayaran ${event.totalItems} tagihan (${breakdown})...`;
+    }
+    case "provider_start": {
+      const seconds = Math.round(event.estimatedMaxMs / 1000);
+      return `Memproses ${event.itemCount} tagihan ${event.provider} (maks. ~${seconds}s)...`;
+    }
+    case "provider_done": {
+      const success = event.results.filter((r) => r.success).length;
+      const totalSec = (event.elapsedMs / 1000).toFixed(1);
+      return `${event.provider}: ${success}/${event.results.length} berhasil (${totalSec}s). Lanjut...`;
+    }
+    case "done":
+      return "Menyelesaikan transaksi...";
+    case "error":
+      return `Error: ${event.message}`;
+  }
+}
 
 // PDAM bill item from inquiry API
 interface PdamBill {
@@ -205,6 +302,12 @@ export default function PembayaranPage() {
   const [inquiryLoading, setInquiryLoading] = useState(false);
   const [inquiryError, setInquiryError] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
+  // Pesan progress real-time saat orchestrator memproses multi-payment (via SSE).
+  const [paymentProgress, setPaymentProgress] = useState<string>("");
+  // Reset progress message setiap kali loading selesai (sukses atau gagal).
+  useEffect(() => {
+    if (!paymentLoading) setPaymentProgress("");
+  }, [paymentLoading]);
 
   // Receipt modal
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
@@ -936,30 +1039,29 @@ export default function PembayaranPage() {
         },
       }));
 
-      const res = await fetch("/api/pembayaran/multipay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const streamResult = await streamMultipay(
+        {
           idempotencyKey,
           loketCode: loketInfo.loketCode,
           loketName: loketInfo.nama,
           paidAmount: parsedPlnPayment,
           items,
-        }),
-      });
-      const data = await res.json();
+        },
+        (event) => setPaymentProgress(progressEventToLabel(event)),
+      );
 
       // Always reset intent key so next attempt gets fresh UUID
       setPlnPaymentIntentKey(null);
 
-      if (!res.ok) {
-        alert(data.error || "Pembayaran gagal");
+      if (!streamResult.ok) {
+        alert(streamResult.error || "Pembayaran gagal");
         focusField("payment");
         return;
       }
+      const data = streamResult.response;
 
       const itemLookup = new Map(items.map((item) => [item.itemCode, item]));
-      const allResults: PaymentResult[] = (data.results || []).map((result: Record<string, unknown>) => {
+      const allResults: PaymentResult[] = ((data.results || []) as unknown as Array<Record<string, unknown>>).map((result: Record<string, unknown>) => {
         const item = itemLookup.get(String(result.itemCode || ""));
         return {
           itemCode: String(result.itemCode || item?.itemCode || ""),
@@ -1084,29 +1186,28 @@ export default function PembayaranPage() {
 
       const itemLookup = new Map(items.map((item) => [item.itemCode, item]));
 
-      const res = await fetch("/api/pembayaran/multipay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const streamResult = await streamMultipay(
+        {
           idempotencyKey,
           loketCode: loketInfo.loketCode,
           loketName: loketInfo.nama,
           paidAmount: parsedUnifiedPayment,
           items,
-        }),
-      });
-      const data = await res.json();
+        },
+        (event) => setPaymentProgress(progressEventToLabel(event)),
+      );
 
       // Always reset intent key so next attempt gets fresh UUID
       setMultiPayIntentKey(null);
 
-      if (!res.ok) {
-        alert(data.error || "Pembayaran multi-provider gagal");
+      if (!streamResult.ok) {
+        alert(streamResult.error || "Pembayaran multi-provider gagal");
         focusField("payment");
         return;
       }
+      const data = streamResult.response;
 
-      const allResults: PaymentResult[] = (data.results || []).map((result: Record<string, unknown>) => {
+      const allResults: PaymentResult[] = ((data.results || []) as unknown as Array<Record<string, unknown>>).map((result: Record<string, unknown>) => {
         const item = itemLookup.get(String(result.itemCode || ""));
         const provider = String(result.provider || item?.provider || "") === "LUNASIN" ? "LUNASIN" : "PDAM";
         const itemMetadata = (item?.metadata || {}) as Record<string, unknown>;
@@ -1580,30 +1681,29 @@ export default function PembayaranPage() {
         },
       }));
 
-      const res = await fetch("/api/pembayaran/multipay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const streamResult = await streamMultipay(
+        {
           idempotencyKey,
           loketCode: loketInfo.loketCode,
           loketName: loketInfo.nama,
           paidAmount: parsedPayment,
           items,
-        }),
-      });
-      const data = await res.json();
+        },
+        (event) => setPaymentProgress(progressEventToLabel(event)),
+      );
 
       // Always reset intent key so next attempt gets fresh UUID
       setPaymentIntentKey(null);
 
-      if (!res.ok) {
-        alert(data.error || "Pembayaran gagal");
+      if (!streamResult.ok) {
+        alert(streamResult.error || "Pembayaran gagal");
         focusField("payment");
         return;
       }
+      const data = streamResult.response;
 
       const itemLookup = new Map(items.map((item) => [item.itemCode, item]));
-      const allResults: PaymentResult[] = (data.results || []).map((result: Record<string, unknown>) => {
+      const allResults: PaymentResult[] = ((data.results || []) as unknown as Array<Record<string, unknown>>).map((result: Record<string, unknown>) => {
         const item = itemLookup.get(String(result.itemCode || ""));
         const itemMetadata = (item?.metadata || {}) as Record<string, unknown>;
         return {
@@ -2780,7 +2880,7 @@ export default function PembayaranPage() {
                 {paymentLoading ? (
                   <>
                     <span className="material-symbols-outlined animate-spin">progress_activity</span>
-                    MEMPROSES...
+                    <span className="truncate">{paymentProgress || "MEMPROSES..."}</span>
                   </>
                 ) : (
                   <>

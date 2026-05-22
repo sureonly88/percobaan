@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canProcessPayment } from "@/lib/rbac";
 import { orchestrateMultiPayment } from "@/lib/multipay/orchestrator";
-import { MultiPaymentRequestInput } from "@/lib/multipay/types";
+import { MultiPaymentProgressEvent, MultiPaymentRequestInput } from "@/lib/multipay/types";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
@@ -142,6 +142,62 @@ export async function POST(req: NextRequest) {
   const internalPort = process.env.PORT || "3000";
   const baseUrl = `http://localhost:${internalPort}`;
   const cookieHeader = req.headers.get("cookie") || undefined;
+
+  const wantsStream = req.nextUrl.searchParams.get("stream") === "1";
+
+  if (wantsStream) {
+    // SSE mode: stream progress events to the client, with final `done` event
+    // carrying the same MultiPaymentResponse JSON as the non-stream path.
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        let closed = false;
+        const safeEnqueue = (chunk: string) => {
+          if (closed) return;
+          try {
+            controller.enqueue(encoder.encode(chunk));
+          } catch {
+            // Controller already closed (client disconnected); ignore.
+          }
+        };
+        const sendEvent = (event: MultiPaymentProgressEvent) => {
+          safeEnqueue(`data: ${JSON.stringify(event)}\n\n`);
+        };
+
+        // Keepalive comment every 15s so reverse proxies don't time out.
+        const keepalive = setInterval(() => safeEnqueue(`: keepalive\n\n`), 15_000);
+
+        try {
+          await assertCashierCanProcessPayment({ username, loketCode: body.loketCode });
+          await orchestrateMultiPayment(
+            { ...body, username },
+            { baseUrl, cookieHeader, onProgress: sendEvent },
+          );
+        } catch (error: unknown) {
+          const status = error instanceof CashierClosingError ? error.status : 500;
+          const message = error instanceof Error ? error.message : "Gagal memproses multipay";
+          sendEvent({ type: "error", message: `[${status}] ${message}` });
+        } finally {
+          clearInterval(keepalive);
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // Already closed; ignore.
+          }
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
 
   try {
     await assertCashierCanProcessPayment({ username, loketCode: body.loketCode });
