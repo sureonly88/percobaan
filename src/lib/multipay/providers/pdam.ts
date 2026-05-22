@@ -83,7 +83,7 @@ function mapLegacyResponseToResults(items: ProviderExecutionItem[], response: { 
       customerId,
       customerName: String(result.nama || matched?.customerName || ""),
       success: Boolean(result.success),
-      status: result.success ? "SUCCESS" : "FAILED",
+      status: result.success ? "SUCCESS" : result.errorCode === "PENDING_ADVICE" ? "PENDING_ADVICE" : "FAILED",
       transactionCode: result.transactionCode ? String(result.transactionCode) : undefined,
       errorCode: result.errorCode ? String(result.errorCode) : undefined,
       error: result.error ? String(result.error) : undefined,

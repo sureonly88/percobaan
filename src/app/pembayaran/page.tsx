@@ -236,6 +236,33 @@ export default function PembayaranPage() {
   const [saveGroupLoading, setSaveGroupLoading] = useState(false);
   const [groupInquiryLoading, setGroupInquiryLoading] = useState(false);
 
+  // Pending Advice PDAM (banner + modal in tab PDAM)
+  type PendingAdviceItem = {
+    itemCode: string;
+    periodLabel: string;
+    amount: number;
+    adminFee: number;
+    total: number;
+  };
+  type PendingAdviceTrx = {
+    transactionCode: string;
+    idpel: string;
+    customerName: string;
+    loketCode: string;
+    loketName: string;
+    createdAt: string;
+    adviceTanggal: string;
+    adviceAttempts: number;
+    grandTotal: number;
+    items: PendingAdviceItem[];
+  };
+  const [pendingAdvice, setPendingAdvice] = useState<PendingAdviceTrx[]>([]);
+  const [pendingAdviceLoading, setPendingAdviceLoading] = useState(false);
+  const [pendingAdviceModalOpen, setPendingAdviceModalOpen] = useState(false);
+  const [adviceRunningTrx, setAdviceRunningTrx] = useState<string | null>(null);
+  const [adviceRunningAll, setAdviceRunningAll] = useState(false);
+  const [adviceMessages, setAdviceMessages] = useState<Record<string, { type: "success" | "warn" | "error"; text: string }>>({});
+
   const inputRef = useRef<HTMLInputElement>(null);
   const paymentRef = useRef<HTMLInputElement>(null);
   const scanSubmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -539,6 +566,123 @@ export default function PembayaranPage() {
       }
     };
   }, []);
+
+  // Fetch pending PDAM advice for current loket
+  const fetchPendingAdvice = React.useCallback(async () => {
+    if (!loketInfo?.loketCode) return;
+    setPendingAdviceLoading(true);
+    try {
+      const res = await fetch(
+        `/api/pembayaran/pdam/advice?loketCode=${encodeURIComponent(loketInfo.loketCode)}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) return;
+      const json = (await res.json()) as { transactions?: PendingAdviceTrx[] };
+      setPendingAdvice(json.transactions ?? []);
+    } catch {
+      // silent — banner just won't show
+    } finally {
+      setPendingAdviceLoading(false);
+    }
+  }, [loketInfo?.loketCode]);
+
+  // Auto-load when loket ready and tab is PDAM; refresh every 60s while on PDAM tab
+  useEffect(() => {
+    if (activeTab !== "PDAM" || !loketInfo?.loketCode) return;
+    void fetchPendingAdvice();
+    const interval = setInterval(() => { void fetchPendingAdvice(); }, 60_000);
+    return () => clearInterval(interval);
+  }, [activeTab, loketInfo?.loketCode, fetchPendingAdvice]);
+
+  async function runAdviceForTransaction(trx: PendingAdviceTrx) {
+    if (adviceRunningTrx || adviceRunningAll) return;
+    setAdviceRunningTrx(trx.transactionCode);
+    setAdviceMessages((prev) => ({ ...prev, [trx.transactionCode]: { type: "warn", text: "Memproses..." } }));
+    try {
+      const res = await fetch("/api/pembayaran/pdam/advice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idpel: trx.idpel, transactionCode: trx.transactionCode }),
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        message?: string;
+        totalFinalized?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setAdviceMessages((prev) => ({
+          ...prev,
+          [trx.transactionCode]: { type: "error", text: json.error || "Advice gagal" },
+        }));
+      } else {
+        const finalized = json.totalFinalized ?? 0;
+        setAdviceMessages((prev) => ({
+          ...prev,
+          [trx.transactionCode]: {
+            type: finalized > 0 ? "success" : "warn",
+            text: json.message || (finalized > 0 ? "Berhasil difinalisasi" : "Belum ada data di server PDAM"),
+          },
+        }));
+      }
+    } catch {
+      setAdviceMessages((prev) => ({
+        ...prev,
+        [trx.transactionCode]: { type: "error", text: "Gagal menghubungi server" },
+      }));
+    } finally {
+      setAdviceRunningTrx(null);
+      await fetchPendingAdvice();
+    }
+  }
+
+  async function runAdviceForAll() {
+    if (adviceRunningTrx || adviceRunningAll || pendingAdvice.length === 0) return;
+    setAdviceRunningAll(true);
+    try {
+      // Group by idpel — single POST per idpel processes all its pending transactions
+      const idpels = Array.from(new Set(pendingAdvice.map((t) => t.idpel)));
+      for (const idpel of idpels) {
+        const trxsForIdpel = pendingAdvice.filter((t) => t.idpel === idpel);
+        for (const t of trxsForIdpel) {
+          setAdviceMessages((prev) => ({ ...prev, [t.transactionCode]: { type: "warn", text: "Memproses..." } }));
+        }
+        try {
+          const res = await fetch("/api/pembayaran/pdam/advice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idpel }),
+          });
+          const json = (await res.json()) as {
+            message?: string;
+            totalFinalized?: number;
+            error?: string;
+          };
+          const text = res.ok
+            ? json.message || `${json.totalFinalized ?? 0} tagihan difinalisasi`
+            : json.error || "Advice gagal";
+          const type: "success" | "warn" | "error" = res.ok
+            ? (json.totalFinalized ?? 0) > 0
+              ? "success"
+              : "warn"
+            : "error";
+          for (const t of trxsForIdpel) {
+            setAdviceMessages((prev) => ({ ...prev, [t.transactionCode]: { type, text } }));
+          }
+        } catch {
+          for (const t of trxsForIdpel) {
+            setAdviceMessages((prev) => ({
+              ...prev,
+              [t.transactionCode]: { type: "error", text: "Gagal menghubungi server" },
+            }));
+          }
+        }
+      }
+    } finally {
+      setAdviceRunningAll(false);
+      await fetchPendingAdvice();
+    }
+  }
 
   // PDAM inquiry via API
   async function handleInquiry(customerId?: string) {
@@ -2043,6 +2187,30 @@ export default function PembayaranPage() {
                 </div>
               )}
 
+              {/* Banner: Pending Advice PDAM (only on PDAM tab) */}
+              {activeTab === "PDAM" && pendingAdvice.length > 0 && (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 flex items-center gap-3 flex-wrap">
+                  <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-xl">hourglass_top</span>
+                  <div className="flex-1 min-w-[200px]">
+                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                      {pendingAdvice.length} transaksi PDAM menunggu Advice
+                    </p>
+                    <p className="text-xs text-amber-700/80 dark:text-amber-400/80">
+                      Total {formatRupiah(pendingAdvice.reduce((s, t) => s + t.grandTotal, 0))} •{" "}
+                      {Array.from(new Set(pendingAdvice.map((t) => t.idpel))).length} pelanggan
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setAdviceMessages({}); setPendingAdviceModalOpen(true); }}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold"
+                  >
+                    <span className="material-symbols-outlined text-sm">visibility</span>
+                    Lihat &amp; Proses
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-end gap-3 flex-wrap">
                 <div className="flex-1 max-w-xs">
                   <label className="text-sm font-semibold mb-2 block text-slate-700 dark:text-slate-300">
@@ -3162,6 +3330,135 @@ export default function PembayaranPage() {
               {saveGroupLoading ? "Menyimpan..." : "Simpan Grup"}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Pending Advice PDAM */}
+      <Modal
+        open={pendingAdviceModalOpen}
+        onClose={() => setPendingAdviceModalOpen(false)}
+        title="Transaksi PDAM Pending Advice"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="text-sm text-slate-600 dark:text-slate-300">
+              <p>
+                {pendingAdvice.length} transaksi menunggu konfirmasi (advice) ke server PDAM
+                untuk loket <span className="font-bold">{loketInfo?.nama || loketInfo?.loketCode}</span>.
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Jalankan advice agar transaksi yang sempat timeout dapat difinalisasi (sukses) atau dibatalkan.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void fetchPendingAdvice()}
+                disabled={pendingAdviceLoading || adviceRunningAll || adviceRunningTrx !== null}
+                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-sm ${pendingAdviceLoading ? "animate-spin" : ""}`}>
+                  {pendingAdviceLoading ? "progress_activity" : "refresh"}
+                </span>
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => void runAdviceForAll()}
+                disabled={adviceRunningAll || adviceRunningTrx !== null || pendingAdvice.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-sm ${adviceRunningAll ? "animate-spin" : ""}`}>
+                  {adviceRunningAll ? "progress_activity" : "sync"}
+                </span>
+                Jalankan Semua
+              </button>
+            </div>
+          </div>
+
+          {pendingAdvice.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-8 text-center">
+              <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-600 block mb-2">task_alt</span>
+              <p className="font-semibold text-slate-600 dark:text-slate-300">Tidak ada transaksi pending</p>
+              <p className="text-xs text-slate-400 mt-1">Semua transaksi PDAM sudah difinalisasi.</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+              {pendingAdvice.map((trx) => {
+                const msg = adviceMessages[trx.transactionCode];
+                const isRunning = adviceRunningTrx === trx.transactionCode || adviceRunningAll;
+                return (
+                  <div
+                    key={trx.transactionCode}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-3 p-3 border-b border-slate-100 dark:border-slate-800">
+                      <div className="min-w-0">
+                        <p className="font-mono font-bold text-xs text-slate-700 dark:text-slate-200 truncate">
+                          {trx.transactionCode}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          <span className="font-mono">{trx.idpel}</span>
+                          {trx.customerName && <span> · {trx.customerName}</span>}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Tgl advice: <span className="font-mono">{trx.adviceTanggal}</span>
+                          {trx.adviceAttempts > 0 && (
+                            <span className="ml-2 text-amber-500">· {trx.adviceAttempts}× dicoba</span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-bold text-sm text-slate-800 dark:text-white">
+                          {formatRupiah(trx.grandTotal)}
+                        </p>
+                        <p className="text-[11px] text-slate-400">{trx.items.length} periode</p>
+                      </div>
+                    </div>
+
+                    <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 space-y-1">
+                      {trx.items.map((it) => (
+                        <div key={it.itemCode} className="flex items-center justify-between">
+                          <span>{it.periodLabel || it.itemCode}</span>
+                          <span className="font-mono">{formatRupiah(it.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">
+                      <div className="text-xs flex-1 min-w-0">
+                        {msg && (
+                          <p className={`flex items-center gap-1.5 ${
+                            msg.type === "success"
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : msg.type === "error"
+                              ? "text-red-600 dark:text-red-400"
+                              : "text-amber-600 dark:text-amber-400"
+                          }`}>
+                            <span className="material-symbols-outlined text-sm">
+                              {msg.type === "success" ? "check_circle" : msg.type === "error" ? "cancel" : "hourglass_top"}
+                            </span>
+                            <span className="truncate">{msg.text}</span>
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void runAdviceForTransaction(trx)}
+                        disabled={isRunning}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-50"
+                      >
+                        <span className={`material-symbols-outlined text-sm ${isRunning ? "animate-spin" : ""}`}>
+                          {isRunning ? "progress_activity" : "sync"}
+                        </span>
+                        Jalankan Advice
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </Modal>
 

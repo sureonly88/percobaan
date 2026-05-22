@@ -342,7 +342,16 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Controlled retry for PDAM payment API.
- * Retry only for network/timeout/transient HTTP errors.
+ *
+ * Strategy setelah payment timeout:
+ * - Attempt 1: kirim payment normal (timeout 30 detik)
+ * - Jika timeout → attempt 2, 3, dst: jalankan ADVICE saja (bukan payment ulang)
+ *   karena ada kemungkinan besar PDAM sudah memproses pembayaran di server mereka.
+ *   Mengirim payment ulang berisiko double-charge.
+ * - Jika advice menemukan data → kembalikan sebagai SUCCESS (adviceUsed: true)
+ * - Jika advice kosong setelah semua attempt habis → throw PENDING_ADVICE
+ *
+ * Retry hanya untuk error network/timeout, bukan error bisnis PDAM (403/404/405/406).
  */
 export async function pdamPaymentWithRetry(
   params: {
@@ -362,13 +371,60 @@ export async function pdamPaymentWithRetry(
   data: PdamInquiryItem[];
   rawResponse: PdamPaymentResponse;
   httpStatus: number;
+  adviceUsed?: boolean;
 }> {
   const maxAttempts = options?.maxAttempts ?? 3;
   const baseDelayMs = options?.baseDelayMs ?? 500;
+  const tanggal = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
   let lastError: PdamApiError | null = null;
+  let paymentTimedOut = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Setelah payment pertama timeout, gunakan advice bukan payment ulang
+    if (paymentTimedOut) {
+      const jitter = Math.floor(Math.random() * 150);
+      const delayMs = baseDelayMs * Math.pow(2, attempt - 1) + jitter;
+      await sleep(delayMs);
+
+      try {
+        const adviceResult = await pdamAdvice({ idpel: params.idpel, tanggal });
+        if (adviceResult.data.length > 0) {
+          // PDAM sudah memproses pembayaran — kembalikan sebagai sukses
+          recordSuccess(PDAM_PROVIDER);
+          return {
+            result: "000000",
+            attempts: attempt,
+            data: adviceResult.data,
+            rawResponse: { RequestPaymentBulk_Rev2Result: "000000" } as PdamPaymentResponse,
+            httpStatus: adviceResult.httpStatus,
+            adviceUsed: true,
+          };
+        }
+        // Advice kosong — PDAM belum konfirmasi, lanjut ke attempt berikutnya
+        const pendingErr = new PdamApiError(
+          "Pembayaran timeout. Advice belum menunjukkan konfirmasi dari PDAM.",
+          "NETWORK_TIMEOUT",
+          true
+        );
+        pendingErr.attemptCount = attempt;
+        lastError = pendingErr;
+        continue;
+      } catch (adviceError: unknown) {
+        // Advice call itu sendiri gagal (network) — catat dan lanjut
+        const adviceErrMsg = adviceError instanceof Error ? adviceError.message : "Advice gagal";
+        const pendingErr = new PdamApiError(
+          `Pembayaran timeout, advice gagal: ${adviceErrMsg}`,
+          "NETWORK_TIMEOUT",
+          true
+        );
+        pendingErr.attemptCount = attempt;
+        lastError = pendingErr;
+        continue;
+      }
+    }
+
+    // Payment attempt normal
     try {
       const payResult = await pdamPayment(params);
       return {
@@ -391,12 +447,14 @@ export async function pdamPaymentWithRetry(
       normalized.attemptCount = attempt;
       lastError = normalized;
 
-      const shouldRetry = normalized.retryable && attempt < maxAttempts;
-      if (!shouldRetry) break;
+      if (normalized.retryable && attempt < maxAttempts) {
+        // Tandai timeout — percobaan berikutnya akan pakai advice
+        paymentTimedOut = true;
+        continue;
+      }
 
-      const jitter = Math.floor(Math.random() * 150);
-      const delayMs = baseDelayMs * Math.pow(2, attempt - 1) + jitter;
-      await sleep(delayMs);
+      // Error bisnis (non-retryable) — langsung berhenti
+      break;
     }
   }
 

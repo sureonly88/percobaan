@@ -430,8 +430,8 @@ export async function POST(req: NextRequest) {
           await pool.execute(
             "INSERT INTO log_inquery (jenis, log, created_at, user_login) VALUES (?, ?, NOW(), ?)",
             [
-              "PDAM_PAYMENT_SUCCESS",
-              JSON.stringify({ idpel, transactionCode, attempts: paymentResult.attempts, response: paymentResult.rawResponse }),
+              paymentResult.adviceUsed ? "PDAM_PAYMENT_SUCCESS_VIA_ADVICE" : "PDAM_PAYMENT_SUCCESS",
+              JSON.stringify({ idpel, transactionCode, attempts: paymentResult.attempts, adviceUsed: paymentResult.adviceUsed ?? false, response: paymentResult.rawResponse }),
               username,
             ]
           );
@@ -448,10 +448,13 @@ export async function POST(req: NextRequest) {
           username,
           loketCode,
           custId: idpel,
-          message: "Provider PDAM mengembalikan respons sukses untuk payment",
+          message: paymentResult.adviceUsed
+            ? "Payment timeout — dikonfirmasi sukses via advice PDAM (tidak ada payment ulang)"
+            : "Provider PDAM mengembalikan respons sukses untuk payment",
           payload: {
             idpel,
             attempts: paymentResult.attempts,
+            adviceUsed: paymentResult.adviceUsed ?? false,
             billsCount: pelBills.length,
             periods: pelBills.map((bill) => bill.blth),
             responseCount: paymentResult.data?.length || 0,
@@ -490,6 +493,7 @@ export async function POST(req: NextRequest) {
                   diskon: parsePdamNumber(resp.diskon),
                   jenis_loket: jenisLoket,
                   source: "loket",
+                  ...(paymentResult.adviceUsed ? { _advice_source: true } : {}),
                 };
                 const respSubTotal = parsePdamNumber(resp.total);
                 await pool.execute(

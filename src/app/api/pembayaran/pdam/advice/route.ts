@@ -191,12 +191,17 @@ export async function GET(req: NextRequest) {
   }
 
   const idpel = req.nextUrl.searchParams.get("idpel")?.trim() || "";
+  const loketCode = req.nextUrl.searchParams.get("loketCode")?.trim() || "";
 
   const whereClauses = ["mpi.status = 'PENDING_ADVICE'", "mpi.provider = 'PDAM'"];
   const params: string[] = [];
   if (idpel) {
     whereClauses.push("mpi.customer_id = ?");
     params.push(idpel);
+  }
+  if (loketCode) {
+    whereClauses.push("mpr.loket_code = ?");
+    params.push(loketCode);
   }
 
   const [rows] = await pool.query<ItemRow[]>(

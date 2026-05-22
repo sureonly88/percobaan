@@ -1,0 +1,1806 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-05-06T08:11:01.205Z",
+  "files": {
+    ".dockerignore": {
+      "filePath": ".dockerignore",
+      "contentHash": "b82904512f382dc8a1b40a13ea6cb945f4a7e74611aa74e9909644263d7d5881",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 55,
+      "hasStructuralAnalysis": false
+    },
+    ".env.example": {
+      "filePath": ".env.example",
+      "contentHash": "6ba6c3df2c4dbac495e9aa71369507c40f358671c70ac03d3e7a184c8e7102ef",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/00000000_baseline_schema.sql": {
+      "filePath": "database/migrations/00000000_baseline_schema.sql",
+      "contentHash": "351c226dd06565004df557802c6fa0726a3def85641db5b84814562f40fdb512",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 642,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260405_payment_idempotency_and_status.sql": {
+      "filePath": "database/migrations/20260405_payment_idempotency_and_status.sql",
+      "contentHash": "bc95522e337e5314eeb707e8c65aa9f7896331ab839370a639f54222de69e60f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 35,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260407_customer_favorites.sql": {
+      "filePath": "database/migrations/20260407_customer_favorites.sql",
+      "contentHash": "ee116a14b5e7b7aaeca7894d0de4b5f223a43042b73b03bcc5de40f16985c655",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260407_lunasin_trans.sql": {
+      "filePath": "database/migrations/20260407_lunasin_trans.sql",
+      "contentHash": "597b9feacf1747fca821a68de67be8e8d5728e4c57f9f9a3da6b830467ff906b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 49,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260407_notifications.sql": {
+      "filePath": "database/migrations/20260407_notifications.sql",
+      "contentHash": "5d97ec46e762529572c6de6e8666804d6bbd65e063fa2a22e06d3bf412cf9baa",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 18,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260407_transaction_events.sql": {
+      "filePath": "database/migrations/20260407_transaction_events.sql",
+      "contentHash": "f451e3621d1727d8b79f6488b58bbcd9aefea7ce344ae71eec714e3c037a5bf1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 24,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_api_providers.sql": {
+      "filePath": "database/migrations/20260408_api_providers.sql",
+      "contentHash": "afa6e5b71c9a5100f574fe526021e17b8d01d569d55833057f9b3428ef46d824",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 68,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_composite_indexes.sql": {
+      "filePath": "database/migrations/20260408_composite_indexes.sql",
+      "contentHash": "91b3f2e12c4e63aa3c9c0ab3a4686196692e8fdcfe477a08932c816ae754d187",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 15,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_jenis_kasir.sql": {
+      "filePath": "database/migrations/20260408_jenis_kasir.sql",
+      "contentHash": "8f3754708b917e93f77aed23a79bcc78d7e78a26bcba543b1af15fdbaf90b6d7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_multi_payment_core.sql": {
+      "filePath": "database/migrations/20260408_multi_payment_core.sql",
+      "contentHash": "5b0663d6d24dab521db07f08b54c18aafea4fc2dbcfad364bfc172077bee3a98",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 75,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_performance_indexes.sql": {
+      "filePath": "database/migrations/20260408_performance_indexes.sql",
+      "contentHash": "2653536c5a729a40b2245fadbb474ff37119506efcdce2ac54d5c34121ee12d1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 43,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_pln_admin_tier.sql": {
+      "filePath": "database/migrations/20260408_pln_admin_tier.sql",
+      "contentHash": "2d3002c75c5a18fcb7a7ff18e1dc1139ed09ae838d0b35ea2e36cdf868be4bf6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 7,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_remove_jenis_kasir.sql": {
+      "filePath": "database/migrations/20260408_remove_jenis_kasir.sql",
+      "contentHash": "08515f9ffa0542ec49342d49b398b1c0e44e66146d6073fb2c2664ba8eee8ca4",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260408_runtime_tables.sql": {
+      "filePath": "database/migrations/20260408_runtime_tables.sql",
+      "contentHash": "60fa9c56dd40ef9642eae86caeca2b347a3144fbf2d8c8bb2ae6c2bfe6b67179",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 34,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260409_favorite_groups.sql": {
+      "filePath": "database/migrations/20260409_favorite_groups.sql",
+      "contentHash": "bb517a8d48d9e41083ceaadfe407027dd55c12f1543899ae7315e688ce30744c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 31,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260409_item_code_unique_per_request.sql": {
+      "filePath": "database/migrations/20260409_item_code_unique_per_request.sql",
+      "contentHash": "fdcf44074010776b53dbc51db23a39eead1cac8fb062d6d0b67cd7a0953fba94",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260409_metadata_generated_columns.sql": {
+      "filePath": "database/migrations/20260409_metadata_generated_columns.sql",
+      "contentHash": "dd046d60a36fff936179646e5fa5c6f7656f92c911f7cd89ec6763a7f07789b4",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 29,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260410_cashier_closing_admin_receipt.sql": {
+      "filePath": "database/migrations/20260410_cashier_closing_admin_receipt.sql",
+      "contentHash": "afaca555d68fc7f18388a9822af8524e59d1dc50ac9d2a7fdb74e50e7dfc801d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 10,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260410_cashier_closing_ops_extensions.sql": {
+      "filePath": "database/migrations/20260410_cashier_closing_ops_extensions.sql",
+      "contentHash": "811e1f9b3d13e4a00262aa9418b363d6e1f800e73c7e43d7e128b1a0b7409309",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 49,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260410_cashier_closings.sql": {
+      "filePath": "database/migrations/20260410_cashier_closings.sql",
+      "contentHash": "e15a72a7cb79218bced3ff699bcd5124cb2c9d502c2d72114cbf79bc8a19e84e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 53,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260411_topup_requests.sql": {
+      "filePath": "database/migrations/20260411_topup_requests.sql",
+      "contentHash": "11ff0a3ebe8b20210727f1905fbe2608c66cf1dddd4a7c2031948a4b439241e0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 28,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260412_loket_admin_flag.sql": {
+      "filePath": "database/migrations/20260412_loket_admin_flag.sql",
+      "contentHash": "957327917f446ecd6364d931842ae25c2d0fdb91e8f0e9418412d92ce5b67f9c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 20,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260412_user_registration.sql": {
+      "filePath": "database/migrations/20260412_user_registration.sql",
+      "contentHash": "0f964bc407a78aa1d9c06fc119e78bd2806390a7ca561161dc7d30005e942936",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 15,
+      "hasStructuralAnalysis": false
+    },
+    "database/migrations/20260414_loket_max_pdam_tagihan.sql": {
+      "filePath": "database/migrations/20260414_loket_max_pdam_tagihan.sql",
+      "contentHash": "c5469313105c54081a9bf7e6bc20220c0588c21b8f9f9b7e516b9a9034ab9880",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 7,
+      "hasStructuralAnalysis": false
+    },
+    "instrumentation.ts": {
+      "filePath": "instrumentation.ts",
+      "contentHash": "00a519db0b29d183b13b5c1b8a6829802bfcbd454802123174d10c6f223c7431",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 126,
+      "hasStructuralAnalysis": false
+    },
+    "middleware.ts": {
+      "filePath": "middleware.ts",
+      "contentHash": "2a0cd9b1c939806a098e6a0e245ac2af1a69118a6e333744c77d9f17bcf1c3b9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 48,
+      "hasStructuralAnalysis": false
+    },
+    "next.config.js": {
+      "filePath": "next.config.js",
+      "contentHash": "996075f1b2e46e102c67ff3ff5cc19dc642e6e5ba056a4cd0ba2cd8d6c0fe2c9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 44,
+      "hasStructuralAnalysis": false
+    },
+    "nixpacks.toml": {
+      "filePath": "nixpacks.toml",
+      "contentHash": "9af20f006d0882b2bb7d00372c3f5efc11d2e7c91d2e9f2dbc5e8019aa98fb5c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 18,
+      "hasStructuralAnalysis": false
+    },
+    "package.json": {
+      "filePath": "package.json",
+      "contentHash": "23439fb32e1e643739c223d16b998eb4afb8722511c1fe3d9b3c45563d9c73bb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 43,
+      "hasStructuralAnalysis": false
+    },
+    "postcss.config.js": {
+      "filePath": "postcss.config.js",
+      "contentHash": "fa650b380adfabb151a0b352f7135e107e6352345f899060f1c5c231228f94bf",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 7,
+      "hasStructuralAnalysis": false
+    },
+    "print-bridge/config.json": {
+      "filePath": "print-bridge/config.json",
+      "contentHash": "73b94c1a3d1d58186831363e111542c30c9b268ef6c5ff4bbc231ebff7ede13e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": false
+    },
+    "print-bridge/formatter.js": {
+      "filePath": "print-bridge/formatter.js",
+      "contentHash": "a925b853c5dff2eae46525e6d437502930b0ca48371eec0b49515692b5918a64",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 194,
+      "hasStructuralAnalysis": false
+    },
+    "print-bridge/package.json": {
+      "filePath": "print-bridge/package.json",
+      "contentHash": "f6756ad59c75af440465e115f9741ace09970f6fee51637c0aff4b7fa4ad29dd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 13,
+      "hasStructuralAnalysis": false
+    },
+    "print-bridge/server.js": {
+      "filePath": "print-bridge/server.js",
+      "contentHash": "c7a93ca950224b6c5315581d3a1ce9f0232bb14956d78e23b37f545639c51bf0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 225,
+      "hasStructuralAnalysis": false
+    },
+    "print-bridge/setup.bat": {
+      "filePath": "print-bridge/setup.bat",
+      "contentHash": "0be54b0d691bbe3723623edbe6af97804263e1992ed01e4266754ec93b20be5d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 58,
+      "hasStructuralAnalysis": false
+    },
+    "product_lunasin.csv": {
+      "filePath": "product_lunasin.csv",
+      "contentHash": "45ecc3f027187d3d4153db107892c42f3977dda2d6e3f10814d6a370da14d440",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1513,
+      "hasStructuralAnalysis": false
+    },
+    "scripts/migrate.js": {
+      "filePath": "scripts/migrate.js",
+      "contentHash": "30fc2d5335abd84fa1c58622382ca35272901b4eeb40d8a43243f63bc9b9a47b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 162,
+      "hasStructuralAnalysis": false
+    },
+    "scripts/simulate-bpjs.js": {
+      "filePath": "scripts/simulate-bpjs.js",
+      "contentHash": "feadfff29e5e5b745bae2faedab0b53a4d05ee4aff9a03abe08193a299e9eabc",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 394,
+      "hasStructuralAnalysis": false
+    },
+    "scripts/simulate-pln-nonrek.js": {
+      "filePath": "scripts/simulate-pln-nonrek.js",
+      "contentHash": "45efde3de97c0cadc1aabc26d56b61dc06d1ef682400b972f6f411262133513d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 430,
+      "hasStructuralAnalysis": false
+    },
+    "scripts/simulate-pulsa.js": {
+      "filePath": "scripts/simulate-pulsa.js",
+      "contentHash": "0432d5a0935e5010cef22eee3b78bd4c76f189b0519e4a5572c2dfb1786f3d60",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 333,
+      "hasStructuralAnalysis": false
+    },
+    "scripts/simulate-telkom.js": {
+      "filePath": "scripts/simulate-telkom.js",
+      "contentHash": "b1fff4293617eacf944ae15e760ac4c3ccf0caa6207ac256363ea7cd702f7bf5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 382,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/advice-lunasin/page.tsx": {
+      "filePath": "src/app/advice-lunasin/page.tsx",
+      "contentHash": "93d7b289aaa7bb6d2ca933c8c26a2120b62f30731e033491d7a27c8c05690993",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 846,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/advice-pdam/page.tsx": {
+      "filePath": "src/app/advice-pdam/page.tsx",
+      "contentHash": "c7ef3ea98595204e2d7724fc20afc9dfaeee6c7464f913ca1897c5ecc6d3577b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 352,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/admin/registrations/route.ts": {
+      "filePath": "src/app/api/admin/registrations/route.ts",
+      "contentHash": "7c02465d4c744ed1d5d6dde23811f6c8ee15d8ca9b0ecb9e8673a85b9e47cb94",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 213,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/auth/[...nextauth]/route.ts": {
+      "filePath": "src/app/api/auth/[...nextauth]/route.ts",
+      "contentHash": "ff42dc4fa935d9dafecffef6dc225f559a3b51c98e3c788735f0609e85966971",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/auth/mobile/login/route.ts": {
+      "filePath": "src/app/api/auth/mobile/login/route.ts",
+      "contentHash": "22eb432cdcf583b01b498070700cb83bdfe9bba5b7213e477ae2cfc6d9a9c153",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 94,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/auth/mobile/refresh/route.ts": {
+      "filePath": "src/app/api/auth/mobile/refresh/route.ts",
+      "contentHash": "3c384b94ee6807fc5232b848aa0c61c3ba85451f3c1c04862b92aeb979fc62b8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 66,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/auth/register/route.ts": {
+      "filePath": "src/app/api/auth/register/route.ts",
+      "contentHash": "cd4dc80ca3b5885514c958c09061337aef7e930f066726e256aaa3106244cbdd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 135,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/auth/setup/route.ts": {
+      "filePath": "src/app/api/auth/setup/route.ts",
+      "contentHash": "f5676fcace9922d9f2eeca80b4f7289872d2b9e9b8bd4770623d7b44fb105ff0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 36,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/dashboard/analytics/route.ts": {
+      "filePath": "src/app/api/dashboard/analytics/route.ts",
+      "contentHash": "e7e18cb2d8e8510303fea22877d205a06af14091ac0014ed580d51ea69336760",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 205,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/dashboard/route.ts": {
+      "filePath": "src/app/api/dashboard/route.ts",
+      "contentHash": "92dfc436d59fbec316d3026c9cc05b8fd5644e25eac8f6980ffefef0b3911d1b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 205,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/db-manage/auth/route.ts": {
+      "filePath": "src/app/api/db-manage/auth/route.ts",
+      "contentHash": "7d9893e40f69f0981fc27a76523e5e5128b3ccf8b4577a795641441d5e8d006b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/db-manage/query/route.ts": {
+      "filePath": "src/app/api/db-manage/query/route.ts",
+      "contentHash": "17822a3c5db5eddd889d9677d32d34c68a9dbab091b551d605454acd9aeaac39",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 49,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/db-manage/tables/[table]/route.ts": {
+      "filePath": "src/app/api/db-manage/tables/[table]/route.ts",
+      "contentHash": "2f790e50acdb95a3ad7fce5a9ad52454be6d2760a8a1e2df3caac85c1d7882e5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 227,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/db-manage/tables/route.ts": {
+      "filePath": "src/app/api/db-manage/tables/route.ts",
+      "contentHash": "8692853bbda4f58c7b8b5498f6a96863436c9c580f4fc929f3f3725cf8461d1e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 26,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/favorites/groups/route.ts": {
+      "filePath": "src/app/api/favorites/groups/route.ts",
+      "contentHash": "e25ece3fb9f16eebd5cafc77eeb5945ed4bea8c9c4d0dc7aa6c05341a7409eaf",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 278,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/favorites/route.ts": {
+      "filePath": "src/app/api/favorites/route.ts",
+      "contentHash": "01b15e3e594173ae35517fd539adb3d1fd31805feae1fc964ad44764879edc0d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 165,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/laporan/detail/route.ts": {
+      "filePath": "src/app/api/laporan/detail/route.ts",
+      "contentHash": "0d3166b04e67bacf40244d76fec28664c1242570811b127b2270914165a769f2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 150,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/laporan/route.ts": {
+      "filePath": "src/app/api/laporan/route.ts",
+      "contentHash": "cb3af9bfcf00b721ad9b9c01b8db581e30d5b8c19eb6abd8c6b17132e840983e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 211,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/loket/members/route.ts": {
+      "filePath": "src/app/api/loket/members/route.ts",
+      "contentHash": "1ca71244c02b243da5d11bd348ec54f3198d11f17173dbca6e5ea6b2381a663f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 281,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/loket/route.ts": {
+      "filePath": "src/app/api/loket/route.ts",
+      "contentHash": "c1f55f21f133bf041f986709948ff547fe0efb70548ed15d37fe438afd3f34cd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 185,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/monitoring/[idempotencyKey]/route.ts": {
+      "filePath": "src/app/api/monitoring/[idempotencyKey]/route.ts",
+      "contentHash": "7364a73e328d4c03ce7baa5099d22313f16bdddec37a860c98bb9bd386930e08",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 391,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/monitoring/inquiry/route.ts": {
+      "filePath": "src/app/api/monitoring/inquiry/route.ts",
+      "contentHash": "7e0899199c53d4e06500e4526f556ba7822ed8edb755d9cd677f9f4a29c59fd9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 282,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/monitoring/logs/route.ts": {
+      "filePath": "src/app/api/monitoring/logs/route.ts",
+      "contentHash": "d8f42b5095182386bc5e0a4f24dbfae97cb0ab708b64eb671b95f3804991b4e0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 122,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/monitoring/route.ts": {
+      "filePath": "src/app/api/monitoring/route.ts",
+      "contentHash": "59ccf60554e36302240c811e5065f7d5b88d05b0d595fa5b904b10ec773a1b0c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 508,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/notifications/route.ts": {
+      "filePath": "src/app/api/notifications/route.ts",
+      "contentHash": "46e486b36e99f07c8729468d3c67953e1ccfb33a40ce483d7526c50739ca009e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 233,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/notifications/stuck/route.ts": {
+      "filePath": "src/app/api/notifications/stuck/route.ts",
+      "contentHash": "5e8faaa723cdf94b30224cfbdd897bdd8cd67be306afa294001bd5798f65dee1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 141,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pelanggan/riwayat/route.ts": {
+      "filePath": "src/app/api/pelanggan/riwayat/route.ts",
+      "contentHash": "f3abfdae1df479a6e24c9a4428b3618e2b5feff6d56a115c8cc05007442732d7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 141,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pelanggan/route.ts": {
+      "filePath": "src/app/api/pelanggan/route.ts",
+      "contentHash": "82a23e048caa28e5ec33f697becad5ee30d288c1ee2d846cfe73ff05967af3e3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 584,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/inquiry/route.ts": {
+      "filePath": "src/app/api/pembayaran/inquiry/route.ts",
+      "contentHash": "b2034fbaca12884dad9ad5a43dc16e019e0006c5d95c8f92d2b9cd497d74d1f2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 155,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/lunasin/advice/route.ts": {
+      "filePath": "src/app/api/pembayaran/lunasin/advice/route.ts",
+      "contentHash": "f7345528362590a5ad6dce53ad7ad70b2d3f2c593f09a3a4ceddfdd4008bf26d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 640,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/lunasin/inquiry/route.ts": {
+      "filePath": "src/app/api/pembayaran/lunasin/inquiry/route.ts",
+      "contentHash": "c5d7975c34fca2dba97a12a0d5701bc3717f422a1b50dd028486d4f51b35596f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 142,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/lunasin/pay/route.ts": {
+      "filePath": "src/app/api/pembayaran/lunasin/pay/route.ts",
+      "contentHash": "1dacbe58c15f8e28e61a509bd636127cf1df207c68c57385561ff7f2e50aff08",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 610,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/multipay/[code]/route.ts": {
+      "filePath": "src/app/api/pembayaran/multipay/[code]/route.ts",
+      "contentHash": "40c813ba7ba04fe61a0333f2fb3e1b7349507a27287bc028ea5116e57cd79c99",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 269,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/multipay/route.ts": {
+      "filePath": "src/app/api/pembayaran/multipay/route.ts",
+      "contentHash": "d69de2b55b6fc323abf27c03fcbf77b976a997cf5b5432a8ae253ec31ce2ee6a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 164,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/pay/route.ts": {
+      "filePath": "src/app/api/pembayaran/pay/route.ts",
+      "contentHash": "5c9ef07df2d8b5bba7e177320d6798be80012faacab32e6abaf58a080facd694",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 895,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/pdam/advice/route.ts": {
+      "filePath": "src/app/api/pembayaran/pdam/advice/route.ts",
+      "contentHash": "04fce3eef8803695f0d9fb24368c97ecd7b4f0dcc4bf01a7ecab2b542fe5fb51",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 400,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pembayaran/reprint/route.ts": {
+      "filePath": "src/app/api/pembayaran/reprint/route.ts",
+      "contentHash": "6bac9810cb490ea1bee7a30b01e65f08c1b3f463c715e6095a2a1352039d933d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 182,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pengaturan/profil/route.ts": {
+      "filePath": "src/app/api/pengaturan/profil/route.ts",
+      "contentHash": "72560b982719ef51d073f194b1c4dea651c3788b5416c4e5ecaeeff15149765f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 144,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/pengaturan/route.ts": {
+      "filePath": "src/app/api/pengaturan/route.ts",
+      "contentHash": "6e2586da72b5b1af6ca9488fec8288efd9a8d005cc163840e15ffb8df3c58843",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 71,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/provider/regenerate-key/route.ts": {
+      "filePath": "src/app/api/provider/regenerate-key/route.ts",
+      "contentHash": "ef8171fca1b7c7f0dae9ba326a3a9f46a0085e04ce5653c8b06e1b7153af491f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 52,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/provider/route.ts": {
+      "filePath": "src/app/api/provider/route.ts",
+      "contentHash": "d42388a3dfae0e26d011e3f3b4b399dcf8ca79cae77d543aee9da6ac97e2edfd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 257,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/provider/transactions/route.ts": {
+      "filePath": "src/app/api/provider/transactions/route.ts",
+      "contentHash": "529dcede100a386cadd2b24f672011f571a4a1e465d83adcdafed3ee7e7110e7",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 74,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/rekonsiliasi/export/route.ts": {
+      "filePath": "src/app/api/rekonsiliasi/export/route.ts",
+      "contentHash": "72ea585654f1304614261eca67ce9854d63832deeace7ac6da07f1f6a67dbecb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 45,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/rekonsiliasi/route.ts": {
+      "filePath": "src/app/api/rekonsiliasi/route.ts",
+      "contentHash": "aa43f2fa08d9cbc5d637d56719117943671a57340cf0836a571e51d827ecbad8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 41,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/saldo/route.ts": {
+      "filePath": "src/app/api/saldo/route.ts",
+      "contentHash": "329ad3aca56bc750dfaa77193d53e1ce1b801ffbdf4aa7a6677375849f429c42",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 184,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/topup/create/route.ts": {
+      "filePath": "src/app/api/topup/create/route.ts",
+      "contentHash": "5ad4d61878225b1f8d53cefa015530eae3b626e0eaa282ee1f0a3520079d85d6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 98,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/topup/route.ts": {
+      "filePath": "src/app/api/topup/route.ts",
+      "contentHash": "6c6fe10de3f510dd8fc33b159205c4c5953c86865e9ec608a165500f5209391c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 138,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/topup/webhook/route.ts": {
+      "filePath": "src/app/api/topup/webhook/route.ts",
+      "contentHash": "ad06421be7d5cb95af47403a7e9ad2b1b35a2b2fc5ac345a130812f1ca8c2655",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 142,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/tutup-kasir/route.ts": {
+      "filePath": "src/app/api/tutup-kasir/route.ts",
+      "contentHash": "58e326958a4ddf577e92797408839fed4c7fde40ab2bc91175c4f9f5a6beaf86",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 130,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/users/route.ts": {
+      "filePath": "src/app/api/users/route.ts",
+      "contentHash": "1c7f781a43f3d47dc2f1d00a15488d03657146694cc9f00268c10d803ab254c6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 209,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/v1/pdam/inquiry/route.ts": {
+      "filePath": "src/app/api/v1/pdam/inquiry/route.ts",
+      "contentHash": "a7ca308de9375e6307a63e3841432a3ec4ff52bcb309035dc5fbc27f0bfa42c9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 178,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/v1/pdam/pay/route.ts": {
+      "filePath": "src/app/api/v1/pdam/pay/route.ts",
+      "contentHash": "441b6515e39dc95f2facecac486e941d4853b6e020f0caca3344d8f5fa495db9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 430,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/v1/transactions/[idempotencyKey]/route.ts": {
+      "filePath": "src/app/api/v1/transactions/[idempotencyKey]/route.ts",
+      "contentHash": "195a5b15ad7f98b95d626ed6cc14108afdb7be228386952268f8525bfd99fbfe",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 168,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/v1/transactions/route.ts": {
+      "filePath": "src/app/api/v1/transactions/route.ts",
+      "contentHash": "7333f429e200a82a8f7a3ae4ed8a3086144c4e41126a5276801b93c3f0e67b3d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 158,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/v1/transactions/summary/route.ts": {
+      "filePath": "src/app/api/v1/transactions/summary/route.ts",
+      "contentHash": "0bdf870e0325ef28d84173446d25f76330de22611758d64493e86e72f168ce1b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 64,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/api/verifikasi-kasir/route.ts": {
+      "filePath": "src/app/api/verifikasi-kasir/route.ts",
+      "contentHash": "53ac7b8c05da1f0b9dfb92c579b2a3c5b3027ee6cdf3a26bf450c073b669321f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 93,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/biaya-admin/page.tsx": {
+      "filePath": "src/app/biaya-admin/page.tsx",
+      "contentHash": "6828d84c2b8ac00f582ea854615cfe1671479c839e3e97749c3f62d205f17c03",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 513,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/dashboard-analytics.tsx": {
+      "filePath": "src/app/dashboard-analytics.tsx",
+      "contentHash": "b26664b7d48932dbc4646f158e21abbaa97acc9b1f42d499d6b5d821b90c0c04",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 482,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/db-manage/page.tsx": {
+      "filePath": "src/app/db-manage/page.tsx",
+      "contentHash": "a04f5574f192acb0dafede007d2933a2857866d5ff5d45dcba84b2e632a04f1e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 930,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/laporan/page.tsx": {
+      "filePath": "src/app/laporan/page.tsx",
+      "contentHash": "52f8b5d7336245b79f32914635f1cfdcfa4edc73d3026f85aad5037fb0ea9eca",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1463,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/layout.tsx": {
+      "filePath": "src/app/layout.tsx",
+      "contentHash": "7c92903f1204b3cefe62fa1cc2f07e604202c8792e47253360bc05fe70120969",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 42,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/login/page.tsx": {
+      "filePath": "src/app/login/page.tsx",
+      "contentHash": "24614990346b1a682ca529164e77f50498b02533c5e7a54831379c43bac48da2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 247,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/loket/members/page.tsx": {
+      "filePath": "src/app/loket/members/page.tsx",
+      "contentHash": "48f535541d730df1020448bd0060a8e8ebd07091c6b640b142276380e80fc758",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 757,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/loket/page.tsx": {
+      "filePath": "src/app/loket/page.tsx",
+      "contentHash": "3cc57f8f3d3a538e59d6cf4004aa50061a45e7ab0954a9191bbe938fbbc25397",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 869,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/monitoring/[idempotencyKey]/page.tsx": {
+      "filePath": "src/app/monitoring/[idempotencyKey]/page.tsx",
+      "contentHash": "b3d219987003c512ada08b36f15e5016e80b369b16600f681e4b9a46f6dd176d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 531,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/monitoring/InquiryMonitoringTab.tsx": {
+      "filePath": "src/app/monitoring/InquiryMonitoringTab.tsx",
+      "contentHash": "6a45ea873d103cf8cf6ec9a4dcbe4d86e41083f0379584662bfd1f5377653497",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 675,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/monitoring/page.tsx": {
+      "filePath": "src/app/monitoring/page.tsx",
+      "contentHash": "adba1f6e82d2044ffba11121784253c8392291ce9d3d09c55b27d3c3a0deef5f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1230,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/notifikasi/page.tsx": {
+      "filePath": "src/app/notifikasi/page.tsx",
+      "contentHash": "0fc52c454af1cd000261026f916715ad084cf9bb56122bebe1a07784c78b0a9b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 636,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/page.tsx": {
+      "filePath": "src/app/page.tsx",
+      "contentHash": "fa432d5ef5dbb68c40fa3d9d06118684c0fbc40433a1f95e5cb4069914be73d4",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 510,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/pelanggan/page.tsx": {
+      "filePath": "src/app/pelanggan/page.tsx",
+      "contentHash": "50d9e216d22ca38fef8b794bd02ce36327938f4da0388902e39de33f5eb724f9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2021,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/pembayaran/multipay/[code]/page.tsx": {
+      "filePath": "src/app/pembayaran/multipay/[code]/page.tsx",
+      "contentHash": "2ab1282505ce135f8280c71881df496cac35d3b8e94cf17ec8dd50850943888e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 188,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/pembayaran/page.tsx": {
+      "filePath": "src/app/pembayaran/page.tsx",
+      "contentHash": "e3ba1bcafd8d7786b1d0af06cd41f68fc24fc2a93dcdc7078c6708e7d3715765",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3473,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/pengaturan/page.tsx": {
+      "filePath": "src/app/pengaturan/page.tsx",
+      "contentHash": "261228baf562b2f1db07fa04fe464d6f0861b3793841a14a280dc95eb41b51d2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 524,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/provider/docs/page.tsx": {
+      "filePath": "src/app/provider/docs/page.tsx",
+      "contentHash": "dc9dbd37779deba1d6583ea046a826e0f82b9e3e56d04d7f6fe2261e719199c6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 925,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/provider/page.tsx": {
+      "filePath": "src/app/provider/page.tsx",
+      "contentHash": "86c4efd83291c4a2f1bb6e7a98f06a4d7b68b3e3a3a6f26bb2aebcb66cb780e0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 973,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/register/page.tsx": {
+      "filePath": "src/app/register/page.tsx",
+      "contentHash": "fdcef4b3fa5ad1fda09fbbbb4a07f5b45c2347606c4c58b0c6e4e73628e08c43",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 410,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/rekonsiliasi/page.tsx": {
+      "filePath": "src/app/rekonsiliasi/page.tsx",
+      "contentHash": "01ffd0f8081b4ac989604b96abdce30ea97f73d3494f1485aa4aa9baf9a39841",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 533,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/riwayat/page.tsx": {
+      "filePath": "src/app/riwayat/page.tsx",
+      "contentHash": "e58fc049fa5822afc010b7eb696b8ec961ee1d368fc692104072d62f9b4962e2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1069,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/saldo/page.tsx": {
+      "filePath": "src/app/saldo/page.tsx",
+      "contentHash": "dfd49df2df34f47d8e9f4f1f20d25d8c0036bf13cc2dd1e49e5be700ec2ee4b1",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 654,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/topup/error/page.tsx": {
+      "filePath": "src/app/topup/error/page.tsx",
+      "contentHash": "5f073fb9fdee80e3d22dda8cc3fd15f6cc44d7e99cb27f99193cead46fd872c9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 74,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/topup/finish/page.tsx": {
+      "filePath": "src/app/topup/finish/page.tsx",
+      "contentHash": "49ad50ce099baac5d746a21fed5974938c3cdb0e9035e1aff3d83ef0322f46c5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 96,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/topup/page.tsx": {
+      "filePath": "src/app/topup/page.tsx",
+      "contentHash": "8e475fee6cc91a931c660873d8cd7ccd61b0c29d90a3cb31280244aaf8f944bc",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 421,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/topup/unfinish/page.tsx": {
+      "filePath": "src/app/topup/unfinish/page.tsx",
+      "contentHash": "bea9425475d6e7a95db48e8e74116c4ed0402ae9d93b6df2dc955279055c984a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 63,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/tutup-kasir/page.tsx": {
+      "filePath": "src/app/tutup-kasir/page.tsx",
+      "contentHash": "86674ba45000802d2d1e795bb9f6fb4243bd416cfbee07a91c6eb714ef25fcc3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1244,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/users/page.tsx": {
+      "filePath": "src/app/users/page.tsx",
+      "contentHash": "9634f8bf62ff5a7d3ca4f612a9377871bc3475dbcdc162fdd90512501fbb3ff8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 630,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/users/registrations/page.tsx": {
+      "filePath": "src/app/users/registrations/page.tsx",
+      "contentHash": "51ea76e1236567d46e53ea7bd3aaa5f584185e5eb87f27547be35dac16ca17ad",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 382,
+      "hasStructuralAnalysis": false
+    },
+    "src/app/verifikasi-kasir/page.tsx": {
+      "filePath": "src/app/verifikasi-kasir/page.tsx",
+      "contentHash": "b628bba4174559750ca55f85fbf7335b37f5cc9cb837b7e72cfd867a1e86b5ee",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 568,
+      "hasStructuralAnalysis": false
+    },
+    "src/data/lunasin-products.ts": {
+      "filePath": "src/data/lunasin-products.ts",
+      "contentHash": "baac02ff7873309ab11d6d92e3c79fd07d1a4148fa0f95e932bc58b72084a670",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 381,
+      "hasStructuralAnalysis": false
+    },
+    "src/data/mock.ts": {
+      "filePath": "src/data/mock.ts",
+      "contentHash": "a868b79f9632fbd1276e6d429bc2a840d943956717e7ef616f9b25387272ec42",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 217,
+      "hasStructuralAnalysis": false
+    },
+    "src/instrumentation.ts": {
+      "filePath": "src/instrumentation.ts",
+      "contentHash": "00a519db0b29d183b13b5c1b8a6829802bfcbd454802123174d10c6f223c7431",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 126,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/api-auth.ts": {
+      "filePath": "src/lib/api-auth.ts",
+      "contentHash": "e433bc8c393623af6f40de5c81782d57a508b0dbf0537894e088fa082971578c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 69,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/auth.ts": {
+      "filePath": "src/lib/auth.ts",
+      "contentHash": "c5391d613620e6cb4808639212cb4f33ca200e4351b54d58afb4b21928b0607b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 117,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/cache.ts": {
+      "filePath": "src/lib/cache.ts",
+      "contentHash": "7ceaf3beec128637f74d711879b029d2bfd77a2b28c36920440194daa57ff7de",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 55,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/cashier-closing.ts": {
+      "filePath": "src/lib/cashier-closing.ts",
+      "contentHash": "a94a7f98b5195eabd3ee1c85a9c2bc21d3106354aa0d7f1ff6d021e3be2dacc2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 1691,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/circuit-breaker.ts": {
+      "filePath": "src/lib/circuit-breaker.ts",
+      "contentHash": "9aaf7ae638261f7a79153e02e3384a45a28efe19d8f688099e30e32da35b133c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 156,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/db-manage-auth.ts": {
+      "filePath": "src/lib/db-manage-auth.ts",
+      "contentHash": "e6845be28905db119bf8a63239a0a402cee5d365ed10c2c8bca675d5f4e7c465",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 17,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/db.ts": {
+      "filePath": "src/lib/db.ts",
+      "contentHash": "cffe57a96555a3599fc87b5176e2822dcf673c4c7795b5db976190abc2aa6b65",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 26,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/lunasin-api.ts": {
+      "filePath": "src/lib/lunasin-api.ts",
+      "contentHash": "5de1af9d7ed789ac9aab80172fa95b1f6fc748e22ecc798f15b1e9a890a13e04",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 428,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/midtrans.ts": {
+      "filePath": "src/lib/midtrans.ts",
+      "contentHash": "5027c5b3b9acf245ab887205e7f374d6d8952d1703a46a7307a038dbd4d581a3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 180,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/mobile-auth.ts": {
+      "filePath": "src/lib/mobile-auth.ts",
+      "contentHash": "8b1678c44aafed3fac95f1ce848473e71a142b912bb78086828e8f7b2c88125a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 118,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/multipay/orchestrator.ts": {
+      "filePath": "src/lib/multipay/orchestrator.ts",
+      "contentHash": "4799236e4cca5d11dc80558bc7a81b013709915fe5e744ebaa9f0d659f9ffd40",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 209,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/multipay/providers/index.ts": {
+      "filePath": "src/lib/multipay/providers/index.ts",
+      "contentHash": "45a71410b513441b50a07a632d42cbf08af153606cc2f3bb76679a69ec9a476b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 12,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/multipay/providers/lunasin.ts": {
+      "filePath": "src/lib/multipay/providers/lunasin.ts",
+      "contentHash": "9e2929d33a0cc44d06caade64f1f58e907be207c62dc6eaf31387e56e9784e22",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 148,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/multipay/providers/pdam.ts": {
+      "filePath": "src/lib/multipay/providers/pdam.ts",
+      "contentHash": "67d952582502b446530dfdbb9cce4df2b174b1d7410066ee4b42056a07684d30",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 148,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/multipay/repository.ts": {
+      "filePath": "src/lib/multipay/repository.ts",
+      "contentHash": "02e11c1d2ca9c1e764b86a6a62e432e995011f65eabb4360c449eea727554b2e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 230,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/multipay/types.ts": {
+      "filePath": "src/lib/multipay/types.ts",
+      "contentHash": "be36df77d068e44465f3904eb77d0ca0a7417b542f714a82bba483354be8eadd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 101,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/notifications.ts": {
+      "filePath": "src/lib/notifications.ts",
+      "contentHash": "0069f1a08c3d8c5b0151c5c6c4a1a6cb1b3a436ee365d91194afe15ec2b4eda9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 123,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/pdam-api.ts": {
+      "filePath": "src/lib/pdam-api.ts",
+      "contentHash": "81499f5f4b9ffcc3a9cb4d1109d5b0f0266d4e146244041865e805d39c0d7773",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 506,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/print-cashier-closing.ts": {
+      "filePath": "src/lib/print-cashier-closing.ts",
+      "contentHash": "1a37c13fc85ff41a920e9339d7cdd455e6b4477f32d0391d26e759d55b2d8dbf",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 198,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/print-receipt.ts": {
+      "filePath": "src/lib/print-receipt.ts",
+      "contentHash": "88c405147055d1c8c2a022a740d4eecf852962c96d2936b678b55aea7f0dae72",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 384,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/provider-auth.ts": {
+      "filePath": "src/lib/provider-auth.ts",
+      "contentHash": "acaed453f77771ac004b15b7e0b76d1091df7bcae6944d033350d62525e97f69",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 173,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/provider-rate-limit.ts": {
+      "filePath": "src/lib/provider-rate-limit.ts",
+      "contentHash": "48e5966252500ead6a8eb06b7d4de807dfb40ba18af76b0cc7dd2ed0b858499a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 108,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/provider-webhook.ts": {
+      "filePath": "src/lib/provider-webhook.ts",
+      "contentHash": "0a9d92e09eb2adaae1479a834e6f99fb25a8044f8cfd2ff5e0b14a3cef6a3302",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 105,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/rate-limit.ts": {
+      "filePath": "src/lib/rate-limit.ts",
+      "contentHash": "daf1cbf58665465fff98f6f3707a42163876103c5bab1b08504cb7d275f6719a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 44,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/rbac.ts": {
+      "filePath": "src/lib/rbac.ts",
+      "contentHash": "45164a08de9c5a308c2c10f757e83258bd8d4268d22f7dc4b6d2cec057d7cd53",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 211,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/reconciliation.ts": {
+      "filePath": "src/lib/reconciliation.ts",
+      "contentHash": "4fe2bcee394fba04c865276259f87c0b2341904d911d8ccf4d02ef0c489155b3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 876,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/transaction-events.ts": {
+      "filePath": "src/lib/transaction-events.ts",
+      "contentHash": "1c2cf971e0c4389d61ace08acd585c6b0d60088e9567ec1a2d16459187e78cae",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 71,
+      "hasStructuralAnalysis": false
+    },
+    "src/lib/useStuckDetector.ts": {
+      "filePath": "src/lib/useStuckDetector.ts",
+      "contentHash": "fffcdd2716a695200d0f83942fac9118e1f77cdcd8a8b65cabe8c40262352801",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 41,
+      "hasStructuralAnalysis": false
+    },
+    "src/types/index.ts": {
+      "filePath": "src/types/index.ts",
+      "contentHash": "16cdd3e51b2e8f62b7d7811790d0c99ced26a3437fb9d103fad93e92ec018321",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 91,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/AppShell.tsx": {
+      "filePath": "src/ui/AppShell.tsx",
+      "contentHash": "ae2ed543d8b9e4cf0500b0b46a464538e02c89a54e6009d402ce1d95ab9252bf",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 133,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/AppSidebar.tsx": {
+      "filePath": "src/ui/AppSidebar.tsx",
+      "contentHash": "11e9d13c00ab7b007d94b429c20fda647d49fcfc65b0c2989bd09b8262d2aa24",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 186,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/AppTopNav.tsx": {
+      "filePath": "src/ui/AppTopNav.tsx",
+      "contentHash": "936526ded5ee1c3e349252d5bdb12a7ded632d482f630ac1044898255402544e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 281,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/AuthProvider.tsx": {
+      "filePath": "src/ui/AuthProvider.tsx",
+      "contentHash": "aee735e4d276205ed7ab69702b24607305022202d970b790abcf974193cfe4d5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 8,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Badge.tsx": {
+      "filePath": "src/ui/Badge.tsx",
+      "contentHash": "454e496175d74e3fb3efc15f53e163bb081e45a21b997da7ae5962cf695aa451",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 31,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Breadcrumb.tsx": {
+      "filePath": "src/ui/Breadcrumb.tsx",
+      "contentHash": "1ec475cb045b047d4bc4b6645af0b3c03bf8bf57521eede8a4ca603a2d3fdb9b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 37,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Button.tsx": {
+      "filePath": "src/ui/Button.tsx",
+      "contentHash": "5e8a4b7c823e0b33760074e8f530f9383f5f427cbb6e3c747878d6e703a9d845",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 61,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Card.tsx": {
+      "filePath": "src/ui/Card.tsx",
+      "contentHash": "cb4099ec70bdf62e9200fcf3334db7018888c86120e505bec30a3b53ce2d0abb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 44,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/index.ts": {
+      "filePath": "src/ui/index.ts",
+      "contentHash": "ed3d1375fd77fe864a6ab3e0880cad01464e95a90341e2e04c49b743fa7c492f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 10,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Input.tsx": {
+      "filePath": "src/ui/Input.tsx",
+      "contentHash": "8d3bb08e71be2ede7e8350e2910b0646527f794dc7e91725433958e3a5739a62",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 58,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Modal.tsx": {
+      "filePath": "src/ui/Modal.tsx",
+      "contentHash": "19b1dd6a5b2cbd2d095ef336ad48cd5e40abdf8a626919d6dbecfc37ec678c8f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 61,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Navbar.tsx": {
+      "filePath": "src/ui/Navbar.tsx",
+      "contentHash": "261e16cb2e91b1a9af4cf6d127dee8bc7dc26ab5e0a7a9fa763ffb47b74f370e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 81,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/NotificationCenter.tsx": {
+      "filePath": "src/ui/NotificationCenter.tsx",
+      "contentHash": "ad377156e69b9c401f0a92a0da9fddc950b6ea088fc8f1ceb1f6d9c23e660b9d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 239,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Sidebar.tsx": {
+      "filePath": "src/ui/Sidebar.tsx",
+      "contentHash": "56ca29f343bd1f80aa54e9d29eb5a0391bbfb2a3aa3de0e0d5b7f59f6ddadcfa",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 65,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/ThemeProvider.tsx": {
+      "filePath": "src/ui/ThemeProvider.tsx",
+      "contentHash": "6b3540b5369b06d65b5c48b02fa5a51b974011cae05d97507b75006003abfbd8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 67,
+      "hasStructuralAnalysis": false
+    },
+    "src/ui/Toast.tsx": {
+      "filePath": "src/ui/Toast.tsx",
+      "contentHash": "dca88b93b134ce425d25bd90866535c15dc1e63b245e8d87ccfc541738c6f7d2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 112,
+      "hasStructuralAnalysis": false
+    },
+    "tailwind.config.ts": {
+      "filePath": "tailwind.config.ts",
+      "contentHash": "bbf9ccc93656e62fc1983abffe2dcd2360fb4e7f70c9c344734a62824f829df5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 32,
+      "hasStructuralAnalysis": false
+    },
+    "tsconfig.json": {
+      "filePath": "tsconfig.json",
+      "contentHash": "88796aa69d5611f1c3d79b4aa0e172b6b812d2d45e85226516672721c05a3cbd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 23,
+      "hasStructuralAnalysis": false
+    }
+  }
+}
