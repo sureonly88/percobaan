@@ -2621,32 +2621,32 @@ export default function PembayaranPage() {
                         <span>·</span>
                         <span className="truncate">{group.info.alamat}</span>
                       </div>
+                      {/* Status bayar per pelanggan */}
+                      {(() => {
+                        const cs = customerPayStatus[`PDAM:${group.info.idpel}`];
+                        if (!cs) return null;
+                        const isActive = cs.state === "connecting" || cs.state === "processing";
+                        const badgeCls = cs.state === "success" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700" : cs.state === "partial" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-700" : cs.state === "failed" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700" : cs.state === "pending_advice" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700" : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-700";
+                        const icon = cs.state === "success" ? "check_circle" : cs.state === "partial" ? "warning" : cs.state === "failed" ? "error" : cs.state === "pending_advice" ? "hourglass_empty" : null;
+                        return (
+                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border mt-1.5 ${badgeCls}`}>
+                            {isActive ? (
+                              <svg className="animate-spin h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                              </svg>
+                            ) : icon ? (
+                              <span className="material-symbols-outlined shrink-0" style={{fontSize:"13px",lineHeight:"1"}}>{icon}</span>
+                            ) : null}
+                            <span className="whitespace-nowrap">{cs.label}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-lg font-black text-primary">{formatRupiah(group.totalAkumulasi)}</p>
                       <p className="text-[11px] text-slate-400">{group.bills.length} rekening</p>
                     </div>
-                    {/* Status bayar per pelanggan */}
-                    {(() => {
-                      const cs = customerPayStatus[`PDAM:${group.info.idpel}`];
-                      if (!cs) return null;
-                      const isActive = cs.state === "connecting" || cs.state === "processing";
-                      const badgeCls = cs.state === "success" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700" : cs.state === "partial" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-700" : cs.state === "failed" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700" : cs.state === "pending_advice" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700" : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-700";
-                      const icon = cs.state === "success" ? "check_circle" : cs.state === "partial" ? "warning" : cs.state === "failed" ? "error" : cs.state === "pending_advice" ? "hourglass_empty" : null;
-                      return (
-                        <div className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeCls}`}>
-                          {isActive ? (
-                            <svg className="animate-spin h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                            </svg>
-                          ) : icon ? (
-                            <span className="material-symbols-outlined shrink-0" style={{fontSize:"13px",lineHeight:"1"}}>{icon}</span>
-                          ) : null}
-                          <span className="whitespace-nowrap">{cs.label}</span>
-                        </div>
-                      );
-                    })()}
                     <button
                       onClick={() => handleHapusPelanggan(group.info.idpel)}
                       className="text-slate-300 hover:text-red-500 transition-colors shrink-0 ml-2"
@@ -2794,32 +2794,32 @@ export default function PembayaranPage() {
                           </>
                         )}
                       </div>
+                      {/* Status bayar per pelanggan Lunasin */}
+                      {(() => {
+                        const cs = customerPayStatus[`LUNASIN:${bill.idpel}`];
+                        if (!cs) return null;
+                        const isActive = cs.state === "connecting" || cs.state === "processing";
+                        const badgeCls = cs.state === "success" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700" : cs.state === "partial" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-700" : cs.state === "failed" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700" : cs.state === "pending_advice" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700" : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-700";
+                        const icon = cs.state === "success" ? "check_circle" : cs.state === "partial" ? "warning" : cs.state === "failed" ? "error" : cs.state === "pending_advice" ? "hourglass_empty" : null;
+                        return (
+                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border mt-1.5 ${badgeCls}`}>
+                            {isActive ? (
+                              <svg className="animate-spin h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                              </svg>
+                            ) : icon ? (
+                              <span className="material-symbols-outlined shrink-0" style={{fontSize:"13px",lineHeight:"1"}}>{icon}</span>
+                            ) : null}
+                            <span className="whitespace-nowrap">{cs.label}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-lg font-black text-primary">{formatRupiah(bill.rpTotal)}</p>
                       <p className="text-[11px] text-slate-400">incl. admin {formatRupiah(bill.rpAdmin)}</p>
                     </div>
-                    {/* Status bayar per pelanggan Lunasin */}
-                    {(() => {
-                      const cs = customerPayStatus[`LUNASIN:${bill.idpel}`];
-                      if (!cs) return null;
-                      const isActive = cs.state === "connecting" || cs.state === "processing";
-                      const badgeCls = cs.state === "success" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700" : cs.state === "partial" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-700" : cs.state === "failed" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700" : cs.state === "pending_advice" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700" : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-700";
-                      const icon = cs.state === "success" ? "check_circle" : cs.state === "partial" ? "warning" : cs.state === "failed" ? "error" : cs.state === "pending_advice" ? "hourglass_empty" : null;
-                      return (
-                        <div className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeCls}`}>
-                          {isActive ? (
-                            <svg className="animate-spin h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                            </svg>
-                          ) : icon ? (
-                            <span className="material-symbols-outlined shrink-0" style={{fontSize:"13px",lineHeight:"1"}}>{icon}</span>
-                          ) : null}
-                          <span className="whitespace-nowrap">{cs.label}</span>
-                        </div>
-                      );
-                    })()}
                     <button
                       onClick={() => setDaftarTagihanPln((prev) => prev.filter((_, i) => i !== idx))}
                       className="text-slate-300 hover:text-red-500 transition-colors shrink-0 ml-2"

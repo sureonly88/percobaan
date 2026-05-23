@@ -105,7 +105,7 @@ async function syncMultiPaymentParent(transactionCode: string) {
           ? `Semua ${statuses.length} item berhasil diproses`
           : partialSuccess
             ? `${successCount}/${statuses.length} item berhasil diproses`
-            : "Multi-payment belum berhasil diproses penuh",
+            : "Payment belum berhasil diproses",
       paidAt: ["SUCCESS", "PARTIAL_SUCCESS"].includes(parentStatus) ? new Date().toISOString() : null,
       results: rebuiltResults,
     };

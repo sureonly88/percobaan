@@ -220,7 +220,7 @@ export async function orchestrateMultiPayment(
         ? `Semua ${results.length} item berhasil diproses`
         : partialSuccess
           ? `${successCount}/${results.length} item berhasil diproses`
-          : "Multi-payment belum berhasil diproses penuh",
+          : "Payment belum berhasil diproses",
     paidAt: finalStatus === "SUCCESS" || finalStatus === "PARTIAL_SUCCESS" ? new Date().toISOString() : null,
     loketCode: input.loketCode,
     loketName: input.loketName,
