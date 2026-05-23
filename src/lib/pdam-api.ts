@@ -1,6 +1,13 @@
 // PDAM BJM External API Configuration & Helpers
 
 import { checkCircuit, recordSuccess, recordFailure, configureCircuitBreaker } from "@/lib/circuit-breaker";
+import {
+  mockPdamInquiry,
+  mockPdamAdvice,
+  mockPdamPaymentWithRetry,
+} from "@/lib/pdam-mock";
+
+const PDAM_MOCK = process.env.PDAM_MOCK === "true";
 
 const PDAM_PROVIDER = "PDAM";
 configureCircuitBreaker(PDAM_PROVIDER, { failureThreshold: 5, resetTimeoutMs: 30_000, halfOpenMaxAttempts: 2 });
@@ -137,6 +144,7 @@ export const PDAM_PAYMENT_ERROR_CODES: Record<string, string> = {
  * Customer inquiry — fetch billing details from PDAM
  */
 export async function pdamInquiry(idpel: string): Promise<PdamInquiryExecutionResult> {
+  if (PDAM_MOCK) return mockPdamInquiry(idpel);
   checkCircuit(PDAM_PROVIDER);
 
   const url = `${PDAM_BASE_URL}/reqcustomer_rev2/?idpel=${encodeURIComponent(idpel)}&clientid=${PDAM_CLIENT_ID}&password=${PDAM_PASSWORD}`;
@@ -360,6 +368,7 @@ export async function pdamPaymentWithRetry(
     transactionCode: string;
     loketCode: string;
     username: string;
+    // mock param is forwarded transparently
   },
   options?: {
     maxAttempts?: number;
@@ -373,6 +382,8 @@ export async function pdamPaymentWithRetry(
   httpStatus: number;
   adviceUsed?: boolean;
 }> {
+  if (PDAM_MOCK) return mockPdamPaymentWithRetry(params, options);
+
   const maxAttempts = options?.maxAttempts ?? 3;
   const baseDelayMs = options?.baseDelayMs ?? 500;
   const tanggal = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -490,6 +501,7 @@ export async function pdamAdvice(params: {
   idpel: string;
   tanggal: string;  // YYYY-MM-DD
 }): Promise<PdamAdviceExecutionResult> {
+  if (PDAM_MOCK) return mockPdamAdvice(params);
   checkCircuit(PDAM_PROVIDER);
 
   const url = `${PDAM_BASE_URL}/reqlpptanggal/?idpel=${encodeURIComponent(params.idpel)}&tanggal=${encodeURIComponent(params.tanggal)}&clientid=${PDAM_CLIENT_ID}&password=${PDAM_PASSWORD}`;

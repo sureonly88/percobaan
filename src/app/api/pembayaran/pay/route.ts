@@ -302,7 +302,9 @@ export async function POST(req: NextRequest) {
       multiPaymentId = mprResult.insertId;
     }
 
-    for (const [idpel, pelBills] of groupedEntries) {
+    // Proses semua pelanggan secara paralel — tiap idpel berjalan bersamaan
+    // sehingga timeout 1 pelanggan tidak memblokir pelanggan lain.
+    await Promise.allSettled(groupedEntries.map(async ([idpel, pelBills]) => {
       const transactionCode = generateTransactionCode();
 
       // Phase 1: Persist pending rows into multi_payment_items (skip when called from orchestrator)
@@ -393,7 +395,7 @@ export async function POST(req: NextRequest) {
               blth: bill.blth,
             });
           }
-          continue;
+          return;
         }
       }
 
@@ -555,6 +557,23 @@ export async function POST(req: NextRequest) {
                 );
               }
             }
+            // Tutup PENDING_ADVICE lama untuk customer + blth yang sudah berhasil dibayar
+            for (const bill of pelBills) {
+              await pool.execute(
+                `UPDATE multi_payment_items
+                    SET status = 'FAILED',
+                        provider_error_code = 'SUPERSEDED_BY_PAYMENT',
+                        provider_error_message = 'Tagihan ini sudah lunas melalui transaksi pembayaran lain yang berhasil',
+                        failed_at = NOW(),
+                        updated_at = NOW()
+                  WHERE customer_id = ?
+                    AND period_label = ?
+                    AND provider = 'PDAM'
+                    AND status = 'PENDING_ADVICE'
+                    AND transaction_code != ?`,
+                [bill.idpel, bill.blth, transactionCode]
+              );
+            }
           }
 
           for (const bill of pelBills) {
@@ -707,19 +726,56 @@ export async function POST(req: NextRequest) {
         // Phase 2b: timeout/network errors → PENDING_ADVICE (payable via reqlpptanggal)
         //            hard errors (business logic) → FAILED
         const isAdviceable = err instanceof PdamApiError && err.retryable;
+        // blths yg sudah ada PENDING_ADVICE aktif (tidak boleh duplikat per nopelanggan+blth)
+        const blockedFromAdvice = new Set<string>();
+
         if (!skipMultiPayment) {
           if (isAdviceable) {
             const tglTransaksi = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-            await pool.execute(
-              `UPDATE multi_payment_items
-                  SET status = 'PENDING_ADVICE',
-                      provider_error_code = ?,
-                      provider_error_message = ?,
-                      metadata_json = JSON_SET(IFNULL(metadata_json, '{}'), '$.advice_tanggal', ?)
-                WHERE transaction_code = ?
-                  AND status = 'PENDING'`,
-              [errorCode, message, tglTransaksi, transactionCode]
+            const blthList = pelBills.map((b) => b.blth);
+
+            // Cek apakah sudah ada PENDING_ADVICE aktif untuk customer + blth yang sama
+            const [existingAdviceRows] = await pool.query<RowDataPacket[]>(
+              `SELECT period_label FROM multi_payment_items
+                WHERE customer_id = ?
+                  AND period_label IN (${blthList.map(() => "?").join(",")})
+                  AND status = 'PENDING_ADVICE'
+                  AND provider = 'PDAM'
+                  AND transaction_code != ?`,
+              [idpel, ...blthList, transactionCode]
             );
+            existingAdviceRows.forEach((r) => blockedFromAdvice.add(String(r.period_label)));
+
+            const blthsForAdvice = blthList.filter((b) => !blockedFromAdvice.has(b));
+            const blthsBlocked   = blthList.filter((b) => blockedFromAdvice.has(b));
+
+            if (blthsForAdvice.length > 0) {
+              await pool.execute(
+                `UPDATE multi_payment_items
+                    SET status = 'PENDING_ADVICE',
+                        provider_error_code = ?,
+                        provider_error_message = ?,
+                        metadata_json = JSON_SET(IFNULL(metadata_json, '{}'), '$.advice_tanggal', ?)
+                  WHERE transaction_code = ?
+                    AND period_label IN (${blthsForAdvice.map(() => "?").join(",")})
+                    AND status = 'PENDING'`,
+                [errorCode, message, tglTransaksi, transactionCode, ...blthsForAdvice]
+              );
+            }
+
+            if (blthsBlocked.length > 0) {
+              await pool.execute(
+                `UPDATE multi_payment_items
+                    SET status = 'FAILED',
+                        provider_error_code = 'DUPLICATE_PENDING_ADVICE',
+                        provider_error_message = 'Sudah ada tagihan advice aktif untuk pelanggan dan periode yang sama',
+                        failed_at = NOW()
+                  WHERE transaction_code = ?
+                    AND period_label IN (${blthsBlocked.map(() => "?").join(",")})
+                    AND status = 'PENDING'`,
+                [transactionCode, ...blthsBlocked]
+              );
+            }
           } else {
             await pool.execute(
               `UPDATE multi_payment_items
@@ -735,14 +791,17 @@ export async function POST(req: NextRequest) {
         }
 
         for (const bill of pelBills) {
+          const isBlockedBill = isAdviceable && blockedFromAdvice.has(bill.blth);
           results.push({
             idpel: bill.idpel,
             transactionCode,
             success: false,
-            error: isAdviceable
+            error: isBlockedBill
+              ? "Sudah ada tagihan advice aktif untuk pelanggan dan periode yang sama"
+              : isAdviceable
               ? `${message} — transaksi dalam status PENDING ADVICE, dapat diproses ulang via menu Advice`
               : message,
-            errorCode: isAdviceable ? "PENDING_ADVICE" : errorCode,
+            errorCode: isBlockedBill ? "DUPLICATE_PENDING_ADVICE" : isAdviceable ? "PENDING_ADVICE" : errorCode,
             total: bill.subTotal + biayaAdminLoket,
             nama: bill.nama,
             blth: bill.blth,
@@ -750,7 +809,7 @@ export async function POST(req: NextRequest) {
           });
         }
       }
-    }
+    }));
 
     const allSuccess = results.length > 0 && results.every((r) => r.success);
     const anySuccess = results.some((r) => r.success);

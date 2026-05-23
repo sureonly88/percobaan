@@ -171,8 +171,33 @@ export async function createMultiPaymentItems(multiPaymentId: number, items: Pro
 
 export async function updateMultiPaymentItems(multiPaymentId: number, results: ProviderExecutionResult[]) {
   for (const result of results) {
-    const paidAt = result.status === "SUCCESS" ? new Date() : null;
-    const failedAt = result.status === "FAILED" ? new Date() : null;
+    let effectiveStatus = result.status;
+    let effectiveErrorCode = result.errorCode || null;
+    let effectiveError = result.error || null;
+
+    // Cegah duplikat PENDING_ADVICE: 1 nopelanggan + blth hanya boleh ada 1 advice aktif
+    if (result.status === "PENDING_ADVICE") {
+      const [dupeRows] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS cnt
+           FROM multi_payment_items cur
+           JOIN multi_payment_items dup
+             ON dup.customer_id = cur.customer_id
+            AND dup.period_label <=> cur.period_label
+            AND dup.provider = cur.provider
+          WHERE cur.multi_payment_id = ? AND cur.item_code = ?
+            AND dup.status = 'PENDING_ADVICE'
+            AND dup.multi_payment_id != ?`,
+        [multiPaymentId, result.itemCode, multiPaymentId]
+      );
+      if (Number(dupeRows[0]?.cnt ?? 0) > 0) {
+        effectiveStatus = "FAILED";
+        effectiveErrorCode = "DUPLICATE_PENDING_ADVICE";
+        effectiveError = "Sudah ada tagihan advice aktif untuk pelanggan dan periode yang sama";
+      }
+    }
+
+    const paidAt = effectiveStatus === "SUCCESS" ? new Date() : null;
+    const failedAt = effectiveStatus === "FAILED" ? new Date() : null;
 
     await pool.execute(
       `UPDATE multi_payment_items
@@ -186,10 +211,10 @@ export async function updateMultiPaymentItems(multiPaymentId: number, results: P
               updated_at = NOW()
         WHERE multi_payment_id = ? AND item_code = ?`,
       [
-        result.status,
+        effectiveStatus,
         result.transactionCode || null,
-        result.errorCode || null,
-        result.error || null,
+        effectiveErrorCode,
+        effectiveError,
         result.providerData ? JSON.stringify(result.providerData) : null,
         paidAt,
         failedAt,
@@ -197,6 +222,31 @@ export async function updateMultiPaymentItems(multiPaymentId: number, results: P
         result.itemCode,
       ]
     );
+
+    // Jika item ini berhasil dibayar, tutup PENDING_ADVICE lama untuk customer + periode yg sama
+    if (effectiveStatus === "SUCCESS") {
+      const [itemInfo] = await pool.query<RowDataPacket[]>(
+        `SELECT customer_id, period_label, provider FROM multi_payment_items
+          WHERE multi_payment_id = ? AND item_code = ? LIMIT 1`,
+        [multiPaymentId, result.itemCode]
+      );
+      if (itemInfo[0]) {
+        await pool.execute(
+          `UPDATE multi_payment_items
+              SET status = 'FAILED',
+                  provider_error_code = 'SUPERSEDED_BY_PAYMENT',
+                  provider_error_message = 'Tagihan ini sudah lunas melalui transaksi pembayaran lain yang berhasil',
+                  failed_at = NOW(),
+                  updated_at = NOW()
+            WHERE customer_id = ?
+              AND period_label <=> ?
+              AND provider = ?
+              AND status = 'PENDING_ADVICE'
+              AND multi_payment_id != ?`,
+          [itemInfo[0].customer_id, itemInfo[0].period_label, itemInfo[0].provider, multiPaymentId]
+        );
+      }
+    }
   }
 }
 

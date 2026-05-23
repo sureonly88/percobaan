@@ -302,12 +302,21 @@ export default function PembayaranPage() {
   const [inquiryLoading, setInquiryLoading] = useState(false);
   const [inquiryError, setInquiryError] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
-  // Pesan progress real-time saat orchestrator memproses multi-payment (via SSE).
-  const [paymentProgress, setPaymentProgress] = useState<string>("");
-  // Reset progress message setiap kali loading selesai (sukses atau gagal).
+  // Log progress real-time saat orchestrator memproses multi-payment (via SSE).
+  const [paymentProgress, setPaymentProgress] = useState<Array<{ label: string; type: MultiPaymentProgressEvent["type"] }>>([]); 
+  const progressLogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!paymentLoading) setPaymentProgress("");
-  }, [paymentLoading]);
+    if (progressLogRef.current) {
+      progressLogRef.current.scrollTop = progressLogRef.current.scrollHeight;
+    }
+  }, [paymentProgress]);
+
+  // Per-customer payment status (key: `${provider}:${customerId}`)
+  type CustomerPayStatus = {
+    state: "connecting" | "processing" | "success" | "partial" | "failed" | "pending_advice";
+    label: string;
+  };
+  const [customerPayStatus, setCustomerPayStatus] = useState<Record<string, CustomerPayStatus>>({});
 
   // Receipt modal
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
@@ -1039,6 +1048,7 @@ export default function PembayaranPage() {
         },
       }));
 
+      setPaymentProgress([]);
       const streamResult = await streamMultipay(
         {
           idempotencyKey,
@@ -1047,7 +1057,7 @@ export default function PembayaranPage() {
           paidAmount: parsedPlnPayment,
           items,
         },
-        (event) => setPaymentProgress(progressEventToLabel(event)),
+        (event) => setPaymentProgress(prev => [...prev, { label: progressEventToLabel(event), type: event.type }]),
       );
 
       // Always reset intent key so next attempt gets fresh UUID
@@ -1161,10 +1171,11 @@ export default function PembayaranPage() {
       focusField("payment");
     } finally {
       setPaymentLoading(false);
+      void fetchPendingAdvice();
     }
   }
 
-  // Unified multi-provider payment
+  // Unified multi-provider payment — satu request per pelanggan, dijalankan paralel
   async function handleBayarSemua() {
     if (!hasAnyBills || !loketInfo || paymentLoading) return;
     if (parsedUnifiedPayment < grandTotalBayar) {
@@ -1173,88 +1184,178 @@ export default function PembayaranPage() {
     }
 
     setPaymentLoading(true);
+    setCustomerPayStatus({});
     const pdamSnapshot = [...daftarTagihan];
     const lunasinSnapshot = [...daftarTagihanPln];
 
     try {
-      const idempotencyKey = multiPayIntentKey ?? generateIdempotencyKey();
+      const baseKey = multiPayIntentKey ?? generateIdempotencyKey();
       if (!multiPayIntentKey) {
-        setMultiPayIntentKey(idempotencyKey);
+        setMultiPayIntentKey(baseKey);
       }
 
-      const items = unifiedCart;
+      const itemLookup = new Map(unifiedCart.map((item) => [item.itemCode, item]));
 
-      const itemLookup = new Map(items.map((item) => [item.itemCode, item]));
+      // Group items by (provider, customerId)
+      const groups = new Map<string, UnifiedCartItem[]>();
+      for (const item of unifiedCart) {
+        const key = `${item.provider}:${item.customerId}`;
+        const arr = groups.get(key) ?? [];
+        arr.push(item);
+        groups.set(key, arr);
+      }
 
-      const streamResult = await streamMultipay(
-        {
-          idempotencyKey,
-          loketCode: loketInfo.loketCode,
-          loketName: loketInfo.nama,
-          paidAmount: parsedUnifiedPayment,
-          items,
-        },
-        (event) => setPaymentProgress(progressEventToLabel(event)),
+      // Tampilkan semua pelanggan dengan status "connecting" sebelum request dikirim
+      setCustomerPayStatus(
+        Object.fromEntries(Array.from(groups.keys()).map((k) => [k, { state: "connecting" as const, label: "Menghubungi server..." }]))
       );
 
-      // Always reset intent key so next attempt gets fresh UUID
+      // Helper: satu SSE request per grup — status diperbarui real-time dari stream events
+      const payGroup = async (groupKey: string, items: UnifiedCartItem[]): Promise<MultiPaymentResponse> => {
+        const colonIdx = groupKey.indexOf(":");
+        const provider = groupKey.slice(0, colonIdx);
+        const customerId = groupKey.slice(colonIdx + 1);
+        const idempotencyKey = `${baseKey}-${provider}-${customerId}`;
+
+        const makeFailed = (errMsg: string): MultiPaymentResponse => ({
+          success: false, partialSuccess: false, multiPaymentCode: "", status: "FAILED",
+          message: errMsg, paidAt: null,
+          loketCode: loketInfo!.loketCode, loketName: loketInfo!.nama,
+          totalItems: items.length, totalAmount: 0, totalAdmin: 0, grandTotal: 0, paidAmount: 0, changeAmount: 0,
+          results: items.map((item) => ({
+            itemCode: item.itemCode, provider: item.provider, serviceType: item.serviceType,
+            customerId: item.customerId, customerName: item.customerName,
+            success: false, status: "FAILED" as const, error: errMsg, errorCode: "NETWORK_ERROR",
+          })),
+        });
+
+        try {
+          const streamResult = await streamMultipay(
+            {
+              idempotencyKey,
+              loketCode: loketInfo!.loketCode,
+              loketName: loketInfo!.nama,
+              paidAmount: items.reduce((s, i) => s + i.total, 0),
+              items,
+            },
+            (event) => {
+              if (event.type === "provider_start") {
+                const pName = event.provider === "LUNASIN" ? "Lunasin" : "PDAM";
+                const label = event.provider === "PDAM" && event.itemCount > 1
+                  ? `Memproses ${event.itemCount} rekening PDAM...`
+                  : `Memproses ${pName}...`;
+                setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "processing", label } }));
+              } else if (event.type === "provider_done") {
+                const okCnt = event.results.filter((r) => r.success).length;
+                const tot = event.results.length;
+                const hasAdv = event.results.some((r) => r.status === "PENDING_ADVICE");
+                if (hasAdv) {
+                  setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "pending_advice", label: "Memeriksa konfirmasi PDAM..." } }));
+                } else if (okCnt === tot) {
+                  setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "success", label: tot === 1 ? "Berhasil" : `${okCnt} rekening berhasil` } }));
+                } else if (okCnt > 0) {
+                  setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "partial", label: `${okCnt}/${tot} rekening berhasil` } }));
+                } else {
+                  setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "failed", label: "Transaksi gagal" } }));
+                }
+              }
+            },
+          );
+
+          if (!streamResult.ok) {
+            const errMsg = streamResult.error || "Gagal menghubungi server";
+            setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "failed", label: errMsg } }));
+            return makeFailed(errMsg);
+          }
+
+          const data = streamResult.response;
+          // Final definitive status from full response
+          const hasAdvice = data.results?.some((r) => r.status === "PENDING_ADVICE");
+          const allOk = data.results?.length > 0 && data.results.every((r) => r.success);
+          const okCount = data.results?.filter((r) => r.success).length ?? 0;
+          const total = data.results?.length ?? 0;
+          if (allOk) {
+            setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "success", label: total === 1 ? "Berhasil" : `${okCount} rekening berhasil` } }));
+          } else if (hasAdvice) {
+            setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "pending_advice", label: "Menunggu konfirmasi PDAM" } }));
+          } else if (okCount > 0) {
+            setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "partial", label: `${okCount}/${total} rekening berhasil` } }));
+          } else {
+            setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "failed", label: data.message || "Semua transaksi gagal" } }));
+          }
+          return data;
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : "Gagal menghubungi server";
+          setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "failed", label: errMsg } }));
+          return makeFailed(errMsg);
+        }
+      };
+
+      // Jalankan semua grup secara paralel
+      const settled = await Promise.allSettled(
+        Array.from(groups.entries()).map(([key, items]) => payGroup(key, items))
+      );
+
+      // Reset intent key agar attempt berikutnya mendapat UUID baru
       setMultiPayIntentKey(null);
 
-      if (!streamResult.ok) {
-        alert(streamResult.error || "Pembayaran multi-provider gagal");
-        focusField("payment");
-        return;
-      }
-      const data = streamResult.response;
+      // Kumpulkan semua responses (payGroup tidak pernah throw, selalu fulfilled)
+      const allData: MultiPaymentResponse[] = settled
+        .filter((r): r is PromiseFulfilledResult<MultiPaymentResponse> => r.status === "fulfilled")
+        .map((r) => r.value);
 
-      const allResults: PaymentResult[] = ((data.results || []) as unknown as Array<Record<string, unknown>>).map((result: Record<string, unknown>) => {
-        const item = itemLookup.get(String(result.itemCode || ""));
-        const provider = String(result.provider || item?.provider || "") === "LUNASIN" ? "LUNASIN" : "PDAM";
-        const itemMetadata = (item?.metadata || {}) as Record<string, unknown>;
-        return {
-          itemCode: String(result.itemCode || item?.itemCode || ""),
-          idpel: String(result.customerId || item?.customerId || ""),
-          transactionCode: String(result.transactionCode || ""),
-          success: Boolean(result.success),
-          error: result.error ? String(result.error) : undefined,
-          total: Number(item?.total || 0),
-          nama: String(result.customerName || item?.customerName || ""),
-          blth: provider === "PDAM"
-            ? String(item?.periodLabel || itemMetadata.blth || "")
-            : String(item?.productCode || item?.periodLabel || "Lunasin"),
-          provider,
-          serviceType: String(result.serviceType || item?.serviceType || ""),
-          adminFee: Number(item?.adminFee || 0),
-          finalStatus: String(result.status || (result.success ? "SUCCESS" : "FAILED")),
-          kodeProduk: String(item?.productCode || "") || undefined,
-          providerData: (result.providerData as Record<string, unknown> | undefined) || undefined,
-        };
-      });
+      // Map semua ProviderExecutionResult ke PaymentResult frontend
+      const allResults: PaymentResult[] = allData.flatMap((data) =>
+        ((data.results || []) as unknown as Array<Record<string, unknown>>).map((result: Record<string, unknown>) => {
+          const item = itemLookup.get(String(result.itemCode || ""));
+          const provider = String(result.provider || item?.provider || "") === "LUNASIN" ? "LUNASIN" : "PDAM";
+          const itemMetadata = (item?.metadata || {}) as Record<string, unknown>;
+          return {
+            itemCode: String(result.itemCode || item?.itemCode || ""),
+            idpel: String(result.customerId || item?.customerId || ""),
+            transactionCode: String(result.transactionCode || ""),
+            success: Boolean(result.success),
+            error: result.error ? String(result.error) : undefined,
+            total: Number(item?.total || 0),
+            nama: String(result.customerName || item?.customerName || ""),
+            blth:
+              provider === "PDAM"
+                ? String(item?.periodLabel || itemMetadata.blth || "")
+                : String(item?.productCode || item?.periodLabel || "Lunasin"),
+            provider,
+            serviceType: String(result.serviceType || item?.serviceType || ""),
+            adminFee: Number(item?.adminFee || 0),
+            finalStatus: String(result.status || (result.success ? "SUCCESS" : "FAILED")),
+            kodeProduk: String(item?.productCode || "") || undefined,
+            providerData: (result.providerData as Record<string, unknown> | undefined) || undefined,
+          };
+        })
+      );
 
       const successCount = allResults.filter((r) => r.success).length;
-      const allSuccess = data.success === true;
-      const partialSuccess = data.partialSuccess === true;
+      const allSuccess = allResults.length > 0 && allResults.every((r) => r.success);
+      const partialSuccess = !allSuccess && successCount > 0;
+      const totalAdmin = allData.reduce((s, d) => s + Number(d.totalAdmin || 0), 0);
+      const firstPaidAt = allData.find((d) => d.paidAt)?.paidAt ?? new Date().toISOString();
 
       setDaftarTagihanSnapshot(pdamSnapshot);
       setReceipt({
         results: allResults,
-        loketCode: data.loketCode || loketInfo.loketCode,
-        loketName: data.loketName || loketInfo.nama,
+        loketCode: loketInfo.loketCode,
+        loketName: loketInfo.nama,
         biayaAdmin: biayaAdminPerTagihan,
-        totalAdmin: Number(data.totalAdmin || 0),
-        paidAt: data.paidAt || new Date().toISOString(),
-        totalBayar: Number(data.grandTotal || grandTotalBayar),
+        totalAdmin,
+        paidAt: firstPaidAt,
+        totalBayar: grandTotalBayar,
         tunai: parsedUnifiedPayment,
         kembalian: unifiedKembalian,
         allSuccess,
         partialSuccess,
-        message:
-          data.message ||
-          (allSuccess
-            ? `Semua ${allResults.length} tagihan berhasil dibayar`
-            : partialSuccess
-              ? `${successCount}/${allResults.length} tagihan berhasil`
-              : `Semua ${allResults.length} tagihan gagal`),
+        message: allSuccess
+          ? `Semua ${allResults.length} tagihan berhasil dibayar`
+          : partialSuccess
+            ? `${successCount}/${allResults.length} tagihan berhasil`
+            : `Semua ${allResults.length} tagihan gagal`,
       });
 
       const totalSaldoDeducted = allResults
@@ -1330,6 +1431,7 @@ export default function PembayaranPage() {
       focusField("payment");
     } finally {
       setPaymentLoading(false);
+      void fetchPendingAdvice();
     }
   }
 
@@ -1681,6 +1783,7 @@ export default function PembayaranPage() {
         },
       }));
 
+      setPaymentProgress([]);
       const streamResult = await streamMultipay(
         {
           idempotencyKey,
@@ -1689,7 +1792,7 @@ export default function PembayaranPage() {
           paidAmount: parsedPayment,
           items,
         },
-        (event) => setPaymentProgress(progressEventToLabel(event)),
+        (event) => setPaymentProgress(prev => [...prev, { label: progressEventToLabel(event), type: event.type }]),
       );
 
       // Always reset intent key so next attempt gets fresh UUID
@@ -1769,6 +1872,7 @@ export default function PembayaranPage() {
       focusField("payment");
     } finally {
       setPaymentLoading(false);
+      void fetchPendingAdvice();
     }
   }
 
@@ -2522,6 +2626,27 @@ export default function PembayaranPage() {
                       <p className="text-lg font-black text-primary">{formatRupiah(group.totalAkumulasi)}</p>
                       <p className="text-[11px] text-slate-400">{group.bills.length} rekening</p>
                     </div>
+                    {/* Status bayar per pelanggan */}
+                    {(() => {
+                      const cs = customerPayStatus[`PDAM:${group.info.idpel}`];
+                      if (!cs) return null;
+                      const isActive = cs.state === "connecting" || cs.state === "processing";
+                      const badgeCls = cs.state === "success" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700" : cs.state === "partial" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-700" : cs.state === "failed" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700" : cs.state === "pending_advice" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700" : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-700";
+                      const icon = cs.state === "success" ? "check_circle" : cs.state === "partial" ? "warning" : cs.state === "failed" ? "error" : cs.state === "pending_advice" ? "hourglass_empty" : null;
+                      return (
+                        <div className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeCls}`}>
+                          {isActive ? (
+                            <svg className="animate-spin h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                            </svg>
+                          ) : icon ? (
+                            <span className="material-symbols-outlined shrink-0" style={{fontSize:"13px",lineHeight:"1"}}>{icon}</span>
+                          ) : null}
+                          <span className="whitespace-nowrap">{cs.label}</span>
+                        </div>
+                      );
+                    })()}
                     <button
                       onClick={() => handleHapusPelanggan(group.info.idpel)}
                       className="text-slate-300 hover:text-red-500 transition-colors shrink-0 ml-2"
@@ -2674,6 +2799,27 @@ export default function PembayaranPage() {
                       <p className="text-lg font-black text-primary">{formatRupiah(bill.rpTotal)}</p>
                       <p className="text-[11px] text-slate-400">incl. admin {formatRupiah(bill.rpAdmin)}</p>
                     </div>
+                    {/* Status bayar per pelanggan Lunasin */}
+                    {(() => {
+                      const cs = customerPayStatus[`LUNASIN:${bill.idpel}`];
+                      if (!cs) return null;
+                      const isActive = cs.state === "connecting" || cs.state === "processing";
+                      const badgeCls = cs.state === "success" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700" : cs.state === "partial" ? "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-700" : cs.state === "failed" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700" : cs.state === "pending_advice" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700" : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-700";
+                      const icon = cs.state === "success" ? "check_circle" : cs.state === "partial" ? "warning" : cs.state === "failed" ? "error" : cs.state === "pending_advice" ? "hourglass_empty" : null;
+                      return (
+                        <div className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeCls}`}>
+                          {isActive ? (
+                            <svg className="animate-spin h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                            </svg>
+                          ) : icon ? (
+                            <span className="material-symbols-outlined shrink-0" style={{fontSize:"13px",lineHeight:"1"}}>{icon}</span>
+                          ) : null}
+                          <span className="whitespace-nowrap">{cs.label}</span>
+                        </div>
+                      );
+                    })()}
                     <button
                       onClick={() => setDaftarTagihanPln((prev) => prev.filter((_, i) => i !== idx))}
                       className="text-slate-300 hover:text-red-500 transition-colors shrink-0 ml-2"
@@ -2880,7 +3026,7 @@ export default function PembayaranPage() {
                 {paymentLoading ? (
                   <>
                     <span className="material-symbols-outlined animate-spin">progress_activity</span>
-                    <span className="truncate">{paymentProgress || "MEMPROSES..."}</span>
+                    <span>MEMPROSES...</span>
                   </>
                 ) : (
                   <>
@@ -2896,6 +3042,71 @@ export default function PembayaranPage() {
                   transaksi layanan utilitas.
                 </p>
               </div>
+
+              {/* Status ringkasan per-pelanggan selama pembayaran */}
+              {Object.keys(customerPayStatus).length > 0 && (() => {
+                const statuses = Object.values(customerPayStatus);
+                const activeCount = statuses.filter((s) => s.state === "connecting" || s.state === "processing").length;
+                const successCount = statuses.filter((s) => s.state === "success").length;
+                const partialCount = statuses.filter((s) => s.state === "partial").length;
+                const failedCount = statuses.filter((s) => s.state === "failed").length;
+                const adviceCount = statuses.filter((s) => s.state === "pending_advice").length;
+                return (
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3 space-y-2">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Status Pembayaran</span>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {activeCount > 0 && (
+                        <span className="flex items-center gap-1 text-xs text-blue-500">
+                          <span className="material-symbols-outlined text-sm animate-spin">progress_activity</span>
+                          {activeCount} diproses
+                        </span>
+                      )}
+                      {successCount > 0 && (
+                        <span className="flex items-center gap-1 text-xs text-green-600">
+                          <span className="material-symbols-outlined text-sm">check_circle</span>
+                          {successCount} berhasil
+                        </span>
+                      )}
+                      {partialCount > 0 && (
+                        <span className="flex items-center gap-1 text-xs text-orange-500">
+                          <span className="material-symbols-outlined text-sm">warning</span>
+                          {partialCount} sebagian
+                        </span>
+                      )}
+                      {failedCount > 0 && (
+                        <span className="flex items-center gap-1 text-xs text-red-500">
+                          <span className="material-symbols-outlined text-sm">error</span>
+                          {failedCount} gagal
+                        </span>
+                      )}
+                      {adviceCount > 0 && (
+                        <span className="flex items-center gap-1 text-xs text-amber-500">
+                          <span className="material-symbols-outlined text-sm">hourglass_empty</span>
+                          {adviceCount} advice
+                        </span>
+                      )}
+                    </div>
+                    {/* Detail label per pelanggan */}
+                    {statuses.length > 1 && (
+                      <div className="flex flex-col gap-1 pt-1 border-t border-slate-200 dark:border-slate-700">
+                        {Object.entries(customerPayStatus).map(([key, cs]) => {
+                          const isActive = cs.state === "connecting" || cs.state === "processing";
+                          const colorCls = cs.state === "success" ? "text-green-600" : cs.state === "partial" ? "text-orange-500" : cs.state === "failed" ? "text-red-500" : cs.state === "pending_advice" ? "text-amber-500" : "text-blue-500";
+                          const icon = cs.state === "success" ? "check_circle" : cs.state === "partial" ? "warning" : cs.state === "failed" ? "error" : cs.state === "pending_advice" ? "hourglass_empty" : "progress_activity";
+                          const [, customerId] = key.split(":");
+                          return (
+                            <div key={key} className={`flex items-center gap-1.5 text-xs ${colorCls}`}>
+                              <span className={`material-symbols-outlined text-sm shrink-0 ${isActive ? "animate-spin" : ""}`}>{icon}</span>
+                              <span className="font-mono text-[10px] text-slate-400 shrink-0">{customerId}</span>
+                              <span className="font-medium truncate">{cs.label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
