@@ -20,6 +20,7 @@ interface RekapItem {
   trxPdam: number;
   trxLunasin: number;
   jenisLoket: string;
+  source?: "portal" | "pedami";
 }
 
 interface LoketItem {
@@ -68,6 +69,7 @@ interface DetailItem {
   kodeProduk?: string | null;
   providerDetail?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
+  _source?: "portal" | "pedami";
 }
 
 interface GroupedDetail {
@@ -209,6 +211,25 @@ const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "te
 ];
 
 function getDetailFields(item: DetailItem): Array<{ label: string; value: string; discount?: boolean }> {
+  // Pedami items: build fields directly from item + providerDetail
+  if (item._source === "pedami") {
+    const prov = (item.providerDetail || {}) as Record<string, unknown>;
+    const result: Array<{ label: string; value: string; discount?: boolean }> = [];
+    if (item.periode && item.periode !== "-") result.push({ label: "Periode Tagihan", value: item.periode });
+    const jenisTrx = prov.jenis_transaksi ? String(prov.jenis_transaksi) : null;
+    if (jenisTrx) result.push({ label: "Jenis Transaksi", value: jenisTrx });
+    const jenisLoket = prov.jenis_loket ? String(prov.jenis_loket) : null;
+    if (jenisLoket) result.push({ label: "Jenis Loket", value: jenisLoket });
+    const loketName = prov.loket_name ? String(prov.loket_name) : null;
+    if (loketName) result.push({ label: "Nama Loket", value: loketName });
+    const loketCode = prov.loket_code ? String(prov.loket_code) : null;
+    if (loketCode) result.push({ label: "Kode Loket", value: loketCode });
+    result.push({ label: "Tagihan", value: formatRupiah(item.tagihan) });
+    if (item.admin > 0) result.push({ label: "Biaya Admin", value: formatRupiah(item.admin) });
+    result.push({ label: "Total Bayar", value: formatRupiah(item.total) });
+    return result;
+  }
+
   const fields = item.jenis === "PDAM" ? PDAM_FIELDS : LUNASIN_FIELDS;
   const isPdam = item.jenis === "PDAM";
   const result: Array<{ label: string; value: string; discount?: boolean }> = [];
@@ -294,6 +315,18 @@ export default function LaporanPage() {
   const [data, setData] = useState<LaporanData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Sumber data toggle: "semua" | "portal" | "pedami"
+  const [sourceSel, setSourceSel] = useState<"semua" | "portal" | "pedami">("semua");
+
+  // Pedami data state
+  const [pedamiRekap, setPedamiRekap] = useState<RekapItem[]>([]);
+  const [pedamiRekapLoketUser, setPedamiRekapLoketUser] = useState<Array<{ loketCode: string; username: string; jumlahTrx: number; totalNominal: number }>>([]);
+  const [pedamiSummary, setPedamiSummary] = useState<{ pdam: { totalTrx: number; totalNominal: number }; lunasin: { totalTrx: number; totalNominal: number }; gabungan: { totalTrx: number; totalNominal: number } } | null>(null);
+  const [pedamiLoading, setPedamiLoading] = useState(false);
+
+  // Track which source the detail panel is showing
+  const [detailSource, setDetailSource] = useState<"portal" | "pedami">("portal");
+
   // Expanded loket rows for user breakdown
   const [expandedLokets, setExpandedLokets] = useState<Set<string>>(new Set());
 
@@ -361,11 +394,46 @@ export default function LaporanPage() {
     }
   }, [startDate, endDate, loket, jenisFilter]);
 
+  const fetchPedamiData = useCallback(async () => {
+    if (sourceSel === "portal") {
+      setPedamiRekap([]);
+      setPedamiRekapLoketUser([]);
+      setPedamiSummary(null);
+      return;
+    }
+    if (!startDate || !endDate) return;
+    setPedamiLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("startDate", startDate);
+      params.set("endDate", endDate);
+      if (jenisFilter !== "semua") params.set("jenis", jenisFilter);
+      const url = `/api/laporan/pedami?${params.toString()}`;
+      console.log("[Pedami] fetching:", url);
+      const res = await fetch(url);
+      console.log("[Pedami] response status:", res.status);
+      const json = await res.json();
+      console.log("[Pedami] json keys:", Object.keys(json), "rekap count:", json.rekap?.length, "error:", json.error);
+      if (json.rekap) {
+        setPedamiRekap((json.rekap as RekapItem[]).map((r) => ({ ...r, source: "pedami" as const })));
+        setPedamiRekapLoketUser(json.rekapLoketUser || []);
+        setPedamiSummary(json.summary || null);
+      }
+    } catch (err) {
+      console.error("Pedami fetch error:", err);
+    } finally {
+      setPedamiLoading(false);
+    }
+  }, [startDate, endDate, jenisFilter, sourceSel]);
+
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchPedamiData();
+  }, [fetchData, fetchPedamiData]);
 
   const openDetail = async (item: RekapItem) => {
+    const src = item.source === "pedami" ? "pedami" : "portal";
+    setDetailSource(src);
     setDetailLoket(item);
     setDetailUser(null);
     setDetailOpen(true);
@@ -379,7 +447,8 @@ export default function LaporanPage() {
       if (startDate) params.set("startDate", startDate);
       if (endDate) params.set("endDate", endDate);
       if (jenisFilter !== "semua") params.set("jenis", jenisFilter);
-      const res = await fetch(`/api/laporan/detail?${params.toString()}`);
+      const endpoint = src === "pedami" ? "/api/laporan/pedami/detail" : "/api/laporan/detail";
+      const res = await fetch(`${endpoint}?${params.toString()}`);
       const json = await res.json();
       if (!res.ok || json.error) {
         setDetailData([]);
@@ -397,6 +466,8 @@ export default function LaporanPage() {
   };
 
   const openUserDetail = async (loketItem: RekapItem, user: LoketUserItem) => {
+    const src = loketItem.source === "pedami" ? "pedami" : "portal";
+    setDetailSource(src);
     setDetailLoket({ ...loketItem, jumlahTrx: user.jumlahTrx, totalNominal: user.totalNominal });
     setDetailUser(user.username);
     setDetailOpen(true);
@@ -411,7 +482,10 @@ export default function LaporanPage() {
       if (startDate) params.set("startDate", startDate);
       if (endDate) params.set("endDate", endDate);
       if (jenisFilter !== "semua") params.set("jenis", jenisFilter);
-      const res = await fetch(`/api/laporan/detail?${params.toString()}`);
+      // For pedami source, user filter is not supported — fetch all loket detail
+      const endpoint = src === "pedami" ? "/api/laporan/pedami/detail" : "/api/laporan/detail";
+      if (src === "portal") params.set("username", user.username);
+      const res = await fetch(`${endpoint}?${params.toString()}`);
       const json = await res.json();
       if (!res.ok || json.error) {
         setDetailData([]);
@@ -447,13 +521,22 @@ export default function LaporanPage() {
     (l) => l.nama.toLowerCase().includes(loketSearch.toLowerCase()) || l.loketCode.toLowerCase().includes(loketSearch.toLowerCase())
   );
 
-  const totalPages = Math.max(1, Math.ceil(rekap.length / itemsPerPage));
-  const paginatedRekap = rekap.slice(
+  // Merged rekap based on sourceSel
+  const mergedRekap = React.useMemo(() => {
+    const portalRows = rekap.map((r) => ({ ...r, source: "portal" as const }));
+    const pedamiRows = pedamiRekap.map((r) => ({ ...r, source: "pedami" as const }));
+    if (sourceSel === "portal") return portalRows;
+    if (sourceSel === "pedami") return pedamiRows;
+    return [...portalRows, ...pedamiRows].sort((a, b) => b.totalNominal - a.totalNominal);
+  }, [rekap, pedamiRekap, sourceSel]);
+
+  const totalPages = Math.max(1, Math.ceil(mergedRekap.length / itemsPerPage));
+  const paginatedRekap = mergedRekap.slice(
     (activePage - 1) * itemsPerPage,
     activePage * itemsPerPage
   );
 
-  // Group rekapLoketUser by loketCode for expandable rows
+  // Group rekapLoketUser by loketCode for expandable rows (portal)
   const loketUserMap = React.useMemo(() => {
     const map = new Map<string, LoketUserItem[]>();
     for (const item of rekapLoketUser) {
@@ -463,6 +546,17 @@ export default function LaporanPage() {
     }
     return map;
   }, [rekapLoketUser]);
+
+  // Group pedamiRekapLoketUser by loketCode
+  const pedamiLoketUserMap = React.useMemo(() => {
+    const map = new Map<string, Array<{ loketCode: string; username: string; jumlahTrx: number; totalNominal: number }>>();
+    for (const item of pedamiRekapLoketUser) {
+      const arr = map.get(item.loketCode) || [];
+      arr.push(item);
+      map.set(item.loketCode, arr);
+    }
+    return map;
+  }, [pedamiRekapLoketUser]);
 
   // Group rekapProdukPerLoket by loketCode
   const produkPerLoketMap = React.useMemo(() => {
@@ -560,11 +654,20 @@ export default function LaporanPage() {
           <div className="min-w-0">
             <p className="text-xs text-slate-500 font-medium">PDAM</p>
             <p className="text-xl font-bold mt-0.5">
-              {loading ? "..." : formatNumber(summary?.pdam.totalTrx ?? 0)} <span className="text-xs font-normal text-slate-400">Trx</span>
+              {loading ? "..." : formatNumber(
+                (summary?.pdam.totalTrx ?? 0) +
+                (sourceSel !== "portal" ? (pedamiSummary?.pdam.totalTrx ?? 0) : 0)
+              )} <span className="text-xs font-normal text-slate-400">Trx</span>
             </p>
             <p className="text-[11px] text-cyan-600 font-semibold mt-0.5 truncate">
-              {loading ? "..." : formatRupiah(summary?.pdam.totalNominal ?? 0)}
+              {loading ? "..." : formatRupiah(
+                (summary?.pdam.totalNominal ?? 0) +
+                (sourceSel !== "portal" ? (pedamiSummary?.pdam.totalNominal ?? 0) : 0)
+              )}
             </p>
+            {sourceSel !== "portal" && pedamiSummary && pedamiSummary.pdam.totalTrx > 0 && (
+              <p className="text-[10px] text-indigo-500 mt-0.5">+{formatNumber(pedamiSummary.pdam.totalTrx)} Pedami</p>
+            )}
           </div>
         </div>
 
@@ -574,6 +677,9 @@ export default function LaporanPage() {
           const found = produkBreakdown.find((p) => p.kategori === kat);
           const trx = found?.totalTrx ?? 0;
           const nominal = found?.totalNominal ?? 0;
+          // Add pedami PLN totals to PLN card when showing combined
+          const pedamiPlnTrx = (sourceSel !== "portal" && kat === "PLN") ? (pedamiSummary?.lunasin.totalTrx ?? 0) : 0;
+          const pedamiPlnNominal = (sourceSel !== "portal" && kat === "PLN") ? (pedamiSummary?.lunasin.totalNominal ?? 0) : 0;
           return (
             <div key={kat} className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-start gap-4">
               <div className={`p-2.5 ${cfg.bgColor} rounded-lg shrink-0`}>
@@ -582,11 +688,14 @@ export default function LaporanPage() {
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 font-medium">{kat}</p>
                 <p className="text-xl font-bold mt-0.5">
-                  {loading ? "..." : formatNumber(trx)} <span className="text-xs font-normal text-slate-400">Trx</span>
+                  {loading ? "..." : formatNumber(trx + pedamiPlnTrx)} <span className="text-xs font-normal text-slate-400">Trx</span>
                 </p>
                 <p className={`text-[11px] ${cfg.color} font-semibold mt-0.5 truncate`}>
-                  {loading ? "..." : formatRupiah(nominal)}
+                  {loading ? "..." : formatRupiah(nominal + pedamiPlnNominal)}
                 </p>
+                {pedamiPlnTrx > 0 && (
+                  <p className="text-[10px] text-indigo-500 mt-0.5">+{formatNumber(pedamiPlnTrx)} Pedami</p>
+                )}
               </div>
             </div>
           );
@@ -750,17 +859,56 @@ export default function LaporanPage() {
               </div>
               <div className="flex items-end">
                 <button
-                  onClick={fetchData}
-                  className="w-full h-11 bg-primary hover:bg-primary/90 text-white font-bold rounded-lg flex items-center justify-center gap-2 transition-all"
+                  onClick={() => { fetchData(); fetchPedamiData(); }}
+                  disabled={loading || pedamiLoading}
+                  className="w-full h-11 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold rounded-lg flex items-center justify-center gap-2 transition-all"
                 >
-                  <span className="material-symbols-outlined text-sm">
-                    search
-                  </span>
-                  <span>Terapkan</span>
+                  {(loading || pedamiLoading) ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span>Memuat{pedamiLoading && loading ? " semua..." : pedamiLoading ? " Pedami..." : " Portal..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-sm">search</span>
+                      <span>Terapkan</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
+
+            {/* Sumber Data Toggle */}
+            <div className="mt-4 flex items-center gap-3">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Sumber Data:</span>
+              <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden text-xs font-bold">
+                {(["semua", "portal", "pedami"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setSourceSel(s)}
+                    className={`px-3 py-1.5 transition-colors ${
+                      sourceSel === s
+                        ? s === "pedami"
+                          ? "bg-indigo-600 text-white"
+                          : s === "portal"
+                          ? "bg-primary text-white"
+                          : "bg-slate-700 text-white"
+                        : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {s === "semua" ? "Gabungan" : s === "portal" ? "Portal Utilitas" : "Pedami Payment"}
+                    {s === "pedami" && pedamiLoading && (
+                      <span className="ml-1 inline-block w-2 h-2 rounded-full bg-indigo-300 animate-pulse" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
+
 
           {/* Table Section */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -768,7 +916,7 @@ export default function LaporanPage() {
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary text-sm">store</span>
                 <h3 className="text-sm font-bold">Rekap Per Loket</h3>
-                <span className="text-xs text-slate-400 ml-1">({rekap.length} loket)</span>
+                <span className="text-xs text-slate-400 ml-1">({mergedRekap.length} loket)</span>
               </div>
               <div className="flex gap-2">
                 <button
@@ -821,15 +969,20 @@ export default function LaporanPage() {
                     </tr>
                   ) : (
                     paginatedRekap.map((item) => {
-                      const isExpanded = expandedLokets.has(item.loketCode);
-                      const users = loketUserMap.get(item.loketCode) || [];
+                      const isPedami = item.source === "pedami";
+                      // Use a unique key that includes source to avoid collisions when same loket_code appears in both
+                      const rowKey = `${item.source ?? "portal"}-${item.loketCode}`;
+                      const isExpanded = expandedLokets.has(rowKey);
+                      const users = isPedami
+                        ? (pedamiLoketUserMap.get(item.loketCode) || [])
+                        : (loketUserMap.get(item.loketCode) || []);
                       const hasUsers = users.length > 0;
                       return (
-                        <React.Fragment key={item.loketCode}>
-                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                        <React.Fragment key={rowKey}>
+                          <tr className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${isPedami ? "border-l-2 border-indigo-400" : ""}`}>
                             <td className="px-6 py-4 text-center">
                               {hasUsers && (
-                                <button onClick={() => toggleLoketExpand(item.loketCode)} className="p-0.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors">
+                                <button onClick={() => toggleLoketExpand(rowKey)} className="p-0.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors">
                                   <span className={`material-symbols-outlined text-sm text-slate-400 transition-transform ${isExpanded ? "rotate-90" : ""}`}>
                                     chevron_right
                                   </span>
@@ -838,11 +991,18 @@ export default function LaporanPage() {
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400">
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isPedami ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
                                   <span className="material-symbols-outlined">store</span>
                                 </div>
                                 <div>
-                                  <p className="font-bold text-sm">{item.loketName || "—"}</p>
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="font-bold text-sm">{item.loketName || "—"}</p>
+                                    {isPedami && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                                        Pedami
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-slate-400">{item.loketCode || "—"}</p>
                                 </div>
                               </div>
@@ -857,18 +1017,27 @@ export default function LaporanPage() {
                                 {item.trxPdam > 0 && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-bold rounded-full bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600">
                                     <span className="material-symbols-outlined text-xs">water_drop</span>
-                                    PDAM
+                                    PDAM {isPedami && <span className="opacity-60">({formatNumber(item.trxPdam)})</span>}
                                   </span>
                                 )}
-                                {(produkPerLoketMap.get(item.loketCode) || []).map((p) => {
-                                  const cfg = KATEGORI_CONFIG[p.kategori] || KATEGORI_CONFIG["Lainnya"];
-                                  return (
-                                    <span key={p.kategori} className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-bold rounded-full ${cfg.badgeBg}`} title={`${p.count} trx`}>
-                                      <span className="material-symbols-outlined text-xs">{cfg.icon}</span>
-                                      {p.kategori} <span className="opacity-60">({p.count})</span>
+                                {isPedami ? (
+                                  item.trxLunasin > 0 && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-bold rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-600">
+                                      <span className="material-symbols-outlined text-xs">bolt</span>
+                                      PLN <span className="opacity-60">({formatNumber(item.trxLunasin)})</span>
                                     </span>
-                                  );
-                                })}
+                                  )
+                                ) : (
+                                  (produkPerLoketMap.get(item.loketCode) || []).map((p) => {
+                                    const cfg = KATEGORI_CONFIG[p.kategori] || KATEGORI_CONFIG["Lainnya"];
+                                    return (
+                                      <span key={p.kategori} className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-bold rounded-full ${cfg.badgeBg}`} title={`${p.count} trx`}>
+                                        <span className="material-symbols-outlined text-xs">{cfg.icon}</span>
+                                        {p.kategori} <span className="opacity-60">({p.count})</span>
+                                      </span>
+                                    );
+                                  })
+                                )}
                               </div>
                             </td>
                             <td className="px-6 py-4">
@@ -880,14 +1049,14 @@ export default function LaporanPage() {
                               <p className="text-sm font-bold">{formatRupiah(item.totalNominal)}</p>
                             </td>
                             <td className="px-6 py-4 text-center">
-                              <button onClick={() => openDetail(item)} className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-primary text-xs font-bold rounded-lg hover:bg-primary hover:text-white transition-all">
+                              <button onClick={() => openDetail(item)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isPedami ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 hover:bg-indigo-600 hover:text-white" : "bg-slate-100 dark:bg-slate-800 text-primary hover:bg-primary hover:text-white"}`}>
                                 Detail
                               </button>
                             </td>
                           </tr>
                           {/* Expanded user rows */}
                           {isExpanded && users.map((u) => (
-                            <tr key={`${item.loketCode}-${u.username}`} className="bg-slate-50/70 dark:bg-slate-800/30">
+                            <tr key={`${rowKey}-${u.username}`} className="bg-slate-50/70 dark:bg-slate-800/30">
                               <td className="px-6 py-3"></td>
                               <td className="px-6 py-3" colSpan={2}>
                                 <div className="flex items-center gap-2 pl-4">
@@ -923,7 +1092,7 @@ export default function LaporanPage() {
             </div>
             {totalPages > 1 && (
             <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
-              <span className="text-xs text-slate-400">{rekap.length} loket ditemukan</span>
+              <span className="text-xs text-slate-400">{mergedRekap.length} loket ditemukan</span>
               <nav className="flex items-center gap-1">
                 <button className="p-2 text-slate-400 hover:text-primary disabled:opacity-30" disabled={activePage === 1} onClick={() => setActivePage((p) => Math.max(1, p - 1))}>
                   <span className="material-symbols-outlined text-sm">chevron_left</span>
@@ -946,11 +1115,11 @@ export default function LaporanPage() {
 
       {/* Detail Transaksi per Loket — Inline Section */}
       {detailOpen && (
-        <div ref={detailSectionRef} className="mt-6 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+        <div ref={detailSectionRef} className={`mt-6 bg-white dark:bg-slate-900 rounded-xl border overflow-hidden ${detailSource === "pedami" ? "border-indigo-300 dark:border-indigo-700" : "border-slate-200 dark:border-slate-800"}`}>
             {/* Header */}
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+            <div className={`p-6 border-b flex justify-between items-center ${detailSource === "pedami" ? "border-indigo-100 dark:border-indigo-800 bg-indigo-50/40 dark:bg-indigo-900/10" : "border-slate-100 dark:border-slate-800"}`}>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${detailSource === "pedami" ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600" : "bg-primary/10 text-primary"}`}>
                   <span className="material-symbols-outlined">
                     {detailUser ? "person" : "storefront"}
                   </span>
@@ -963,6 +1132,11 @@ export default function LaporanPage() {
                         : `${detailLoket?.loketName || "—"} (${detailLoket?.loketCode || "—"})`
                       }
                     </h3>
+                    {detailSource === "pedami" && (
+                      <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                        Pedami Payment
+                      </span>
+                    )}
                   </div>
                   {detailUser && (
                     <span className="text-xs text-slate-400">
