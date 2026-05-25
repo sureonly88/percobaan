@@ -4,7 +4,11 @@ const globalForDb = globalThis as unknown as { _dbPool?: Pool };
 
 // Hardening (OWASP A05): di production, JANGAN diam-diam pakai kredensial default
 // (root + password kosong). Wajib gagal-cepat agar misconfig terdeteksi.
-if (process.env.NODE_ENV === "production") {
+// Skip saat build phase karena env DB belum tersedia di build environment.
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.NEXT_PHASE !== "phase-production-build"
+) {
   if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_NAME) {
     throw new Error(
       "DB_HOST, DB_USER, dan DB_NAME wajib diset di production (lihat .env)."
