@@ -24,7 +24,7 @@ async function handle(req: NextRequest) {
     await releaseJobLock(
       lock,
       "SUCCESS",
-      `providers=${summary.providers} samples=${summary.samples} purged=${summary.purged}`,
+      `providers=${summary.providers} totalEvents=${summary.totalEvents} purged=${summary.purged}`,
       Date.now() - t0
     );
     return NextResponse.json({ ok: true, summary });
