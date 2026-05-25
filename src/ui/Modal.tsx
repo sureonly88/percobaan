@@ -7,9 +7,18 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  maxWidth?: "sm" | "md" | "lg" | "xl" | "2xl";
 }
 
-export function Modal({ open, onClose, title, children }: ModalProps) {
+const maxWidthClass: Record<string, string> = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-xl",
+  "2xl": "max-w-2xl",
+};
+
+export function Modal({ open, onClose, title, children, maxWidth = "lg" }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,7 +47,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
       {/* Dialog */}
       <div
         ref={dialogRef}
-        className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        className={`relative bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full ${maxWidthClass[maxWidth] ?? "max-w-lg"} max-h-[90vh] overflow-y-auto`}
       >
         {/* Header */}
         <div className="bg-slate-50 dark:bg-slate-700/50 px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center sticky top-0">
