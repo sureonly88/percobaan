@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 
 // ── types ────────────────────────────────────────────────────────────────────
 interface PendingItem {
@@ -49,303 +49,336 @@ function formatTanggal(s: string) {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 export default function AdvicePdamPage() {
-  const [idpel, setIdpel]             = useState("");
-  const [inputIdpel, setInputIdpel]   = useState("");
-  const [transactions, setTransactions] = useState<PendingTransaction[]>([]);
-  const [fetchLoading, setFetchLoading] = useState(false);
-  const [fetchError, setFetchError]   = useState("");
-  const [searched, setSearched]       = useState(false);
+  const [allPending, setAllPending]       = useState<PendingTransaction[]>([]);
+  const [loading, setLoading]             = useState(false);
+  const [loadError, setLoadError]         = useState("");
+  const [runningIdpel, setRunningIdpel]   = useState<string | null>(null);
+  const [results, setResults]             = useState<Record<string, { ok: boolean; msg: string; groupResults?: GroupResult[] }>>({});
 
-  const [running, setRunning]         = useState(false);
-  const [runResult, setRunResult]     = useState<{
-    success: boolean;
-    message: string;
-    totalFinalized: number;
-    groupResults: GroupResult[];
-    customerName: string;
-  } | null>(null);
-  const [runError, setRunError]       = useState("");
+  // ── filter state ──────────────────────────────────────────────────────────
+  const [filterIdpel, setFilterIdpel]     = useState("");
+  const [filterTanggal, setFilterTanggal] = useState("");  // YYYY-MM-DD
 
-  async function handleFetch() {
-    const val = inputIdpel.trim();
-    if (!val) return;
-    setFetchLoading(true);
-    setFetchError("");
-    setTransactions([]);
-    setRunResult(null);
-    setRunError("");
-    setSearched(true);
-    setIdpel(val);
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
     try {
-      const res  = await fetch(`/api/pembayaran/pdam/advice?idpel=${encodeURIComponent(val)}`);
+      const res  = await fetch("/api/pembayaran/pdam/advice");
       const json = await res.json() as { transactions?: PendingTransaction[]; error?: string };
-      if (!res.ok) {
-        setFetchError(json.error || "Gagal mengambil data");
-        return;
-      }
-      setTransactions(json.transactions ?? []);
+      if (!res.ok) { setLoadError(json.error || "Gagal memuat data"); return; }
+      setAllPending(json.transactions ?? []);
     } catch {
-      setFetchError("Gagal menghubungi server");
+      setLoadError("Gagal menghubungi server");
     } finally {
-      setFetchLoading(false);
+      setLoading(false);
     }
-  }
+  }, []);
 
-  async function handleRunAdvice() {
-    if (!idpel || transactions.length === 0) return;
-    setRunning(true);
-    setRunResult(null);
-    setRunError("");
+  useEffect(() => { void loadAll(); }, [loadAll]);
+
+  async function handleAdvice(targetIdpel: string) {
+    setRunningIdpel(targetIdpel);
+    setResults((p) => ({ ...p, [targetIdpel]: { ok: false, msg: "" } }));
     try {
       const res  = await fetch("/api/pembayaran/pdam/advice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idpel }),
+        body: JSON.stringify({ idpel: targetIdpel }),
       });
       const json = await res.json() as {
-        success?: boolean;
-        message?: string;
-        totalFinalized?: number;
-        groupResults?: GroupResult[];
-        customerName?: string;
-        error?: string;
+        success?: boolean; message?: string; totalFinalized?: number;
+        groupResults?: GroupResult[]; error?: string;
       };
       if (!res.ok) {
-        setRunError(json.error || "Advice PDAM gagal");
-        return;
+        setResults((p) => ({ ...p, [targetIdpel]: { ok: false, msg: json.error || "Advice gagal" } }));
+      } else {
+        setResults((p) => ({
+          ...p,
+          [targetIdpel]: {
+            ok: true,
+            msg: json.message || `${json.totalFinalized ?? 0} tagihan selesai`,
+            groupResults: json.groupResults,
+          },
+        }));
+        await loadAll();
       }
-      setRunResult({
-        success:        Boolean(json.success),
-        message:        json.message || "",
-        totalFinalized: json.totalFinalized ?? 0,
-        groupResults:   json.groupResults ?? [],
-        customerName:   json.customerName || "",
-      });
-      // Refresh list after success
-      await handleFetch();
     } catch {
-      setRunError("Gagal menghubungi server");
+      setResults((p) => ({ ...p, [targetIdpel]: { ok: false, msg: "Gagal menghubungi server" } }));
     } finally {
-      setRunning(false);
+      setRunningIdpel(null);
     }
   }
 
-  const totalTagihan = transactions.reduce((s, t) => s + t.grandTotal, 0);
-  const maxAttempts  = transactions.reduce((m, t) => Math.max(m, t.adviceAttempts), 0);
+  // ── filtered + grouped ────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let list = allPending;
+    const q = filterIdpel.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (t) => t.idpel.toLowerCase().includes(q) || t.customerName.toLowerCase().includes(q)
+      );
+    }
+    if (filterTanggal) {
+      list = list.filter((t) => t.createdAt.slice(0, 10) === filterTanggal);
+    }
+    return list;
+  }, [allPending, filterIdpel, filterTanggal]);
+
+  const groupedByIdpel = useMemo(() => {
+    const map = new Map<string, {
+      idpel: string; customerName: string;
+      transactions: PendingTransaction[]; grandTotal: number;
+    }>();
+    for (const trx of filtered) {
+      if (!map.has(trx.idpel)) {
+        map.set(trx.idpel, { idpel: trx.idpel, customerName: trx.customerName, transactions: [], grandTotal: 0 });
+      }
+      const g = map.get(trx.idpel)!;
+      g.transactions.push(trx);
+      g.grandTotal += trx.grandTotal;
+    }
+    return Array.from(map.values());
+  }, [filtered]);
+
+  const totalGrand = allPending.reduce((s, t) => s + t.grandTotal, 0);
+  const hasFilter  = !!filterIdpel.trim() || !!filterTanggal;
 
   return (
     <div className="space-y-6">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-white via-blue-50/50 to-sky-50 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 p-6 sm:p-7 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between mb-5">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 px-3 py-1 text-xs font-bold uppercase tracking-wide mb-3">
+            <div className="inline-flex items-center gap-2 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 px-3 py-1 text-xs font-bold uppercase tracking-wide mb-2">
               <span className="material-symbols-outlined text-sm">water_drop</span>
               Advice PDAM
             </div>
             <h1 className="text-2xl font-bold text-slate-800 dark:text-white leading-tight">
               Konfirmasi Pembayaran PDAM
             </h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-xl">
-              Cek status pembayaran PDAM yang sempat timeout ke server PDAM. Masukkan nomor pelanggan
-              untuk melihat transaksi yang perlu dikonfirmasi, lalu jalankan advice sekali untuk semua tagihan pending.
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Transaksi PDAM yang timeout dan menunggu konfirmasi ke server PDAM.
             </p>
-          </div>
-        </div>
-
-        {/* ── Search bar ─────────────────────────────────────────────────── */}
-        <div className="mt-5 flex flex-col sm:flex-row gap-3 max-w-lg">
-          <div className="relative flex-1">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">
-              badge
-            </span>
-            <input
-              type="text"
-              className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-950 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              placeholder="Nomor Pelanggan PDAM (idpel)"
-              value={inputIdpel}
-              onChange={(e) => setInputIdpel(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void handleFetch(); }}
-            />
           </div>
           <button
             type="button"
-            onClick={() => void handleFetch()}
-            disabled={fetchLoading || !inputIdpel.trim()}
-            className="h-11 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+            onClick={() => void loadAll()}
+            disabled={loading}
+            className="shrink-0 self-start sm:self-auto inline-flex items-center gap-2 h-9 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors"
           >
-            {fetchLoading ? (
-              <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>
-            ) : (
-              <span className="material-symbols-outlined text-base">search</span>
-            )}
-            Cek Tagihan
+            <span className={`material-symbols-outlined text-base ${loading ? "animate-spin" : ""}`}>refresh</span>
+            Refresh
           </button>
+        </div>
+
+        {/* Summary chips */}
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-xl bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 px-4 py-2">
+            <span className="material-symbols-outlined text-amber-500 text-base">pending_actions</span>
+            <span className="text-sm font-bold text-slate-800 dark:text-white">{loading ? "—" : allPending.length}</span>
+            <span className="text-xs text-slate-400">transaksi pending</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 px-4 py-2">
+            <span className="material-symbols-outlined text-blue-500 text-base">group</span>
+            <span className="text-sm font-bold text-slate-800 dark:text-white">
+              {loading ? "—" : new Set(allPending.map((t) => t.idpel)).size}
+            </span>
+            <span className="text-xs text-slate-400">pelanggan</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 px-4 py-2">
+            <span className="material-symbols-outlined text-emerald-500 text-base">payments</span>
+            <span className="text-sm font-bold text-slate-800 dark:text-white">{loading ? "—" : formatRupiah(totalGrand)}</span>
+            <span className="text-xs text-slate-400">total nominal</span>
+          </div>
         </div>
       </section>
 
-      {/* ── Fetch error ─────────────────────────────────────────────────────── */}
-      {fetchError && (
-        <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 flex items-start gap-3 text-red-700 dark:text-red-300 text-sm">
+      {/* ── Filter bar ────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
+          <input
+            type="text"
+            className="w-full h-10 pl-10 pr-9 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            placeholder="Cari nomor pelanggan atau nama..."
+            value={filterIdpel}
+            onChange={(e) => setFilterIdpel(e.target.value)}
+          />
+          {filterIdpel && (
+            <button
+              type="button"
+              onClick={() => setFilterIdpel("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <span className="material-symbols-outlined text-base">close</span>
+            </button>
+          )}
+        </div>
+        <div className="relative">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">calendar_today</span>
+          <input
+            type="date"
+            className="h-10 pl-10 pr-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none w-full sm:w-44"
+            value={filterTanggal}
+            onChange={(e) => setFilterTanggal(e.target.value)}
+          />
+        </div>
+        {hasFilter && (
+          <button
+            type="button"
+            onClick={() => { setFilterIdpel(""); setFilterTanggal(""); }}
+            className="h-10 px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap"
+          >
+            Hapus filter
+          </button>
+        )}
+      </div>
+
+      {/* ── Error ─────────────────────────────────────────────────────────── */}
+      {loadError && (
+        <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 flex items-center gap-3 text-red-700 dark:text-red-300 text-sm">
           <span className="material-symbols-outlined text-lg shrink-0">error</span>
-          <p>{fetchError}</p>
+          {loadError}
         </div>
       )}
 
-      {/* ── Run result banner ─────────────────────────────────────────────── */}
-      {runResult && (
-        <div className={`rounded-xl border p-4 flex items-start gap-3 text-sm ${
-          runResult.totalFinalized > 0
-            ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300"
-            : "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300"
-        }`}>
-          <span className="material-symbols-outlined text-lg shrink-0">
-            {runResult.totalFinalized > 0 ? "check_circle" : "hourglass_top"}
-          </span>
-          <div>
-            <p className="font-bold">{runResult.message}</p>
-            {runResult.groupResults.map((gr) => (
-              <p key={gr.transactionCode} className="text-xs mt-1 opacity-80">
-                {gr.transactionCode} ({gr.tanggal}):{" "}
-                {gr.error
-                  ? `Gagal — ${gr.error}`
-                  : gr.notFound
-                  ? "Belum ada data di server PDAM"
-                  : `${gr.finalizedCount} tagihan selesai`}
-              </p>
-            ))}
+      {/* ── List ──────────────────────────────────────────────────────────── */}
+      <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
+        {loading && (
+          <div className="flex items-center justify-center gap-3 py-16 text-slate-400 text-sm">
+            <span className="material-symbols-outlined animate-spin text-xl">progress_activity</span>
+            Memuat data...
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── Run error banner ──────────────────────────────────────────────── */}
-      {runError && (
-        <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 flex items-start gap-3 text-red-700 dark:text-red-300 text-sm">
-          <span className="material-symbols-outlined text-lg shrink-0">cancel</span>
-          <p>{runError}</p>
-        </div>
-      )}
-
-      {/* ── No results ────────────────────────────────────────────────────── */}
-      {searched && !fetchLoading && !fetchError && transactions.length === 0 && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-10 text-center">
-          <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-600 block mb-3">task_alt</span>
-          <p className="font-semibold text-slate-600 dark:text-slate-300">Tidak ada tagihan pending</p>
-          <p className="text-sm text-slate-400 mt-1">
-            Pelanggan <span className="font-mono font-bold">{idpel}</span> tidak memiliki transaksi PDAM yang perlu dikonfirmasi.
-          </p>
-        </div>
-      )}
-
-      {/* ── Results ───────────────────────────────────────────────────────── */}
-      {transactions.length > 0 && (
-        <>
-          {/* Summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[
-              { label: "Nomor Pelanggan", value: idpel, icon: "badge" },
-              { label: "Nama", value: transactions[0].customerName || "-", icon: "person" },
-              { label: "Tagihan Pending", value: `${transactions.length} transaksi`, icon: "pending_actions" },
-              { label: "Total Nominal", value: formatRupiah(totalTagihan), icon: "payments" },
-            ].map((card) => (
-              <div key={card.label} className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="material-symbols-outlined text-blue-500 text-base">{card.icon}</span>
-                  <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">{card.label}</p>
-                </div>
-                <p className="font-bold text-slate-800 dark:text-white text-sm truncate">{card.value}</p>
-              </div>
-            ))}
+        {!loading && groupedByIdpel.length === 0 && (
+          <div className="py-16 text-center">
+            <span className="material-symbols-outlined text-5xl text-emerald-400 dark:text-emerald-600 block mb-3">task_alt</span>
+            <p className="font-semibold text-slate-600 dark:text-slate-300">
+              {hasFilter ? "Tidak ada hasil untuk filter ini" : "Tidak ada tagihan pending"}
+            </p>
+            <p className="text-sm text-slate-400 mt-1">
+              {hasFilter ? "Coba ubah kata kunci atau tanggal" : "Semua transaksi PDAM sudah terselesaikan"}
+            </p>
           </div>
+        )}
 
-          {/* Transactions list */}
-          <div className="space-y-3">
-            {transactions.map((trx) => (
-              <div
-                key={trx.transactionCode}
-                className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden"
-              >
-                {/* Transaction header */}
-                <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <span className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
-                      <span className="material-symbols-outlined text-base">hourglass_top</span>
-                    </span>
-                    <div>
-                      <p className="font-mono font-bold text-sm text-slate-800 dark:text-white">{trx.transactionCode}</p>
-                      <p className="text-xs text-slate-400">
-                        Loket: {trx.loketName || trx.loketCode} · Dibuat: {formatTanggal(trx.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-slate-800 dark:text-white">{formatRupiah(trx.grandTotal)}</p>
-                    <p className="text-xs text-slate-400">
-                      Tgl advice: <span className="font-mono">{trx.adviceTanggal}</span>
-                      {trx.adviceAttempts > 0 && (
-                        <span className="ml-2 text-amber-500">· {trx.adviceAttempts}× dicoba</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Periods */}
-                <div className="divide-y divide-slate-50 dark:divide-slate-800">
-                  {trx.items.map((item) => (
-                    <div key={item.itemCode} className="flex items-center justify-between px-4 py-2.5 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-slate-300 dark:text-slate-600 text-base">water_drop</span>
-                        <span className="text-slate-600 dark:text-slate-300">
-                          {item.periodLabel || item.itemCode}
-                        </span>
-                      </div>
-                      <div className="text-right text-xs text-slate-400">
-                        <span>Tagihan {formatRupiah(item.amount)}</span>
-                        <span className="mx-1">+</span>
-                        <span>Admin {formatRupiah(item.adminFee)}</span>
-                        <span className="ml-2 font-bold text-slate-600 dark:text-slate-300">{formatRupiah(item.total)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* ── Action button ──────────────────────────────────────────── */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <p className="font-bold text-slate-800 dark:text-white">
-                  Jalankan Advice untuk Pelanggan {idpel}
-                </p>
-                <p className="text-sm text-slate-400 mt-0.5">
-                  Semua {transactions.length} transaksi pending akan dikonfirmasi ke server PDAM sekaligus.
-                  {maxAttempts > 0 && <span className="text-amber-500 ml-1">(sudah {maxAttempts}× dicoba)</span>}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleRunAdvice()}
-                disabled={running}
-                className="shrink-0 inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm disabled:opacity-50 transition-colors"
-              >
-                {running ? (
-                  <>
-                    <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>
-                    Memproses...
-                  </>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined text-base">sync</span>
-                    Jalankan Advice PDAM
-                  </>
-                )}
-              </button>
+        {!loading && groupedByIdpel.length > 0 && (
+          <>
+            {/* Column headers */}
+            <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-2.5 border-b border-slate-100 dark:border-slate-800 text-xs font-semibold text-slate-400 uppercase tracking-wide">
+              <span>Pelanggan</span>
+              <span className="text-right">Transaksi</span>
+              <span className="text-right">Total</span>
+              <span />
             </div>
-          </div>
-        </>
-      )}
+
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {groupedByIdpel.map((group) => {
+                const res       = results[group.idpel];
+                const isRunning = runningIdpel === group.idpel;
+                const attempts  = group.transactions.reduce((s, t) => s + t.adviceAttempts, 0);
+
+                return (
+                  <div key={group.idpel}>
+                    <div className="flex flex-wrap sm:grid sm:grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-5 py-4">
+                      {/* Customer */}
+                      <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto">
+                        <span className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-500 shrink-0">
+                          <span className="material-symbols-outlined text-base">person</span>
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-800 dark:text-white text-sm truncate">
+                            {group.customerName || "-"}
+                          </p>
+                          <p className="font-mono text-xs text-slate-400">{group.idpel}</p>
+                        </div>
+                      </div>
+                      {/* Count */}
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{group.transactions.length}</p>
+                        <p className="text-xs text-slate-400">transaksi</p>
+                      </div>
+                      {/* Total */}
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-slate-800 dark:text-white">{formatRupiah(group.grandTotal)}</p>
+                        {attempts > 0 && (
+                          <p className="text-xs text-amber-500">{attempts}× dicoba</p>
+                        )}
+                      </div>
+                      {/* Advice button */}
+                      <div className="ml-auto sm:ml-0">
+                        <button
+                          type="button"
+                          onClick={() => void handleAdvice(group.idpel)}
+                          disabled={isRunning || !!runningIdpel}
+                          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold disabled:opacity-50 transition-colors"
+                        >
+                          {isRunning ? (
+                            <><span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>Proses...</>
+                          ) : (
+                            <><span className="material-symbols-outlined text-sm">sync</span>Advice</>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Transaction chips */}
+                    <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+                      {group.transactions.map((trx) => (
+                        <span
+                          key={trx.transactionCode}
+                          title={`Dibuat: ${formatTanggal(trx.createdAt)}\nLoket: ${trx.loketName || trx.loketCode}`}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-xs font-mono text-slate-500 dark:text-slate-400 cursor-default"
+                        >
+                          <span className="material-symbols-outlined text-amber-400 text-xs">hourglass_top</span>
+                          {trx.transactionCode}
+                          <span className="text-slate-300 dark:text-slate-600 mx-0.5">·</span>
+                          {formatRupiah(trx.grandTotal)}
+                          <span className="text-slate-300 dark:text-slate-600 mx-0.5">·</span>
+                          {trx.createdAt.slice(0, 10)}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Result message */}
+                    {res?.msg && (
+                      <div className={`mx-5 mb-3 rounded-lg px-3 py-2 text-xs font-medium flex items-start gap-2 ${
+                        res.ok
+                          ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400"
+                          : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
+                      }`}>
+                        <span className="material-symbols-outlined text-sm shrink-0 mt-px">
+                          {res.ok ? "check_circle" : "cancel"}
+                        </span>
+                        <div>
+                          {res.msg}
+                          {res.groupResults?.map((gr) => (
+                            <p key={gr.transactionCode} className="opacity-80 mt-0.5">
+                              {gr.transactionCode}:{" "}
+                              {gr.error
+                                ? `Gagal — ${gr.error}`
+                                : gr.notFound
+                                ? "Belum ada data di server PDAM"
+                                : `${gr.finalizedCount} tagihan selesai`}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {hasFilter && (
+              <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400">
+                Menampilkan {filtered.length} dari {allPending.length} transaksi
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </div>
   );
 }

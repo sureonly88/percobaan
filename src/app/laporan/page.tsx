@@ -167,6 +167,11 @@ function pv(item: DetailItem, ...keys: string[]): string | null {
   return null;
 }
 
+/** Format 20-digit PLN token → XXXX-XXXX-XXXX-XXXX-XXXX */
+function fmtToken(raw: string): string {
+  return raw.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1-");
+}
+
 /* Known field labels for Lunasin provider_response */
 const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text"; discount?: boolean }> = [
   { key: ["tarif"], label: "Tarif" },
@@ -1410,7 +1415,7 @@ export default function LaporanPage() {
                       <span className="material-symbols-outlined text-amber-500">key</span>
                       <div>
                         <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">Token PLN</div>
-                        <div className="font-mono font-bold text-sm text-amber-700 dark:text-amber-300 tracking-widest">{tokenVal}</div>
+                        <div className="font-mono font-bold text-sm text-amber-700 dark:text-amber-300 tracking-widest">{fmtToken(tokenVal)}</div>
                       </div>
                     </div>
                   ) : null;

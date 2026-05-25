@@ -328,6 +328,9 @@ export default function PembayaranPage() {
   const [reprintLoading, setReprintLoading] = useState(false);
   const [reprintError, setReprintError] = useState("");
 
+  // Modal bantuan shortcut keyboard
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+
   // Favorit pelanggan
   const [favorites, setFavorites] = useState<CustomerFavorite[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
@@ -377,6 +380,7 @@ export default function PembayaranPage() {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const paymentRef = useRef<HTMLInputElement>(null);
+  const reprintInputRef = useRef<HTMLInputElement>(null);
   const scanSubmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load loket from logged-in user's profile
@@ -625,13 +629,27 @@ export default function PembayaranPage() {
 
   useEffect(() => {
     function handleGlobalShortcut(event: KeyboardEvent) {
-      if (event.key === "Escape" && receipt) {
+      // F1 → toggle modal bantuan shortcut (kerja di mana saja)
+      if (event.key === "F1") {
         event.preventDefault();
-        handleCloseReceipt();
+        setShortcutHelpOpen((v) => !v);
         return;
       }
 
-      if (receipt) return;
+      if (event.key === "Escape") {
+        if (shortcutHelpOpen) {
+          event.preventDefault();
+          setShortcutHelpOpen(false);
+          return;
+        }
+        if (receipt) {
+          event.preventDefault();
+          handleCloseReceipt();
+          return;
+        }
+      }
+
+      if (receipt || shortcutHelpOpen) return;
 
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName?.toLowerCase();
@@ -652,6 +670,35 @@ export default function PembayaranPage() {
         return;
       }
 
+      // F3 → pindah ke tab layanan berikutnya
+      if (event.key === "F3") {
+        event.preventDefault();
+        const idx = LAYANAN_TABS.findIndex((t) => t.value === activeTab);
+        const next = LAYANAN_TABS[(idx + 1) % LAYANAN_TABS.length];
+        if (next) setActiveTab(next.value);
+        return;
+      }
+
+      // F4 → focus input cetak ulang struk
+      if (event.key === "F4") {
+        event.preventDefault();
+        reprintInputRef.current?.focus();
+        reprintInputRef.current?.select();
+        return;
+      }
+
+      // Ctrl+Delete (atau Ctrl+Backspace) → kosongkan keranjang tagihan aktif
+      if ((event.ctrlKey || event.metaKey) && (event.key === "Delete" || event.key === "Backspace")) {
+        event.preventDefault();
+        if (daftarTagihan.length || daftarTagihanPln.length) {
+          if (window.confirm("Hapus semua tagihan dari keranjang?")) {
+            setDaftarTagihan([]);
+            setDaftarTagihanPln([]);
+          }
+        }
+        return;
+      }
+
       if (event.key === "F8") {
         event.preventDefault();
         if (!paymentLoading && hasAnyBills && loketInfo && parsedUnifiedPayment >= grandTotalBayar) {
@@ -669,7 +716,7 @@ export default function PembayaranPage() {
 
     window.addEventListener("keydown", handleGlobalShortcut);
     return () => window.removeEventListener("keydown", handleGlobalShortcut);
-  }, [receipt, paymentLoading, daftarTagihan.length, loketInfo, parsedPayment, totalBayar, nomorPelanggan]);
+  }, [receipt, shortcutHelpOpen, paymentLoading, daftarTagihan.length, daftarTagihanPln.length, loketInfo, parsedPayment, totalBayar, nomorPelanggan, activeTab, parsedUnifiedPayment, grandTotalBayar, hasAnyBills]);
 
   useEffect(() => {
     return () => {
@@ -1912,6 +1959,10 @@ export default function PembayaranPage() {
         totalBayar: data.totalBayar,
         tunai: data.totalBayar,
         kembalian: 0,
+        isCopy: !!data.isCopy,
+        copyNumber: data.copyNumber,
+        copyBy: data.copyBy,
+        copyAt: data.copyAt,
       });
       setReprintError("");
     } catch {
@@ -2870,7 +2921,7 @@ export default function PembayaranPage() {
                         {bill.tokenPln && (
                         <div className="flex justify-between sm:flex-col sm:gap-0.5 col-span-2">
                           <span className="text-slate-400">Token PLN</span>
-                          <span className="font-mono font-bold text-primary">{bill.tokenPln}</span>
+                          <span className="font-mono font-bold text-primary">{bill.tokenPln.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1-")}</span>
                         </div>
                         )}
                       </div>
@@ -3149,9 +3200,10 @@ export default function PembayaranPage() {
             </p>
             <div className="flex gap-2">
               <input
+                ref={reprintInputRef}
                 type="text"
                 className="flex-1 h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-950 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                placeholder="ID Pelanggan"
+                placeholder="ID Pelanggan (F4)"
                 value={reprintIdpel}
                 onChange={(e) => { setReprintIdpel(e.target.value); setReprintError(""); }}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void handleReprint(); } }}
@@ -3779,6 +3831,58 @@ export default function PembayaranPage() {
           © 2023 Pedami Payment. Layanan Pembayaran Terpadu Indonesia.
         </p>
       </footer>
+
+      {/* Floating tombol bantuan shortcut */}
+      <button
+        type="button"
+        onClick={() => setShortcutHelpOpen(true)}
+        title="Bantuan shortcut keyboard (F1)"
+        className="fixed bottom-5 right-5 z-40 h-12 w-12 rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 flex items-center justify-center"
+        aria-label="Bantuan shortcut keyboard"
+      >
+        <span className="material-symbols-outlined">keyboard</span>
+      </button>
+
+      {/* Modal cheatsheet shortcut */}
+      <Modal
+        open={shortcutHelpOpen}
+        onClose={() => setShortcutHelpOpen(false)}
+        title="Shortcut Keyboard"
+        maxWidth="md"
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Kasir profesional bisa bekerja tanpa mouse. Gunakan shortcut berikut untuk transaksi cepat:
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            {[
+              { k: "F1", d: "Buka/tutup bantuan ini" },
+              { k: "F2", d: "Cek tagihan (PDAM/PLN sesuai tab aktif)" },
+              { k: "F3", d: "Pindah ke tab layanan berikutnya" },
+              { k: "F4", d: "Fokus ke input Cetak Ulang Struk" },
+              { k: "F8", d: "Bayar semua tagihan di keranjang" },
+              { k: "Alt + I", d: "Fokus ke ID Pelanggan" },
+              { k: "Alt + B", d: "Fokus ke nominal Bayar" },
+              { k: "Enter", d: "Konfirmasi (di field aktif)" },
+              { k: "Ctrl + Del", d: "Kosongkan keranjang tagihan" },
+              { k: "Esc", d: "Tutup modal/struk yang sedang terbuka" },
+            ].map((row) => (
+              <div
+                key={row.k}
+                className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
+              >
+                <span className="text-slate-700 dark:text-slate-200">{row.d}</span>
+                <kbd className="font-mono text-xs px-2 py-1 rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-primary font-bold whitespace-nowrap">
+                  {row.k}
+                </kbd>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-200 dark:border-slate-700">
+            Tips: Numpad mendukung input angka langsung. Pastikan kursor berada di field ID Pelanggan atau Nominal saat menggunakan numpad.
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

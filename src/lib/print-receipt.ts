@@ -79,6 +79,14 @@ export interface ReceiptPrintData {
   totalBayar: number;
   tunai: number;
   kembalian: number;
+  /** Tandai cetak ulang. Akan menambahkan watermark "COPY" di struk. */
+  isCopy?: boolean;
+  /** Nomor urut cetak ulang (1 = cetakan pertama, 2 = cetak ulang ke-2, dst). */
+  copyNumber?: number;
+  /** Username operator yang melakukan cetak ulang. */
+  copyBy?: string;
+  /** Timestamp ISO ketika cetak ulang dilakukan. */
+  copyAt?: string;
 }
 
 function fmtRp(n: number): string {
@@ -184,6 +192,20 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
   function pushC2(left: string, right: string) { lines.push(r2c(left, right)); }
 
   push(HEAVY);
+  if (data.isCopy) {
+    const tag = data.copyNumber && data.copyNumber > 1
+      ? `*** COPY #${data.copyNumber} — BUKAN STRUK ASLI ***`
+      : `*** COPY — BUKAN STRUK ASLI ***`;
+    pushCtr(tag);
+    if (data.copyBy || data.copyAt) {
+      const meta = [
+        data.copyBy ? `Dicetak ulang oleh: ${data.copyBy}` : "",
+        data.copyAt ? fmtTanggal(data.copyAt) : "",
+      ].filter(Boolean).join("  •  ");
+      pushCtr(meta);
+    }
+    push(HEAVY);
+  }
   pushCtr("PEDAMI PAYMENT");
   pushCtr("Layanan Pembayaran Multi-Produk");
   push(HEAVY);
@@ -264,18 +286,17 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
       }
     } else {
       const pemakaian = b.pemakaian ?? ((b.standKini ?? 0) - (b.standLalu ?? 0));
-      if (b.gol) pairs.push(["Golongan", b.gol]);
-      if ((b.standLalu ?? 0) > 0 || (b.standKini ?? 0) > 0)
-        pairs.push(["Stand Meter", `${b.standLalu ?? 0} -> ${b.standKini ?? 0}`]);
-      if (pemakaian > 0) pairs.push(["Pemakaian", `${pemakaian.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m3`]);
-      if ((b.hargaAir ?? 0) > 0) pairs.push(["Harga Air", fmtRp(b.hargaAir!)]);
-      if ((b.bebanTetap ?? 0) > 0) pairs.push(["Beban Tetap", fmtRp(b.bebanTetap!)]);
-      if ((b.biayaMeter ?? 0) > 0) pairs.push(["Biaya Meter", fmtRp(b.biayaMeter!)]);
-      if ((b.limbah ?? 0) > 0) pairs.push(["Limbah", fmtRp(b.limbah!)]);
-      if ((b.retribusi ?? 0) > 0) pairs.push(["Retribusi", fmtRp(b.retribusi!)]);
-      if ((b.denda ?? 0) > 0) pairs.push(["Denda", fmtRp(b.denda!)]);
-      if ((b.materai ?? 0) > 0) pairs.push(["Materai", fmtRp(b.materai!)]);
-      if ((b.diskon ?? 0) > 0) pairs.push(["Diskon", `- ${fmtRp(b.diskon!)}`]);
+      pairs.push(["Golongan", b.gol || "-"]);
+      pairs.push(["Stand Meter", `${b.standLalu ?? 0} -> ${b.standKini ?? 0}`]);
+      pairs.push(["Pemakaian", `${pemakaian.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m3`]);
+      pairs.push(["Harga Air", fmtRp(b.hargaAir ?? 0)]);
+      pairs.push(["Beban Tetap", fmtRp(b.bebanTetap ?? 0)]);
+      pairs.push(["Biaya Meter", fmtRp(b.biayaMeter ?? 0)]);
+      pairs.push(["Limbah", fmtRp(b.limbah ?? 0)]);
+      pairs.push(["Retribusi", fmtRp(b.retribusi ?? 0)]);
+      pairs.push(["Denda", fmtRp(b.denda ?? 0)]);
+      pairs.push(["Materai", fmtRp(b.materai ?? 0)]);
+      pairs.push(["Diskon", `- ${fmtRp(b.diskon ?? 0)}`]);
     }
 
     for (let j = 0; j < pairs.length; j += 2) {
@@ -285,9 +306,10 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
     }
 
     if (isPln && b.tokenPln) {
+      const tokenFmt = b.tokenPln.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1-");
       push(LIGHT);
       pushCtr("TOKEN PLN");
-      pushCtr(b.tokenPln);
+      pushCtr(tokenFmt);
       push(LIGHT);
     }
 
@@ -344,16 +366,29 @@ async function tryPrintBridge(data: ReceiptPrintData): Promise<boolean> {
 /** HTML fallback: opens a <pre>-based print window — faster on dot matrix than CSS layout. */
 function printReceiptViaHtml(data: ReceiptPrintData): void {
   const plainText = formatReceiptPlainText(data);
+  const watermarkCss = data.isCopy ? `
+    body { position: relative; }
+    body::before {
+      content: "COPY";
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 140pt; font-weight: bold; color: rgba(180, 0, 0, 0.18);
+      transform: rotate(-30deg);
+      pointer-events: none; z-index: 9999;
+      letter-spacing: 20pt;
+    }
+  ` : "";
   const html = `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8"/>
-  <title>Struk Pembayaran</title>
+  <title>Struk Pembayaran${data.isCopy ? " (COPY)" : ""}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     @page { size: 241mm auto; margin: 3mm 8mm; }
     body { font-family: 'Courier New', Courier, monospace; font-size: 9.5pt; line-height: 1.2; color: #000; background: #fff; }
-    pre { white-space: pre; word-wrap: normal; overflow: visible; }
+    pre { white-space: pre; word-wrap: normal; overflow: visible; position: relative; z-index: 1; }
+    ${watermarkCss}
     @media print { body { margin: 0; } }
   </style>
 </head>

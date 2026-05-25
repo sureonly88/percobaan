@@ -18,7 +18,6 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Advice Lunasin", href: "/advice-lunasin", icon: "fact_check" },
       { label: "Advice PDAM", href: "/advice-pdam", icon: "water_drop" },
       { label: "Transaksi Tergantung", href: "/pending-transaksi", icon: "pending_actions" },
-      { label: "Monitoring", href: "/monitoring", icon: "monitor_heart" },
       { label: "Notifikasi", href: "/notifikasi", icon: "notifications" },
     ],
   },
@@ -30,6 +29,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Laporan Transaksi", href: "/laporan", icon: "analytics" },
       { label: "Rekonsiliasi Data", href: "/rekonsiliasi", icon: "table_view" },
       { label: "Riwayat", href: "/riwayat", icon: "history" },
+      { label: "Monitoring", href: "/monitoring", icon: "monitor_heart" },
+      { label: "Health Provider", href: "/monitoring/provider-health", icon: "health_metrics" },
     ],
   },
   {
@@ -37,7 +38,21 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Manajemen Pelanggan", href: "/pelanggan", icon: "group" },
       { label: "Manajemen Loket", href: "/loket", icon: "store" },
+      { label: "Anggota Loket", href: "/loket/members", icon: "manage_accounts" },
       { label: "Update Saldo Loket", href: "/saldo", icon: "account_balance_wallet" },
+      { label: "Top-up Saldo", href: "/topup", icon: "add_card" },
+    ],
+  },
+  {
+    category: "Keuangan & Akuntansi",
+    items: [
+      { label: "Ringkasan Keuangan", href: "/keuangan", icon: "account_balance" },
+      { label: "Jurnal Umum", href: "/keuangan/jurnal", icon: "menu_book" },
+      { label: "Buku Besar", href: "/keuangan/buku-besar", icon: "import_contacts" },
+      { label: "Neraca Saldo", href: "/keuangan/neraca-saldo", icon: "balance" },
+      { label: "Margin & Profit", href: "/keuangan/margin", icon: "trending_up" },
+      { label: "Chart of Accounts", href: "/keuangan/akun", icon: "format_list_numbered" },
+      { label: "Settlement Loket", href: "/settlement", icon: "handshake" },
     ],
   },
   {
@@ -45,9 +60,11 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Biaya Admin", href: "/biaya-admin", icon: "payments" },
       { label: "Manajemen User", href: "/users", icon: "admin_panel_settings" },
+      { label: "Pendaftaran Agen", href: "/users/registrations", icon: "how_to_reg" },
       { label: "API Provider", href: "/provider", icon: "api" },
       { label: "Dokumentasi API", href: "/provider/docs", icon: "menu_book" },
       { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
+      { label: "DB Manager", href: "/db-manage", icon: "database" },
     ],
   },
 ];

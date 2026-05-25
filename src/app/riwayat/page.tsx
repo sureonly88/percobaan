@@ -302,6 +302,10 @@ export default function RiwayatPage() {
         totalBayar: data.totalBayar,
         tunai: data.totalBayar,
         kembalian: 0,
+        isCopy: !!data.isCopy,
+        copyNumber: data.copyNumber,
+        copyBy: data.copyBy,
+        copyAt: data.copyAt,
       });
     } catch {
       alert("Gagal mencetak ulang struk");

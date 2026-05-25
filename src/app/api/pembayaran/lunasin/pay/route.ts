@@ -88,14 +88,16 @@ export async function POST(req: NextRequest) {
   // Fetch loket info
   let jenisLoket = "SWITCHING";
   let saldoLoket = 0;
+  let loketNamaDb = "";
   try {
     const [loketRows] = await pool.query<RowDataPacket[]>(
-      "SELECT jenis, pulsa FROM lokets WHERE loket_code = ? LIMIT 1",
+      "SELECT jenis, pulsa, nama FROM lokets WHERE loket_code = ? LIMIT 1",
       [loketCode]
     );
     if (loketRows.length > 0) {
       if (loketRows[0].jenis) jenisLoket = loketRows[0].jenis;
       saldoLoket = Number(loketRows[0].pulsa || 0);
+      loketNamaDb = String(loketRows[0].nama || "");
     }
   } catch {
     // fallback
@@ -215,7 +217,7 @@ export async function POST(req: NextRequest) {
            total_items, total_amount, total_admin, grand_total, paid_amount, change_amount)
          VALUES (?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
         [
-          multiPaymentCode, idempotencyKeyTrimmed, loketCode, loketName || "", username,
+          multiPaymentCode, idempotencyKeyTrimmed, loketCode, (loketName || loketNamaDb || ""), username,
           bills.length,
           bills.reduce((s, b) => s + b.rpAmount, 0),
           bills.reduce((s, b) => s + b.admin, 0),
@@ -384,6 +386,28 @@ export async function POST(req: NextRequest) {
             }
           } catch {
             // non-critical
+          }
+
+          // Posting jurnal GL (best-effort)
+          try {
+            const { postPaymentSuccess } = await import("@/lib/gl/posting-rules");
+            const billAmount = Math.max(0, billTotal - (biayaAdmin || 0));
+            const billAdmin = Math.max(0, billTotal - billAmount);
+            await postPaymentSuccess({
+              idempotencyKey: transactionCode,
+              provider: "LUNASIN",
+              serviceType: bill.kodeProduk ?? null,
+              loketCode,
+              amount: billAmount,
+              adminFee: billAdmin,
+              total: billTotal,
+              customerName: bill.nama ?? null,
+              customerId: bill.idpel,
+              productCode: bill.kodeProduk ?? null,
+              username,
+            });
+          } catch {
+            // ignore
           }
 
           await logTransactionEventSafe({

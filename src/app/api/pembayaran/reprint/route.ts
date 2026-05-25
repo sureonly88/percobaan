@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
+import { auditLog } from "@/lib/audit-log";
 
 // GET: Fetch receipt data for reprinting a transaction
 export async function GET(request: NextRequest) {
@@ -41,12 +42,14 @@ export async function GET(request: NextRequest) {
         i.amount, i.admin_fee as adminFee, i.total,
         i.metadata_json as metadataJson,
         i.provider_response as providerResponse,
-        r.loket_name as loketName, r.loket_code as loketCode,
+        COALESCE(NULLIF(r.loket_name, ''), l.nama, '-')       as loketName,
+        COALESCE(NULLIF(r.loket_code, ''), l.loket_code, '-') as loketCode,
         r.username,
         COALESCE(i.paid_at, i.created_at) as tanggal,
         i.paid_at as paidAt
       FROM multi_payment_items i
       JOIN multi_payment_requests r ON r.id = i.multi_payment_id
+      LEFT JOIN lokets l ON l.loket_code = r.loket_code
       ${where}
       ORDER BY COALESCE(i.paid_at, i.created_at) DESC
       LIMIT 50`,
@@ -60,10 +63,64 @@ export async function GET(request: NextRequest) {
     const first = rows[0];
     const isPdam = first.provider === "PDAM";
 
+    // ── Audit & hitung copy number ──
+    // entityId distandarkan ke transaction_code grup (transactionCode atau pakai dari row pertama).
+    const entityIdForAudit = String(transactionCode || first.transactionCode || idPelanggan || "-");
+    const sessionUser = session.user as { name?: string; username?: string; role?: string } | undefined;
+    const actorUsername =
+      sessionUser?.username || sessionUser?.name || "unknown";
+    const actorRole = sessionUser?.role || null;
+    const actorIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      null;
+    const reason = searchParams.get("reason") || null;
+
+    // Hitung jumlah reprint sebelumnya untuk entity ini → copyNumber = previous + 2
+    // (cetakan pertama = 1, jadi reprint pertama = 2).
+    let previousReprintCount = 0;
+    try {
+      const [auditRows] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS n FROM audit_logs
+         WHERE action = 'REPRINT_RECEIPT' AND entity_id = ?`,
+        [entityIdForAudit]
+      );
+      previousReprintCount = Number(auditRows[0]?.n ?? 0);
+    } catch {
+      previousReprintCount = 0;
+    }
+    const copyNumber = previousReprintCount + 2; // first print = 1
+    const copyAt = new Date().toISOString();
+
+    // Tulis audit (non-blocking, tidak menggagalkan request bila DB error).
+    void auditLog({
+      action: "REPRINT_RECEIPT",
+      entityType: isPdam ? "multi_payment_item_pdam" : "multi_payment_item_lunasin",
+      entityId: entityIdForAudit,
+      actorUsername,
+      actorRole,
+      actorIp,
+      context: {
+        transactionCode: transactionCode || null,
+        idPelanggan: idPelanggan || null,
+        loketCode: first.loketCode || null,
+        provider: first.provider || null,
+        itemCount: rows.length,
+        copyNumber,
+        reason,
+      },
+      after: {
+        copyNumber,
+        copyAt,
+      },
+    });
+
+    const copyMeta = { isCopy: true, copyNumber, copyBy: actorUsername, copyAt };
+
     if (isPdam) {
-      return reprintPdam(rows);
+      return reprintPdam(rows, copyMeta);
     } else {
-      return reprintLunasin(rows);
+      return reprintLunasin(rows, copyMeta);
     }
   } catch (error) {
     console.error("Reprint Error:", error);
@@ -80,7 +137,14 @@ function parseJson(val: unknown): Record<string, unknown> {
   }
 }
 
-function reprintPdam(rows: RowDataPacket[]): NextResponse {
+interface CopyMeta {
+  isCopy: boolean;
+  copyNumber: number;
+  copyBy: string;
+  copyAt: string;
+}
+
+function reprintPdam(rows: RowDataPacket[], copyMeta: CopyMeta): NextResponse {
   const first = rows[0];
 
   const bills = rows.map((r) => {
@@ -121,10 +185,11 @@ function reprintPdam(rows: RowDataPacket[]): NextResponse {
     totalTagihan,
     totalAdmin,
     totalBayar,
+    ...copyMeta,
   });
 }
 
-function reprintLunasin(rows: RowDataPacket[]): NextResponse {
+function reprintLunasin(rows: RowDataPacket[], copyMeta: CopyMeta): NextResponse {
   const first = rows[0];
 
   const bills = rows.map((r) => {
@@ -177,5 +242,6 @@ function reprintLunasin(rows: RowDataPacket[]): NextResponse {
     totalAdmin: 0,
     totalBayar: totalTagihan,
     isLunasin: true,
+    ...copyMeta,
   });
 }

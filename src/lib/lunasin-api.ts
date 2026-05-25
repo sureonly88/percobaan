@@ -3,6 +3,9 @@
 // Docs: https://doc.lunasin.co.id
 
 import { checkCircuit, recordSuccess, recordFailure, configureCircuitBreaker } from "@/lib/circuit-breaker";
+import { mockLunasinInquiry, mockLunasinPayment, mockLunasinAdvice } from "@/lib/lunasin-mock";
+
+const LUNASIN_MOCK = process.env.LUNASIN_MOCK === "true";
 
 const LUNASIN_PROVIDER = "LUNASIN";
 configureCircuitBreaker(LUNASIN_PROVIDER, { failureThreshold: 5, resetTimeoutMs: 30_000, halfOpenMaxAttempts: 2 });
@@ -202,6 +205,8 @@ export async function lunasinInquiry(opts: {
 }): Promise<LunasinInquiryResult> {
   const idTrx = generateLunasinTrxId();
 
+  if (LUNASIN_MOCK) return mockLunasinInquiry({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx });
+
   const payload: LunasinRequest = {
     tipe_pesan: "inquiry",
     kode_loket: LUNASIN_LOKET,
@@ -255,6 +260,8 @@ export async function lunasinPayment(opts: {
   input2?: string;
   input3?: string;
 }): Promise<LunasinPaymentResult> {
+  if (LUNASIN_MOCK) return mockLunasinPayment({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx: opts.idTrx });
+
   const payload: LunasinRequest = {
     tipe_pesan: "payment",
     kode_loket: LUNASIN_LOKET,
@@ -310,6 +317,8 @@ export async function lunasinAdvice(opts: {
   input2?: string;
   input3?: string;
 }): Promise<LunasinAdviceResult> {
+  if (LUNASIN_MOCK) return mockLunasinAdvice({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx: opts.idTrx });
+
   const payload: LunasinRequest = {
     tipe_pesan: "advice",
     kode_loket: LUNASIN_LOKET,

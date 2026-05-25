@@ -4,6 +4,7 @@ import { RowDataPacket } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { getAuthToken } from "@/lib/api-auth";
+import { auditLog } from "@/lib/audit-log";
 
 function categorizeError(errorCode: string | null, lastEventType: string | null): string {
   if (errorCode === "MANUALLY_RESOLVED" || lastEventType === "PAYMENT_MANUALLY_RESOLVED") {
@@ -496,6 +497,24 @@ export async function PATCH(req: NextRequest) {
         originalUsername: row.username,
         previousStatus: row.status,
         action,
+      },
+    });
+
+    await auditLog({
+      actorType: "user",
+      actorUsername: actorName || null,
+      actorRole: role ? String(role) : null,
+      actorIp: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || null,
+      action: "PAYMENT_FORCE_RESOLVE",
+      entityType: "payment_request",
+      entityId: String(id),
+      before: { status: "PENDING" },
+      after: { status: "FAILED", errorCode: "MANUALLY_RESOLVED" },
+      context: {
+        idempotencyKey: row.idempotency_key,
+        loketCode: row.loket_code,
+        provider: row.provider,
+        originalUsername: row.username,
       },
     });
 

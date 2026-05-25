@@ -49,9 +49,13 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
     "/db-manage",
+    "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun",
+    "/settlement",
   ],
   supervisor: [
     "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin", "/advice-pdam", "/pending-transaksi",
+    "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin",
+    "/settlement",
   ],
   kasir: [
     "/", "/pembayaran", "/laporan", "/tutup-kasir", "/pelanggan", "/pengaturan", "/notifikasi", "/topup", "/loket/members",
@@ -144,6 +148,28 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
   "/api/pembayaran/stale-pending": {
     GET: ["admin", "supervisor"],
     PATCH: ["admin", "supervisor"],
+  },
+  "/api/keuangan/jurnal": {
+    GET: ["admin", "supervisor"],
+  },
+  "/api/keuangan/buku-besar": {
+    GET: ["admin", "supervisor"],
+  },
+  "/api/keuangan/neraca-saldo": {
+    GET: ["admin", "supervisor"],
+  },
+  "/api/keuangan/margin": {
+    GET: ["admin", "supervisor"],
+  },
+  "/api/keuangan/akun": {
+    GET: ["admin", "supervisor"],
+    POST: ["admin"],
+    PATCH: ["admin"],
+  },
+  "/api/settlement/batches": {
+    GET: ["admin", "supervisor"],
+    POST: ["admin"],
+    PATCH: ["admin"],
   },
 };
 

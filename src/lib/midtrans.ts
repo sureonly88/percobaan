@@ -10,7 +10,7 @@
  *   MIDTRANS_IS_PRODUCTION  (default: false → sandbox)
  */
 
-import { createHash } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 
 function getConfig() {
   const serverKey = process.env.MIDTRANS_SERVER_KEY || "";
@@ -113,7 +113,15 @@ export function verifySignature(
   const { serverKey } = getConfig();
   const payload = orderId + statusCode + grossAmount + serverKey;
   const expected = createHash("sha512").update(payload).digest("hex");
-  return expected === signatureKey;
+  // Constant-time compare — guards against signature timing leaks.
+  try {
+    const a = Buffer.from(expected, "hex");
+    const b = Buffer.from(signatureKey, "hex");
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 // ── Transaction Status Check ────────────────────────────────────────────────

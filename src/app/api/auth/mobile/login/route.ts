@@ -31,7 +31,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "username dan password wajib diisi" }, { status: 400 });
   }
 
-  // Rate limit: maksimal 5 percobaan per 15 menit per username
+  // Rate limit: maksimal 5 percobaan per 15 menit per username + per IP.
+  // Per-IP guard mencegah username enumeration & credential stuffing.
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown";
+  const ipLimit = checkRateLimit(`mobile-login-ip:${ip}`, { max: 20 });
+  if (!ipLimit.allowed) {
+    return NextResponse.json(
+      { error: "Terlalu banyak percobaan login dari IP ini. Coba lagi nanti." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(Math.ceil(ipLimit.retryAfterMs / 1000)) },
+      }
+    );
+  }
+
   const rateLimitKey = `mobile-login:${username}`;
   const limit = checkRateLimit(rateLimitKey);
   if (!limit.allowed) {
@@ -57,8 +73,11 @@ export async function POST(req: NextRequest) {
 
     const user = rows[0];
 
-    // Pakai dummy compare saat user tidak ada agar waktu respons seragam
-    const hash = user?.password || "$2b$12$invalidhashpaddingtomakeitconstanttime";
+    // Constant-time guard: bila user tidak ditemukan, tetap lakukan bcrypt.compare
+    // memakai hash dummy yang VALID agar waktu respons setara dengan kasus user ada.
+    // (String non-bcrypt akan langsung di-reject tanpa kerja → membocorkan timing.)
+    const DUMMY_HASH = "$2b$10$CwTycUXWue0Thq9StjUM0uJ8WzS6Eo9Y2.0G4nXmYqIE5wYkRZqYG"; // bcrypt("dummy", 10)
+    const hash = user?.password || DUMMY_HASH;
     const isValid = await bcrypt.compare(password, hash);
 
     if (!user || !isValid) {

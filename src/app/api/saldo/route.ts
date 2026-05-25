@@ -169,6 +169,20 @@ export async function POST(request: NextRequest) {
       [nominal, loketCode]
     );
 
+    // Posting jurnal GL (best-effort)
+    try {
+      const { postSaldoMutation } = await import("@/lib/gl/posting-rules");
+      await postSaldoMutation({
+        requestCode,
+        loketCode,
+        nominal,
+        description: keterangan.trim(),
+        username,
+      });
+    } catch {
+      // ignore — saldo sudah ter-update, jurnal opsional
+    }
+
     return NextResponse.json({
       success: true,
       message: `Saldo loket ${loket.nama} berhasil ${nominal > 0 ? "ditambahkan" : "dikurangi"} sebesar Rp ${Math.abs(nominal).toLocaleString("id-ID")}`,

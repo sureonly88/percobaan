@@ -3,6 +3,7 @@ import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
+import { auditLog } from "@/lib/audit-log";
 
 interface StaleItemRow extends RowDataPacket {
   id: number;
@@ -204,6 +205,21 @@ export async function PATCH(req: NextRequest) {
           ? `Admin mempromosikan ${result.affectedRows} item PENDING → PENDING_ADVICE (transaksi terhenti)`
           : `Admin membatalkan ${result.affectedRows} item PENDING → FAILED (transaksi terhenti)`,
       payload: { transactionCode, action, affectedRows: result.affectedRows },
+    });
+
+    await auditLog({
+      actorType: "user",
+      actorUsername: username || null,
+      actorRole: token.role ? String(token.role) : null,
+      actorIp: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || null,
+      action: action === "promote" ? "STALE_PENDING_PROMOTE" : "STALE_PENDING_CANCEL",
+      entityType: "multi_payment_item",
+      entityId: transactionCode,
+      before: { status: "PENDING" },
+      after: action === "promote"
+        ? { status: "PENDING_ADVICE", errorCode: "STALE_PENDING_PROMOTED" }
+        : { status: "FAILED", errorCode: "STALE_PENDING_CANCELLED" },
+      context: { idempotencyKey, loketCode, provider, affectedRows: result.affectedRows },
     });
 
     return NextResponse.json({

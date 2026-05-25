@@ -133,6 +133,11 @@ function pvLunasin(item: PlnTransaksiData, ...keys: string[]): string | null {
   return null;
 }
 
+/** Format 20-digit PLN token → XXXX-XXXX-XXXX-XXXX-XXXX */
+function fmtToken(raw: string): string {
+  return raw.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1-");
+}
+
 const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text" }> = [
   { key: ["tarif"], label: "Tarif" },
   { key: ["daya"], label: "Daya (VA)" },
@@ -1910,7 +1915,7 @@ export default function PelangganPage() {
                         <span className="material-symbols-outlined text-amber-500 text-2xl">key</span>
                         <div>
                           <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">Token PLN</p>
-                          <p className="font-mono font-bold text-lg text-amber-700 dark:text-amber-300 tracking-[0.2em]">{tokenVal}</p>
+                          <p className="font-mono font-bold text-lg text-amber-700 dark:text-amber-300 tracking-[0.2em]">{fmtToken(tokenVal)}</p>
                         </div>
                       </div>
                     </div>

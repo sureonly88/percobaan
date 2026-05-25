@@ -1,9 +1,13 @@
 {
   "servers": {
-    "memory": {
+    "agentmemory": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
-      "type": "stdio"
+      "args": ["-y", "@agentmemory/mcp"],
+      "env": {
+        "AGENTMEMORY_URL": "http://localhost:3111"
+      },
+      "type": "stdio",
+      "workDir": "/Users/yakinyakin"
     }
   }
 }

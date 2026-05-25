@@ -104,6 +104,7 @@ export async function POST(req: NextRequest) {
   let jenisLoket = "SWITCHING";
   let saldoLoket = 0;
   let biayaAdminLoket = biayaAdmin || 0;
+  let loketNamaDb = "";
   try {
     const loketInfo = await cached(
       `loket:${loketCode}`,
@@ -120,12 +121,13 @@ export async function POST(req: NextRequest) {
 
     // Saldo and biaya_admin must always be fresh
     const [balRows] = await pool.query<RowDataPacket[]>(
-      "SELECT pulsa, biaya_admin, max_pdam_tagihan FROM lokets WHERE loket_code = ? LIMIT 1",
+      "SELECT pulsa, biaya_admin, max_pdam_tagihan, nama FROM lokets WHERE loket_code = ? LIMIT 1",
       [loketCode]
     );
     if (balRows.length > 0) {
       saldoLoket = Number(balRows[0].pulsa || 0);
       biayaAdminLoket = Number(balRows[0].biaya_admin || 0);
+      loketNamaDb = String(balRows[0].nama || "");
       // Enforce per-loket PDAM tagihan limit
       const maxPdamTagihan = balRows[0].max_pdam_tagihan != null ? Number(balRows[0].max_pdam_tagihan) : null;
       if (maxPdamTagihan !== null && bills.length > maxPdamTagihan) {
@@ -292,7 +294,9 @@ export async function POST(req: NextRequest) {
            total_items, total_amount, total_admin, grand_total, paid_amount, change_amount)
          VALUES (?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
         [
-          multiPaymentCode, idempotencyKeyTrimmed, loketCode, loketName || "", username,
+          multiPaymentCode, idempotencyKeyTrimmed, loketCode,
+          (loketName || loketNamaDb || ""),
+          username,
           bills.length,
           bills.reduce((s, b) => s + b.subTotal, 0),
           bills.length * biayaAdminLoket,
@@ -609,6 +613,8 @@ export async function POST(req: NextRequest) {
 
           // Deduct saldo loket
           const groupTotal = pelBills.reduce((sum, b) => sum + b.subTotal + biayaAdminLoket, 0);
+          const groupAmount = pelBills.reduce((sum, b) => sum + b.subTotal, 0);
+          const groupAdmin = pelBills.reduce((sum, _b) => sum + biayaAdminLoket, 0);
           try {
             await pool.execute(
               "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?",
@@ -632,6 +638,25 @@ export async function POST(req: NextRequest) {
             }
           } catch {
             // Non-critical: saldo deduction failed but payment succeeded
+          }
+
+          // Posting jurnal GL (best-effort, tidak meng-affect status pembayaran)
+          try {
+            const { postPaymentSuccess } = await import("@/lib/gl/posting-rules");
+            await postPaymentSuccess({
+              idempotencyKey: transactionCode,
+              provider: "PDAM",
+              serviceType: "PDAM_TAGIHAN",
+              loketCode,
+              amount: groupAmount,
+              adminFee: groupAdmin,
+              total: groupTotal,
+              customerName: pelBills[0]?.nama ?? null,
+              customerId: idpel,
+              username,
+            });
+          } catch {
+            // GL posting kegagalan tidak boleh menghentikan flow pembayaran
           }
         } catch (dbFinalizeError: unknown) {
           const syncMessage =
