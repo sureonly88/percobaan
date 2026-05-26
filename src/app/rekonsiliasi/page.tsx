@@ -420,6 +420,8 @@ export default function RekonsiliasiPage() {
                   <th className="px-6 py-4 font-semibold">Periode</th>
                   <th className="px-6 py-4 font-semibold">Loket</th>
                   <th className="px-6 py-4 font-semibold">Kasir</th>
+                  <th className="px-6 py-4 font-semibold text-right">Sub Total</th>
+                  <th className="px-6 py-4 font-semibold text-right">Biaya Admin</th>
                   <th className="px-6 py-4 font-semibold text-right">Total</th>
                 </tr>
               ) : (
@@ -438,13 +440,13 @@ export default function RekonsiliasiPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={activeTab === "pdam" ? 10 : 8} className="px-6 py-12 text-center text-slate-400">
                     Memuat data rekonsiliasi...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={activeTab === "pdam" ? 10 : 8} className="px-6 py-12 text-center text-slate-400">
                     Tidak ada transaksi sukses yang sesuai dengan filter.
                   </td>
                 </tr>
@@ -464,6 +466,8 @@ export default function RekonsiliasiPage() {
                       <div>{row.username}</div>
                       <div className="text-[11px] text-slate-400">{row.jenisLoket}</div>
                     </td>
+                    <td className="px-6 py-4 text-right">{formatRupiah(row.amount)}</td>
+                    <td className="px-6 py-4 text-right">{formatRupiah(row.adminFee)}</td>
                     <td className="px-6 py-4 text-right font-bold">{formatRupiah(row.total)}</td>
                   </tr>
                 ))

@@ -410,6 +410,16 @@ export async function POST(req: NextRequest) {
             // ignore
           }
 
+          // Catat komisi/profit-share per item (best-effort, idempoten)
+          try {
+            const { recordCommissionsForTransactionCode } = await import(
+              "@/lib/commission/record"
+            );
+            await recordCommissionsForTransactionCode(transactionCode);
+          } catch {
+            // non-critical
+          }
+
           await logTransactionEventSafe({
             idempotencyKey: idempotencyKeyTrimmed,
             transactionCode,

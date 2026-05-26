@@ -658,6 +658,16 @@ export async function POST(req: NextRequest) {
           } catch {
             // GL posting kegagalan tidak boleh menghentikan flow pembayaran
           }
+
+          // Catat komisi/profit-share per item (best-effort, idempoten)
+          try {
+            const { recordCommissionsForTransactionCode } = await import(
+              "@/lib/commission/record"
+            );
+            await recordCommissionsForTransactionCode(transactionCode);
+          } catch {
+            // non-critical
+          }
         } catch (dbFinalizeError: unknown) {
           const syncMessage =
             dbFinalizeError instanceof Error

@@ -166,8 +166,12 @@ export default function MonitoringPage() {
   const [search, setSearch] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>("ALL");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const todayStrMon = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const [startDate, setStartDate] = useState(todayStrMon);
+  const [endDate, setEndDate] = useState(todayStrMon);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [resolving, setResolving] = useState<number | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);

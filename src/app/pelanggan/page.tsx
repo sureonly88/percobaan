@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { canWrite, normalizeRole } from "@/lib/rbac";
 
@@ -783,7 +784,17 @@ export default function PelangganPage() {
                         </div>
                         <div className="min-w-0">
                           <p className="font-bold text-sm truncate max-w-[160px]">{t.nama}</p>
-                          <p className="text-[10px] text-slate-400">{t.custId}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-[10px] text-slate-400">{t.custId}</p>
+                            <Link
+                              href={`/pelanggan/${encodeURIComponent(t.custId)}`}
+                              className="text-[10px] text-primary hover:underline"
+                              title="Lihat riwayat pelanggan"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Riwayat
+                            </Link>
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -1517,7 +1528,17 @@ export default function PelangganPage() {
                           </div>
                           <div className="min-w-0">
                             <p className="font-bold text-sm truncate max-w-[160px]">{t.nama}</p>
-                            <p className="text-[10px] text-slate-400">{t.custId}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-[10px] text-slate-400">{t.custId}</p>
+                              <Link
+                                href={`/pelanggan/${encodeURIComponent(t.custId)}`}
+                                className="text-[10px] text-primary hover:underline"
+                                title="Lihat riwayat pelanggan"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Riwayat
+                              </Link>
+                            </div>
                           </div>
                         </div>
                       </td>

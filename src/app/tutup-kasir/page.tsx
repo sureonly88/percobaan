@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { Breadcrumb, Modal } from "@/ui";
 import { normalizeRole } from "@/lib/rbac";
 import { printCashierClosingReport } from "@/lib/print-cashier-closing";
+import { printDailyDepositReport, DailyDepositPayload } from "@/lib/print-daily-deposit";
 
 type ClosingStatus = "DRAFT" | "SUBMITTED" | "VERIFIED" | "REJECTED";
 type ShiftCode = "REGULER" | "PAGI" | "SIANG" | "MALAM";
@@ -562,6 +563,37 @@ export default function TutupKasirPage() {
             className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-200"
           >
             Cetak BA
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const date = appliedBusinessDate || businessDate;
+              const loket = appliedLoketCode;
+              if (!date) {
+                alert("Tanggal closing wajib diisi.");
+                return;
+              }
+              if (!loket) {
+                alert("Pilih kasir/loket terlebih dahulu untuk menentukan loket setoran.");
+                return;
+              }
+              try {
+                const res = await fetch(`/api/laporan/setoran-harian?date=${encodeURIComponent(date)}&loketCode=${encodeURIComponent(loket)}`);
+                const json = await res.json();
+                if (!res.ok) {
+                  alert(json?.error || "Gagal memuat setoran harian");
+                  return;
+                }
+                printDailyDepositReport(json as DailyDepositPayload);
+              } catch (err) {
+                alert(err instanceof Error ? err.message : "Gagal memuat setoran harian");
+              }
+            }}
+            disabled={!appliedLoketCode}
+            className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+            title="Cetak rekap setoran harian seluruh kasir untuk loket terpilih"
+          >
+            Print Setoran Harian
           </button>
         </div>
       </header>

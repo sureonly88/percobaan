@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Breadcrumb } from "@/ui";
 import { formatRupiah } from "@/data/mock";
+import { printReceipt, ReceiptPrintData } from "@/lib/print-receipt";
 
 type DetailData = {
   transaction: {
@@ -144,6 +145,8 @@ export default function MonitoringDetailPage({ params }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
+  const [reprinting, setReprinting] = useState<string | null>(null);
+  const [reprintError, setReprintError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -172,6 +175,26 @@ export default function MonitoringDetailPage({ params }: Props) {
       cancelled = true;
     };
   }, [idempotencyKey]);
+
+  async function handleReprint(transactionCode: string) {
+    setReprintError("");
+    setReprinting(transactionCode);
+    try {
+      const res = await fetch(
+        `/api/pembayaran/reprint?transactionCode=${encodeURIComponent(transactionCode)}&reason=monitoring`
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Gagal mengambil data struk");
+      }
+      printReceipt(json as ReceiptPrintData);
+    } catch (err) {
+      setReprintError(err instanceof Error ? err.message : "Gagal mencetak struk");
+      window.setTimeout(() => setReprintError(""), 4000);
+    } finally {
+      setReprinting(null);
+    }
+  }
 
   async function copyJson(label: string, payload: unknown) {
     try {
@@ -300,12 +323,30 @@ export default function MonitoringDetailPage({ params }: Props) {
                 <div>
                   <p className="text-slate-400 mb-2">Transaction Codes</p>
                   <div className="flex flex-wrap gap-2">
-                    {data.transaction.transactionCodes.length > 0 ? data.transaction.transactionCodes.map((code) => (
-                      <span key={code} className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-xs font-mono break-all">
-                        {code}
-                      </span>
-                    )) : <span className="text-sm text-slate-500">-</span>}
+                    {data.transaction.transactionCodes.length > 0 ? data.transaction.transactionCodes.map((code) => {
+                      const canReprint = data.transaction.status === "SUCCESS" || data.transaction.status === "PARTIAL_SUCCESS";
+                      return (
+                        <span key={code} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-xs font-mono break-all">
+                          {code}
+                          {canReprint && (
+                            <button
+                              type="button"
+                              onClick={() => void handleReprint(code)}
+                              disabled={reprinting === code}
+                              title="Cetak ulang struk"
+                              className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-bold disabled:opacity-50"
+                            >
+                              <span className="material-symbols-outlined text-[12px] leading-none">print</span>
+                              {reprinting === code ? "..." : "Cetak"}
+                            </button>
+                          )}
+                        </span>
+                      );
+                    }) : <span className="text-sm text-slate-500">-</span>}
                   </div>
+                  {reprintError && (
+                    <p className="text-xs text-red-600 mt-2">{reprintError}</p>
+                  )}
                 </div>
               </div>
             </div>

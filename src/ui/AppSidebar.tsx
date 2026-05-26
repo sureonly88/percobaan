@@ -27,9 +27,10 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Tutup Kasir", href: "/tutup-kasir", icon: "point_of_sale" },
       { label: "Verifikasi Kasir", href: "/verifikasi-kasir", icon: "verified" },
       { label: "Laporan Transaksi", href: "/laporan", icon: "analytics" },
-      { label: "Rekonsiliasi Data", href: "/rekonsiliasi", icon: "table_view" },
       { label: "Riwayat", href: "/riwayat", icon: "history" },
+      { label: "Cetak Ulang Struk", href: "/cetak-ulang", icon: "print" },
       { label: "Monitoring", href: "/monitoring", icon: "monitor_heart" },
+      { label: "Rekonsiliasi Data", href: "/rekonsiliasi", icon: "table_view" },
       { label: "Health Provider", href: "/monitoring/provider-health", icon: "health_metrics" },
     ],
   },
@@ -44,15 +45,22 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    category: "Keuangan & Akuntansi",
+    category: "Keuangan",
     items: [
       { label: "Ringkasan Keuangan", href: "/keuangan", icon: "account_balance" },
+      { label: "Margin & Profit", href: "/keuangan/margin", icon: "trending_up" },
+      { label: "Pengaturan Komisi", href: "/keuangan/komisi", icon: "redeem" },
+      { label: "Laporan Komisi", href: "/keuangan/komisi/laporan", icon: "payments" },
+      { label: "Settlement Loket", href: "/settlement", icon: "handshake" },
+    ],
+  },
+  {
+    category: "Akuntansi",
+    items: [
       { label: "Jurnal Umum", href: "/keuangan/jurnal", icon: "menu_book" },
       { label: "Buku Besar", href: "/keuangan/buku-besar", icon: "import_contacts" },
       { label: "Neraca Saldo", href: "/keuangan/neraca-saldo", icon: "balance" },
-      { label: "Margin & Profit", href: "/keuangan/margin", icon: "trending_up" },
       { label: "Chart of Accounts", href: "/keuangan/akun", icon: "format_list_numbered" },
-      { label: "Settlement Loket", href: "/settlement", icon: "handshake" },
     ],
   },
   {

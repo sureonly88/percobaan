@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { auditLog } from "@/lib/audit-log";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import bcrypt from "bcryptjs";
+
+const MIN_PASSWORD_LENGTH = 8;
 
 // GET: Get user profile with loket info
 export async function GET(request: NextRequest) {
@@ -113,11 +116,38 @@ export async function PUT(request: NextRequest) {
 
       const isValid = await bcrypt.compare(currentPassword, user.password);
       if (!isValid) {
+        await auditLog({
+          actorType: "user",
+          actorUsername: (session.user as { username?: string }).username ?? null,
+          actorRole: sessionRole ?? null,
+          actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+          action: "PASSWORD_CHANGE_FAILED",
+          entityType: "users",
+          entityId: user.id,
+          context: { reason: "wrong_current_password" },
+        });
         return NextResponse.json({ error: "Password lama tidak sesuai" }, { status: 403 });
       }
 
-      if (newPassword.length < 6) {
-        return NextResponse.json({ error: "Password baru minimal 6 karakter" }, { status: 400 });
+      if (typeof newPassword !== "string" || newPassword.length < MIN_PASSWORD_LENGTH) {
+        return NextResponse.json(
+          { error: `Password baru minimal ${MIN_PASSWORD_LENGTH} karakter` },
+          { status: 400 }
+        );
+      }
+
+      if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+        return NextResponse.json(
+          { error: "Password baru harus mengandung huruf dan angka" },
+          { status: 400 }
+        );
+      }
+
+      if (newPassword === currentPassword) {
+        return NextResponse.json(
+          { error: "Password baru harus berbeda dari password lama" },
+          { status: 400 }
+        );
       }
 
       const hashed = await bcrypt.hash(newPassword, 10);
@@ -134,6 +164,18 @@ export async function PUT(request: NextRequest) {
       `UPDATE users SET ${fields.join(", ")} WHERE id = ?`,
       values
     );
+
+    if (newPassword) {
+      await auditLog({
+        actorType: "user",
+        actorUsername: (session.user as { username?: string }).username ?? null,
+        actorRole: sessionRole ?? null,
+        actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+        action: "PASSWORD_CHANGED",
+        entityType: "users",
+        entityId: user.id,
+      });
+    }
 
     return NextResponse.json({ message: "Profil berhasil diperbarui" });
   } catch (error) {

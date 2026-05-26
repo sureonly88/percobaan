@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useSession } from "next-auth/react";
+import { normalizeRole } from "@/lib/rbac";
 import { printReceipt, ReceiptPrintData, ReceiptBillItem } from "@/lib/print-receipt";
 
 interface SummaryData {
@@ -303,6 +305,10 @@ function exportDetailCSV(details: DetailItem[], loketName: string) {
 }
 
 export default function LaporanPage() {
+  const { data: session } = useSession();
+  const sessionRole = normalizeRole((session?.user as { role?: string })?.role || "");
+  const sessionLoketName = (session?.user as { loketName?: string })?.loketName || "";
+  const canSeeAll = sessionRole === "admin" || sessionRole === "supervisor";
   const KATEGORI_CONFIG: Record<string, { icon: string; color: string; bgColor: string; badgeBg: string }> = {
     PLN: { icon: "bolt", color: "text-amber-600", bgColor: "bg-amber-50 dark:bg-amber-900/20", badgeBg: "bg-amber-50 dark:bg-amber-900/20 text-amber-600" },
     BPJS: { icon: "health_and_safety", color: "text-green-600", bgColor: "bg-green-50 dark:bg-green-900/20", badgeBg: "bg-green-50 dark:bg-green-900/20 text-green-600" },
@@ -313,9 +319,18 @@ export default function LaporanPage() {
     Lainnya: { icon: "more_horiz", color: "text-slate-600", bgColor: "bg-slate-50 dark:bg-slate-800", badgeBg: "bg-slate-100 dark:bg-slate-800 text-slate-600" },
   };
   const [activePage, setActivePage] = useState(1);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState(todayStr);
   const [loket, setLoket] = useState("Semua Loket");
+
+  // Untuk kasir, kunci loket ke loket sendiri saat session tersedia
+  useEffect(() => {
+    if (!canSeeAll && sessionLoketName) {
+      setLoket(sessionLoketName);
+    }
+  }, [canSeeAll, sessionLoketName]);
   const [jenisFilter, setJenisFilter] = useState("semua");
   const [data, setData] = useState<LaporanData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -780,6 +795,13 @@ export default function LaporanPage() {
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
                     Pilih Loket
                   </label>
+                  {!canSeeAll ? (
+                    <div className="h-11 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-950 px-3 flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                      <span className="material-symbols-outlined text-base text-slate-400">store</span>
+                      <span className="truncate">{sessionLoketName || "Loket Anda"}</span>
+                      <span className="ml-auto text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">Terkunci</span>
+                    </div>
+                  ) : (
                   <div className="relative" ref={loketDropdownRef}>
                     <button
                       type="button"
@@ -839,6 +861,7 @@ export default function LaporanPage() {
                       </div>
                     )}
                   </div>
+                  )}
               </div>
 
               <div>

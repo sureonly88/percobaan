@@ -46,19 +46,34 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string }> = {
 // Pages each role can access
 const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
-    "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat",
+    "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/cetak-ulang",
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
     "/db-manage",
-    "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun",
+    "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun", "/keuangan/komisi", "/keuangan/komisi/laporan",
     "/settlement",
   ],
   supervisor: [
-    "/", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/pelanggan", "/loket", "/pengaturan", "/monitoring", "/notifikasi", "/advice-lunasin", "/advice-pdam", "/pending-transaksi",
-    "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin",
+    // Operasional
+    "/", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/notifikasi",
+    // Kasir & Laporan
+    "/tutup-kasir", "/verifikasi-kasir", "/laporan", "/rekonsiliasi", "/riwayat", "/cetak-ulang", "/monitoring",
+    // Pelanggan & Loket
+    "/pelanggan", "/loket", "/loket/members", "/saldo", "/topup",
+    // Keuangan
+    "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/komisi", "/keuangan/komisi/laporan",
     "/settlement",
+    // Administrasi (view-level)
+    "/biaya-admin", "/users/registrations", "/pengaturan",
   ],
   kasir: [
-    "/", "/pembayaran", "/laporan", "/tutup-kasir", "/pelanggan", "/pengaturan", "/notifikasi", "/topup", "/loket/members",
+    // Operasional
+    "/", "/pembayaran", "/notifikasi",
+    // Kasir & Laporan
+    "/tutup-kasir", "/laporan", "/riwayat", "/cetak-ulang",
+    // Pelanggan & Loket
+    "/pelanggan", "/loket/members", "/topup",
+    // Akun pribadi
+    "/pengaturan",
   ],
   switcher: [
     "/provider/docs",
@@ -165,6 +180,18 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor"],
     POST: ["admin"],
     PATCH: ["admin"],
+  },
+  "/api/keuangan/komisi/rules": {
+    GET: ["admin", "supervisor"],
+    POST: ["admin"],
+    PATCH: ["admin"],
+    DELETE: ["admin"],
+  },
+  "/api/keuangan/komisi/laporan": {
+    GET: ["admin", "supervisor"],
+  },
+  "/api/keuangan/komisi/backfill": {
+    POST: ["admin"],
   },
   "/api/settlement/batches": {
     GET: ["admin", "supervisor"],

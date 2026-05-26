@@ -745,23 +745,21 @@ function buildLunasinExportRows(rows: BaseTransactionRow[]): Array<NormalizedExp
 function buildPdamWorkbook(rows: BaseTransactionRow[]) {
   const exportRows = buildPdamExportRows(rows);
   const commonColumns: WorkbookColumn<NormalizedExportRow>[] = [
-    { label: "Tanggal Bayar", getValue: (row) => row.common.transactionDate },
     { label: "Kode Transaksi", getValue: (row) => row.common.transactionCode },
-    { label: "Kode Loket", getValue: (row) => row.common.loketCode },
-    { label: "Nama Loket", getValue: (row) => row.common.loketName },
-    { label: "Username", getValue: (row) => row.common.username },
     { label: "ID Pelanggan", getValue: (row) => row.common.customerId },
     { label: "Nama Pelanggan", getValue: (row) => row.common.customerName },
     { label: "Periode", getValue: (row) => row.common.periodLabel },
-    { label: "Tagihan", getValue: (row) => row.common.amount },
-    { label: "Admin", getValue: (row) => row.common.adminFee },
+    { label: "Sub Total", getValue: (row) => row.common.amount },
+    { label: "Biaya Admin", getValue: (row) => row.common.adminFee },
     { label: "Total Bayar", getValue: (row) => row.common.total },
+    { label: "Kode Loket", getValue: (row) => row.common.loketCode },
+    { label: "Tanggal Transaksi", getValue: (row) => row.common.transactionDate },
   ];
 
   return buildExcelWorkbookXml([
     {
       name: "PDAM Native",
-      columns: [...commonColumns, ...detailColumns(exportRows, PDAM_DETAIL_LABELS, PDAM_DETAIL_ORDER)],
+      columns: commonColumns,
       rows: exportRows,
     },
   ]);
