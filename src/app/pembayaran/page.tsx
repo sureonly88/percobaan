@@ -467,6 +467,103 @@ export default function PembayaranPage() {
     focusField((daftarTagihan.length > 0 || daftarTagihanPln.length > 0) ? "payment" : "customer");
   }, [receipt, daftarTagihan.length, daftarTagihanPln.length]);
 
+  // Auto-cetak struk saat receipt muncul (setelah pembayaran berhasil)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!receipt) return;
+    const successBills = receipt.results.filter((r) => r.success);
+    if (successBills.length === 0) return;
+    const snapshot = daftarTagihanSnapshot;
+    const printableBills = successBills.map((r) => {
+      if (r.provider === "LUNASIN") {
+        const pd = r.providerData || {};
+        const rpAdmin = Number(pd.rp_admin || r.adminFee || 0);
+        const rpAmount = Number(pd.rp_amount || Math.max(0, r.total - rpAdmin));
+        return {
+          type: "pln" as const,
+          idpel: r.idpel,
+          nama: r.nama,
+          kodeProduk: r.kodeProduk || "",
+          periode: String(pd.periode || ""),
+          tarif: String(pd.tarif || ""),
+          daya: String(pd.daya || ""),
+          standMeter: String(pd.stand_meter || ""),
+          noMeter: String(pd.nometer || ""),
+          jumBill: String(pd.jum_bill || "1"),
+          tokenPln: String(pd.token || ""),
+          refnumLunasin: String(pd.refnum_lunasin || ""),
+          noreg: String(pd.noreg || ""),
+          tglReg: String(pd.tgl_reg || ""),
+          jenisReg: String(pd.jenis_reg || ""),
+          rpAmount,
+          rpAdmin,
+          tagihan: rpAmount,
+          admin: rpAdmin,
+          total: r.total,
+          transactionCode: r.transactionCode,
+          kwh: String(pd.kwh || ""),
+          rpMaterai: Number(pd.rp_materai || 0),
+          rpPpn: Number(pd.rp_ppn || 0),
+          rpPju: Number(pd.rp_pju || 0),
+          rpAngsuran: Number(pd.rp_angsuran || 0),
+          rpToken: Number(pd.rp_token || 0),
+          rpTotal: Number(pd.rp_total || 0),
+          saldoTerpotong: Number(pd.saldo_terpotong || 0),
+          refnum: String(pd.refnum || ""),
+          tglLunas: String(pd.tgl_lunas || ""),
+          pesanBiller: String(pd.pesan_biller || ""),
+          nova: String(pd.nova || ""),
+          novaKepalaKeluarga: String(pd.nova_kepala_keluarga || ""),
+          jumPeserta: String(pd.jum_peserta || ""),
+          kodeCabang: String(pd.kode_cabang || ""),
+          namaCabang: String(pd.nama_cabang || ""),
+          sisaSaldoBpjs: String(pd.sisa || ""),
+          nomor: String(pd.nomor || ""),
+          denom: String(pd.denom || ""),
+          namaProduk: String(pd.nama_produk || ""),
+          serialNumber: String(pd.serial_number || ""),
+          masaBerlaku: String(pd.masa_berlaku || ""),
+        };
+      }
+      const orig = snapshot.find((b) => b.idpel === r.idpel && b.thbln === r.blth);
+      return {
+        type: "pdam" as const,
+        idpel: r.idpel,
+        nama: r.nama,
+        alamat: orig?.alamat,
+        gol: orig?.gol,
+        periode: r.blth,
+        standLalu: orig?.standLalu,
+        standKini: orig?.standKini,
+        pemakaian: orig?.pakai,
+        hargaAir: orig?.harga,
+        denda: orig?.denda,
+        materai: orig?.materai,
+        limbah: orig?.limbah,
+        retribusi: orig?.retribusi,
+        bebanTetap: orig?.bebanTetap,
+        biayaMeter: orig?.biayaMeter,
+        diskon: orig?.diskon,
+        tagihan: Math.max(0, r.total - (r.adminFee || receipt.biayaAdmin || 0)),
+        admin: r.adminFee || receipt.biayaAdmin || 0,
+        total: r.total,
+        transactionCode: r.transactionCode,
+      };
+    });
+    printReceipt({
+      loketName: receipt.loketName,
+      loketCode: receipt.loketCode,
+      kasir: (session?.user as { name?: string })?.name || "-",
+      tanggal: receipt.paidAt,
+      bills: printableBills,
+      totalTagihan: printableBills.reduce((s, b) => s + b.tagihan, 0),
+      totalAdmin: printableBills.reduce((s, b) => s + b.admin, 0),
+      totalBayar: printableBills.reduce((s, b) => s + b.total, 0),
+      tunai: receipt.tunai,
+      kembalian: receipt.kembalian,
+    });
+  }, [receipt]); // daftarTagihanSnapshot & session intentionally read at effect-time (same render batch)
+
   const totalTagihan = useMemo(
     () => daftarTagihan.reduce((sum, t) => sum + t.total, 0),
     [daftarTagihan]

@@ -26,6 +26,7 @@ interface ItemRow extends RowDataPacket {
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthToken(req);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const check = denyIfUnauthorized(auth.role, "/api/keuangan/komisi/backfill", "POST");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
