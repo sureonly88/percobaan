@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useTheme } from "@/ui/ThemeProvider";
 
-const DEFAULT_BRIDGE_URL = "http://localhost:6789";
+const DEFAULT_BRIDGE_URL = "https://localhost:6789";
 const LS_KEY_BRIDGE_URL = "print_bridge_url";
 
 interface BridgePrinter {
@@ -754,8 +754,8 @@ export default function PengaturanPage() {
               )}
             </div>
             <p className="text-xs text-slate-400 mt-1.5">
-              Gunakan <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">http://localhost:6789</code> jika browser & printer di komputer yang sama.
-              Jika app HTTPS dan terblokir, ganti ke IP lokal komputer kasir, misal <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">http://192.168.1.10:6789</code>.
+              Gunakan <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">https://localhost:6789</code> jika sudah menjalankan <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">gen-cert</code> di komputer kasir.
+              Jika belum ada cert, gunakan <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">http://localhost:6789</code> (mungkin diblokir browser dari app HTTPS).
             </p>
             {bridgeMsg && (
               <div className={`mt-3 text-sm px-3 py-2 rounded-lg flex items-center gap-2 ${

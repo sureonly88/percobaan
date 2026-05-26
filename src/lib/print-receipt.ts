@@ -150,7 +150,7 @@ function getProdukLabel(kodeProduk: string): string {
 // Used for HTML fallback and as payload for the ESC/P print bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_PRINT_BRIDGE_URL = "http://localhost:6789";
+const DEFAULT_PRINT_BRIDGE_URL = "https://localhost:6789";
 const LS_KEY_BRIDGE_URL = "print_bridge_url";
 
 function getPrintBridgeUrl(): string {

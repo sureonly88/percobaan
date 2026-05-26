@@ -13,13 +13,30 @@
  * Setup: lihat README.md
  */
 
-const http = require('http');
-const fs   = require('fs');
-const path = require('path');
-const os   = require('os');
+const http  = require('http');
+const https = require('https');
+const fs    = require('fs');
+const path  = require('path');
+const os    = require('os');
 const { exec } = require('child_process');
 
 const { formatEscp, formatPlainText } = require('./formatter');
+
+// ── TLS cert (optional — diperlukan agar bisa diakses dari app HTTPS) ─────────
+const CERT_PATH = path.join(__dirname, 'cert.pem');
+const KEY_PATH  = path.join(__dirname, 'key.pem');
+let tlsOptions = null;
+try {
+  if (fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH)) {
+    tlsOptions = {
+      cert: fs.readFileSync(CERT_PATH),
+      key:  fs.readFileSync(KEY_PATH),
+    };
+    console.log('[Bridge] TLS cert ditemukan — mode HTTPS aktif');
+  }
+} catch (e) {
+  console.warn('[Bridge] Gagal load cert/key:', e.message, '— fallback HTTP');
+}
 
 // ── Load config ──────────────────────────────────────────────────────────────
 const CONFIG_PATH   = path.join(__dirname, 'config.json');
@@ -234,9 +251,9 @@ function readBody(req, cb) {
   });
 }
 
-// ── HTTP Server ───────────────────────────────────────────────────────────────
+// ── HTTP/HTTPS Server ─────────────────────────────────────────────────────────
 
-const server = http.createServer((req, res) => {
+function requestHandler(req, res) {
   // CORS — izinkan semua origin (server ini hanya berjalan lokal di komputer kasir)
   const origin = req.headers.origin || '';
   res.setHeader('Access-Control-Allow-Origin', origin || '*');
@@ -387,17 +404,29 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
-});
+}
+
+const server = tlsOptions
+  ? https.createServer(tlsOptions, requestHandler)
+  : http.createServer(requestHandler);
 
 server.listen(config.port, '127.0.0.1', () => {
+  const scheme = tlsOptions ? 'https' : 'http';
   console.log('='.repeat(60));
   console.log('  Pedami Print Bridge');
   console.log('='.repeat(60));
-  console.log(`  URL     : http://127.0.0.1:${config.port}`);
+  console.log(`  URL     : ${scheme}://127.0.0.1:${config.port}`);
+  console.log(`  Mode TLS: ${tlsOptions ? 'HTTPS \u2714 (aman dari app HTTPS)' : 'HTTP \u26A0\uFE0F  (jalankan gen-cert untuk HTTPS)'}`);
   console.log(`  Printer : ${config.printerName}`);
-  console.log(`  Mode    : ${config.printMode}${config.printMode === 'copy' ? ' → ' + config.portMapping : ''}`);
+  console.log(`  Mode    : ${config.printMode}${config.printMode === 'copy' ? ' \u2192 ' + config.portMapping : ''}`);
   console.log('='.repeat(60));
-  console.log('  Buka http://localhost:' + config.port + ' untuk cek status.');
+  if (!tlsOptions) {
+    console.log('  \u26A0\uFE0F  Tanpa HTTPS, browser akan blokir koneksi dari app HTTPS.');
+    console.log('     Jalankan gen-cert.bat (Windows) atau gen-cert.sh (Mac/Linux)');
+    console.log('     lalu restart server ini.\n');
+  } else {
+    console.log(`  Buka https://localhost:${config.port} di browser \u2192 klik "Lanjutkan" untuk trust cert.\n`);
+  }
   console.log('  Tekan Ctrl+C untuk berhenti.\n');
 });
 
