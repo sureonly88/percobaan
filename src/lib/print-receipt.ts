@@ -150,7 +150,17 @@ function getProdukLabel(kodeProduk: string): string {
 // Used for HTML fallback and as payload for the ESC/P print bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PRINT_BRIDGE_URL = "http://localhost:6789";
+const DEFAULT_PRINT_BRIDGE_URL = "http://localhost:6789";
+const LS_KEY_BRIDGE_URL = "print_bridge_url";
+
+function getPrintBridgeUrl(): string {
+  try {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(LS_KEY_BRIDGE_URL) || DEFAULT_PRINT_BRIDGE_URL;
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_PRINT_BRIDGE_URL;
+}
 const COLS = 80;
 
 function escapeHtml(str: string): string {
@@ -323,22 +333,6 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
   });
 
   push(HEAVY);
-  pushC2("Total Tagihan", fmtRp(data.totalTagihan));
-  pushC2(`Total Admin (${data.bills.length}x)`, fmtRp(data.totalAdmin));
-  push(HEAVY);
-  pushC2("TOTAL BAYAR", fmtRp(data.totalBayar));
-  push(HEAVY);
-
-  if (data.tunai > 0) {
-    pushC2("Tunai  ", fmtRp(data.tunai));
-    pushC2("Kembali", fmtRp(data.kembalian));
-    push("");
-  }
-
-  pushCtr("*** LUNAS ***");
-  push("");
-  pushCtr("Struk ini sebagai bukti pembayaran yang sah.");
-  pushCtr("Terima kasih.");
   push(""); push(""); push(""); push("");
   return lines.join("\n");
 }
@@ -348,7 +342,7 @@ async function tryPrintBridge(data: ReceiptPrintData): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1500);
-    const res = await fetch(`${PRINT_BRIDGE_URL}/print`, {
+    const res = await fetch(`${getPrintBridgeUrl()}/print`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),

@@ -237,11 +237,9 @@ function readBody(req, cb) {
 // ── HTTP Server ───────────────────────────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
-  // CORS — only allow localhost origins for security
+  // CORS — izinkan semua origin (server ini hanya berjalan lokal di komputer kasir)
   const origin = req.headers.origin || '';
-  if (!origin || origin.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  }
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

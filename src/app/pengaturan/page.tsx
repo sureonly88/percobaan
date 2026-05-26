@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useTheme } from "@/ui/ThemeProvider";
 
-const BRIDGE_URL = "http://localhost:6789";
+const DEFAULT_BRIDGE_URL = "http://localhost:6789";
+const LS_KEY_BRIDGE_URL = "print_bridge_url";
 
 interface BridgePrinter {
   name: string;
@@ -92,6 +93,8 @@ export default function PengaturanPage() {
   }, [userName, profile]);
 
   // ─────────────────────────── Printer Bridge ───────────────────────────
+  const [bridgeUrl, setBridgeUrl] = useState<string>(DEFAULT_BRIDGE_URL);
+  const [bridgeUrlInput, setBridgeUrlInput] = useState<string>(DEFAULT_BRIDGE_URL);
   const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
   const [bridgeConfig, setBridgeConfig] = useState<BridgeConfig | null>(null);
   const [bridgeTemplate, setBridgeTemplate] = useState<BridgeTemplate | null>(null);
@@ -110,10 +113,10 @@ export default function PengaturanPage() {
     setBridgeLoading(true);
     try {
       const [ping, cfg, tpl, prn] = await Promise.all([
-        fetch(`${BRIDGE_URL}/ping`).then((r) => r.ok).catch(() => false),
-        fetch(`${BRIDGE_URL}/config`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-        fetch(`${BRIDGE_URL}/template`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-        fetch(`${BRIDGE_URL}/printers`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(`${bridgeUrl}/ping`).then((r) => r.ok).catch(() => false),
+        fetch(`${bridgeUrl}/config`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(`${bridgeUrl}/template`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(`${bridgeUrl}/printers`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ]);
       setBridgeOnline(ping);
       if (cfg?.ok) setBridgeConfig(cfg.config);
@@ -125,17 +128,23 @@ export default function PengaturanPage() {
     } finally {
       setBridgeLoading(false);
     }
+  }, [bridgeUrl]);
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem(LS_KEY_BRIDGE_URL) : null;
+    const url = saved || DEFAULT_BRIDGE_URL;
+    setBridgeUrl(url);
+    setBridgeUrlInput(url);
   }, []);
 
   useEffect(() => {
     if (activeTab === "printer") void fetchBridgeAll();
-  }, [activeTab, fetchBridgeAll]);
+  }, [activeTab, fetchBridgeAll, bridgeUrl]);
 
   const saveBridgeConfig = async () => {
     if (!bridgeConfig) return;
     setBridgeLoading(true);
     try {
-      const res = await fetch(`${BRIDGE_URL}/config`, {
+      const res = await fetch(`${bridgeUrl}/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bridgeConfig),
@@ -158,7 +167,7 @@ export default function PengaturanPage() {
     if (!bridgeTemplate) return;
     setBridgeLoading(true);
     try {
-      const res = await fetch(`${BRIDGE_URL}/template`, {
+      const res = await fetch(`${bridgeUrl}/template`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bridgeTemplate),
@@ -194,7 +203,7 @@ export default function PengaturanPage() {
         totalTagihan: 75000, totalAdmin: 2500, totalBayar: 77500,
         tunai: 80000, kembalian: 2500,
       };
-      const res = await fetch(`${BRIDGE_URL}/preview`, {
+      const res = await fetch(`${bridgeUrl}/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: sample, template: bridgeTemplate }),
@@ -213,7 +222,7 @@ export default function PengaturanPage() {
   const triggerTestPrint = async () => {
     setBridgeLoading(true);
     try {
-      const res = await fetch(`${BRIDGE_URL}/test-print`, { method: "POST" });
+      const res = await fetch(`${bridgeUrl}/test-print`, { method: "POST" });
       const j = await res.json();
       if (!res.ok || !j.ok) flashBridgeMsg("err", j.error || "Gagal mencetak");
       else flashBridgeMsg("ok", "Perintah cetak terkirim ke printer");
@@ -693,8 +702,8 @@ export default function PengaturanPage() {
                   <h3 className="font-bold text-lg">Pedami Print Bridge</h3>
                   <p className="text-sm text-slate-500 mt-1">
                     {bridgeOnline === null ? "Mengecek status..." :
-                      bridgeOnline ? `Aktif di ${BRIDGE_URL}` :
-                      `Tidak terdeteksi di ${BRIDGE_URL}. Pastikan service print-bridge sudah berjalan di komputer kasir.`}
+                      bridgeOnline ? `Aktif di ${bridgeUrl}` :
+                      `Tidak terdeteksi di ${bridgeUrl}. Pastikan service print-bridge sudah berjalan di komputer kasir.`}
                   </p>
                 </div>
               </div>
@@ -707,6 +716,47 @@ export default function PengaturanPage() {
                 Refresh
               </button>
             </div>
+            {/* Bridge URL configuration */}
+            <div className="mt-4 flex items-center gap-2">
+              <label className="text-xs font-medium text-slate-500 whitespace-nowrap">URL Bridge</label>
+              <input
+                type="text"
+                value={bridgeUrlInput}
+                onChange={(e) => setBridgeUrlInput(e.target.value)}
+                placeholder="http://localhost:6789"
+                className="flex-1 text-sm border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-900 font-mono"
+              />
+              <button
+                onClick={() => {
+                  const url = bridgeUrlInput.trim().replace(/\/$/, "") || DEFAULT_BRIDGE_URL;
+                  setBridgeUrl(url);
+                  setBridgeUrlInput(url);
+                  if (typeof window !== "undefined") localStorage.setItem(LS_KEY_BRIDGE_URL, url);
+                  flashBridgeMsg("ok", "URL disimpan");
+                }}
+                className="text-sm px-3 py-1.5 bg-primary text-white rounded-lg hover:bg-primary/90 whitespace-nowrap"
+              >
+                Simpan
+              </button>
+              {bridgeUrl !== DEFAULT_BRIDGE_URL && (
+                <button
+                  onClick={() => {
+                    setBridgeUrl(DEFAULT_BRIDGE_URL);
+                    setBridgeUrlInput(DEFAULT_BRIDGE_URL);
+                    if (typeof window !== "undefined") localStorage.removeItem(LS_KEY_BRIDGE_URL);
+                    flashBridgeMsg("ok", "Reset ke default");
+                  }}
+                  className="text-xs px-2 py-1.5 text-slate-500 hover:text-red-500 whitespace-nowrap"
+                  title="Reset ke localhost:6789"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-1.5">
+              Gunakan <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">http://localhost:6789</code> jika browser & printer di komputer yang sama.
+              Jika app HTTPS dan terblokir, ganti ke IP lokal komputer kasir, misal <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">http://192.168.1.10:6789</code>.
+            </p>
             {bridgeMsg && (
               <div className={`mt-3 text-sm px-3 py-2 rounded-lg flex items-center gap-2 ${
                 bridgeMsg.type === "ok"

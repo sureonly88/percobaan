@@ -239,25 +239,6 @@ function formatEscp(data, cfg = {}) {
     if (idx < (data.bills || []).length - 1) line(LIGHT);
   });
 
-  // ── Summary ──
-  line(HEAVY);
-  c2('Total Tagihan', fmtRp(data.totalTagihan));
-  c2(`Total Admin (${(data.bills || []).length}x)`, fmtRp(data.totalAdmin));
-  line(HEAVY);
-  c2('TOTAL BAYAR', fmtRp(data.totalBayar), true);
-  line(HEAVY);
-
-  if (data.tunai > 0) {
-    c2('Tunai  ', fmtRp(data.tunai));
-    c2('Kembali', fmtRp(data.kembalian));
-    line('');
-  }
-
-  ctr(tpl.lunasText || '*** LUNAS ***', true);
-  line('');
-  ctr(tpl.footerLine1 || 'Struk ini sebagai bukti pembayaran yang sah.');
-  ctr(tpl.footerLine2 || 'Terima kasih.');
-
   // Feed lines (paper advance for easy tear-off)
   for (let i = 0; i < FEED; i++) chunks.push(LF);
 
