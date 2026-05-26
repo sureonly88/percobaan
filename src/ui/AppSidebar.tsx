@@ -18,13 +18,13 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Advice Lunasin", href: "/advice-lunasin", icon: "fact_check" },
       { label: "Advice PDAM", href: "/advice-pdam", icon: "water_drop" },
       { label: "Transaksi Tergantung", href: "/pending-transaksi", icon: "pending_actions" },
+      { label: "Tutup Kasir", href: "/tutup-kasir", icon: "point_of_sale" },
       { label: "Notifikasi", href: "/notifikasi", icon: "notifications" },
     ],
   },
   {
-    category: "Kasir & Laporan",
+    category: "Laporan & Monitoring",
     items: [
-      { label: "Tutup Kasir", href: "/tutup-kasir", icon: "point_of_sale" },
       { label: "Verifikasi Kasir", href: "/verifikasi-kasir", icon: "verified" },
       { label: "Laporan Transaksi", href: "/laporan", icon: "analytics" },
       { label: "Riwayat", href: "/riwayat", icon: "history" },
@@ -35,28 +35,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    category: "Pelanggan & Loket",
-    items: [
-      { label: "Manajemen Pelanggan", href: "/pelanggan", icon: "group" },
-      { label: "Manajemen Loket", href: "/loket", icon: "store" },
-      { label: "Anggota Loket", href: "/loket/members", icon: "manage_accounts" },
-      { label: "Update Saldo Loket", href: "/saldo", icon: "account_balance_wallet" },
-      { label: "Top-up Saldo", href: "/topup", icon: "add_card" },
-    ],
-  },
-  {
-    category: "Keuangan",
+    category: "Keuangan & Akuntansi",
     items: [
       { label: "Ringkasan Keuangan", href: "/keuangan", icon: "account_balance" },
       { label: "Margin & Profit", href: "/keuangan/margin", icon: "trending_up" },
       { label: "Pengaturan Komisi", href: "/keuangan/komisi", icon: "redeem" },
       { label: "Laporan Komisi", href: "/keuangan/komisi/laporan", icon: "payments" },
       { label: "Settlement Loket", href: "/settlement", icon: "handshake" },
-    ],
-  },
-  {
-    category: "Akuntansi",
-    items: [
       { label: "Jurnal Umum", href: "/keuangan/jurnal", icon: "menu_book" },
       { label: "Buku Besar", href: "/keuangan/buku-besar", icon: "import_contacts" },
       { label: "Neraca Saldo", href: "/keuangan/neraca-saldo", icon: "balance" },
@@ -64,8 +49,18 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    category: "Loket & Saldo",
+    items: [
+      { label: "Manajemen Loket", href: "/loket", icon: "store" },
+      { label: "Anggota Loket", href: "/loket/members", icon: "manage_accounts" },
+      { label: "Update Saldo Loket", href: "/saldo", icon: "account_balance_wallet" },
+      { label: "Top-up Saldo", href: "/topup", icon: "add_card" },
+    ],
+  },
+  {
     category: "Administrasi",
     items: [
+      { label: "Manajemen Pelanggan", href: "/pelanggan", icon: "group" },
       { label: "Biaya Admin", href: "/biaya-admin", icon: "payments" },
       { label: "Manajemen User", href: "/users", icon: "admin_panel_settings" },
       { label: "Pendaftaran Agen", href: "/users/registrations", icon: "how_to_reg" },
