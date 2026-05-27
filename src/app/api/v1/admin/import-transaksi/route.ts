@@ -345,8 +345,8 @@ export async function POST(request: NextRequest) {
 
   await auditLog({
     actorType: "user",
-    actorUsername: authToken.username,
-    actorRole: authToken.role,
+    actorUsername: authToken!.username,
+    actorRole: authToken!.role,
     actorIp,
     action: "IMPORT_TRANSAKSI",
     entityType: "import_transaksi",
