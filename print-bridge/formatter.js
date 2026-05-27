@@ -62,6 +62,15 @@ function r2c(left, right, width) {
   return left + ' '.repeat(gap) + right;
 }
 
+function detailLine(label, value, width) {
+  const INDENT = 2, LABEL_W = 14, SEP = ': ';
+  const maxVal = (width || 80) - INDENT - LABEL_W - SEP.length;
+  return ' '.repeat(INDENT) +
+    label.substring(0, LABEL_W).padEnd(LABEL_W) +
+    SEP +
+    String(value).substring(0, maxVal);
+}
+
 function detailCell(label, value) {
   const INDENT = 4, LABEL_W = 12, SEP = ' : ';
   const VAL_W = 40 - INDENT - LABEL_W - SEP.length; // = 21
@@ -215,10 +224,8 @@ function formatEscp(data, cfg = {}) {
       pairs.push(['Diskon',      '- ' + fmtRp(b.diskon || 0)]);
     }
 
-    for (let j = 0; j < pairs.length; j += 2) {
-      const c1 = detailCell(pairs[j][0], pairs[j][1]);
-      const c2r = j + 1 < pairs.length ? detailCell(pairs[j + 1][0], pairs[j + 1][1]) : ' '.repeat(40);
-      line(c1 + c2r);
+    for (const [lbl, val] of pairs) {
+      line(detailLine(lbl, val, W));
     }
 
     // Token PLN — centered, bold
@@ -236,7 +243,11 @@ function formatEscp(data, cfg = {}) {
     }
     c2('  SUBTOTAL', fmtRp(b.total), true);
 
-    if (idx < (data.bills || []).length - 1) line(LIGHT);
+    if (idx < (data.bills || []).length - 1) {
+      line('');
+      line(HEAVY);
+      line('');
+    }
   });
 
   // Feed lines (paper advance for easy tear-off)

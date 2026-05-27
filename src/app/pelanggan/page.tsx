@@ -162,6 +162,65 @@ const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | 
 ];
 
 function getLunasinDetailFields(item: PlnTransaksiData): Array<{ label: string; value: string }> {
+  // Items imported from pedami-payment — field names differ from live Lunasin API
+  if (item.metadata?.source === "pedami-payment") {
+    const m = item.metadata as Record<string, unknown>;
+    const result: Array<{ label: string; value: string }> = [];
+    const str = (k: string) => (m[k] != null && String(m[k]) !== "" ? String(m[k]) : null);
+    const num = (k: string) => { const n = parseFloat(String(m[k] ?? "")); return isNaN(n) ? null : n; };
+
+    // PLN Prabayar (token)
+    if (item.kodeProduk?.replace(/-\d+$/, "") === "pln-prepaid") {
+      const tarif = str("subscriber_segment");
+      if (tarif) result.push({ label: "Tarif", value: tarif });
+      const daya = str("power_categorie");
+      if (daya) result.push({ label: "Daya (VA)", value: daya });
+      const nometer = str("material_number");
+      if (nometer) result.push({ label: "No. Meter", value: nometer });
+      const kwh = str("purchase_kwh");
+      if (kwh) result.push({ label: "kWh", value: String(parseFloat(kwh)) });
+      const rupiahToken = num("rupiah_token");
+      if (rupiahToken != null && rupiahToken > 0) result.push({ label: "Nilai Token", value: formatRupiah(rupiahToken) });
+      const stump = num("stump_duty");
+      if (stump != null && stump > 0) result.push({ label: "Materai", value: formatRupiah(stump) });
+      const ppj = num("ligthingtax");
+      if (ppj != null && ppj > 0) result.push({ label: "PPJ", value: formatRupiah(ppj) });
+      const refPln = str("pln_ref_number");
+      if (refPln) result.push({ label: "Ref PLN", value: refPln });
+      const refLunasin = str("switcher_ref_number");
+      if (refLunasin) result.push({ label: "Ref Lunasin", value: refLunasin });
+      const audit = str("trace_audit_number");
+      if (audit) result.push({ label: "No. Audit", value: audit });
+    }
+
+    // PLN Pascabayar (tagihan)
+    if (item.kodeProduk?.replace(/-\d+$/, "") === "pln-postpaid") {
+      const tarif = str("subcriber_segment") ?? str("subscriber_segment");
+      if (tarif) result.push({ label: "Tarif", value: tarif });
+      const daya = str("power_consumtion") ?? str("power_categorie");
+      if (daya) result.push({ label: "Daya (VA)", value: daya });
+      const billPeriode = str("bill_periode");
+      if (billPeriode) result.push({ label: "Periode Tagihan Biller", value: billPeriode });
+      const jenisTagihan = str("jenis");
+      if (jenisTagihan) result.push({ label: "Jenis Tagihan", value: jenisTagihan });
+      const outstanding = str("outstanding_bill");
+      if (outstanding && outstanding !== "0") result.push({ label: "Tunggakan", value: outstanding });
+      const penalty = num("penalty_fee");
+      if (penalty != null && penalty > 0) result.push({ label: "Denda", value: formatRupiah(penalty) });
+      const addedTax = num("added_tax");
+      if (addedTax != null && addedTax > 0) result.push({ label: "PPJ", value: formatRupiah(addedTax) });
+      const refLunasin = str("switcher_ref");
+      if (refLunasin) result.push({ label: "Ref Lunasin", value: refLunasin });
+      const audit = str("trace_audit_number");
+      if (audit) result.push({ label: "No. Audit", value: audit });
+    }
+
+    const jenisLoket = str("jenis_loket");
+    if (jenisLoket) result.push({ label: "Jenis Loket", value: jenisLoket });
+    return result;
+  }
+
+  // Standard Lunasin fields (live API — provider_response / metadata)
   const result: Array<{ label: string; value: string }> = [];
   for (const f of LUNASIN_FIELDS) {
     const raw = pvLunasin(item, ...f.key);
@@ -1929,7 +1988,7 @@ export default function PelangganPage() {
 
                 {/* Token PLN (prominent) */}
                 {(() => {
-                  const tokenVal = pvLunasin(plnDetailData, "token", "tokenPln", "token_pln");
+                  const tokenVal = pvLunasin(plnDetailData, "token", "tokenPln", "token_pln", "token_number");
                   return tokenVal ? (
                     <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border-2 border-dashed border-amber-300 dark:border-amber-700">
                       <div className="flex items-center gap-3">
@@ -1962,24 +2021,36 @@ export default function PelangganPage() {
                 })()}
 
                 {/* Rincian Tagihan */}
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Rincian Tagihan</p>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Tagihan</span>
-                      <span className="font-medium">{formatRupiah(plnDetailData.rpAmount)}</span>
+                {(() => {
+                  // Fallback ke rupiah_token dari metadata jika rpAmount = 0 (data import belum di-update)
+                  const meta = plnDetailData.metadata as Record<string, unknown> | null;
+                  const isPedamiImport = meta?.source === "pedami-payment";
+                  const rupiahToken = isPedamiImport ? Number(meta?.rupiah_token ?? 0) : 0;
+                  const displayAmount = plnDetailData.rpAmount > 0 ? plnDetailData.rpAmount : rupiahToken;
+                  const displayTotal = plnDetailData.rpTotal > 0 && plnDetailData.rpTotal !== plnDetailData.rpAdmin
+                    ? plnDetailData.rpTotal
+                    : displayAmount + plnDetailData.rpAdmin;
+                  return (
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Rincian Tagihan</p>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">{plnDetailData.kodeProduk?.replace(/-\d+$/, "") === "pln-prepaid" ? "Nilai Token" : "Tagihan"}</span>
+                          <span className="font-medium">{formatRupiah(displayAmount)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">Biaya Admin</span>
+                          <span className="font-medium">{formatRupiah(plnDetailData.rpAdmin)}</span>
+                        </div>
+                        <hr className="border-slate-200 dark:border-slate-700" />
+                        <div className="flex justify-between">
+                          <span className="font-bold">Total</span>
+                          <span className="font-bold text-lg text-emerald-600 dark:text-emerald-400">{formatRupiah(displayTotal)}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Biaya Admin</span>
-                      <span className="font-medium">{formatRupiah(plnDetailData.rpAdmin)}</span>
-                    </div>
-                    <hr className="border-slate-200 dark:border-slate-700" />
-                    <div className="flex justify-between">
-                      <span className="font-bold">Total</span>
-                      <span className="font-bold text-lg text-emerald-600 dark:text-emerald-400">{formatRupiah(plnDetailData.rpTotal)}</span>
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Info Loket & Status */}
                 <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-4 text-sm space-y-1.5">

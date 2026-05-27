@@ -341,7 +341,7 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
 async function tryPrintBridge(data: ReceiptPrintData): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1500);
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(`${getPrintBridgeUrl()}/print`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -407,6 +407,22 @@ window.onload = function() {
  */
 export function printReceipt(data: ReceiptPrintData): void {
   void tryPrintBridge(data).then((ok) => {
-    if (!ok) printReceiptViaHtml(data);
+    if (!ok) {
+      // Notify user that bridge failed and we're falling back to HTML print
+      try {
+        const msg = document.createElement('div');
+        msg.textContent = '⚠ Print bridge tidak terhubung — menggunakan cetak browser';
+        Object.assign(msg.style, {
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          background: '#f59e0b', color: '#000', padding: '8px 18px',
+          borderRadius: '8px', fontSize: '13px', fontWeight: '500',
+          zIndex: '99999', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          whiteSpace: 'nowrap',
+        });
+        document.body.appendChild(msg);
+        setTimeout(() => msg.remove(), 4000);
+      } catch { /* ignore */ }
+      printReceiptViaHtml(data);
+    }
   });
 }

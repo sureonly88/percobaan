@@ -97,11 +97,14 @@ export async function GET(request: NextRequest) {
         COALESCE(SUM(i.total), 0) as total_nominal,
         COALESCE(SUM(i.amount), 0) as total_tagihan,
         COALESCE(SUM(i.admin_fee), 0) as total_admin,
-        l.jenis as jenis_loket
+        COALESCE(
+          MAX(l.jenis),
+          MIN(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(i.metadata_json, '$.jenis_loket')), ''))
+        ) as jenis_loket
       ${baseFrom}
       LEFT JOIN lokets l ON l.loket_code = r.loket_code COLLATE utf8mb4_general_ci
       WHERE ${successCond}${providerFilter}${dateFilter}${loketFilter}
-      GROUP BY r.loket_code, r.loket_name, l.jenis
+      GROUP BY r.loket_code, r.loket_name
       ORDER BY total_nominal DESC
     `;
 

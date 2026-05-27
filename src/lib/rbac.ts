@@ -48,7 +48,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
     "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/cetak-ulang",
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
-    "/db-manage",
+    "/db-manage", "/import-transaksi",
     "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun", "/keuangan/komisi", "/keuangan/komisi/laporan",
     "/settlement",
   ],
@@ -83,6 +83,8 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
 // API route permissions: [method] -> roles that can use it
 // If not listed, all authenticated users can access
 const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
+  "/api/v1/admin/import-transaksi": { GET: ["admin"], POST: ["admin"], DELETE: ["admin"] },
+  "/api/v1/admin/import-transaksi/logs": { GET: ["admin"] },
   "/api/dashboard": { GET: ["admin", "supervisor", "kasir"] },
   "/api/loket": {
     GET: ["admin", "supervisor"],
@@ -229,7 +231,7 @@ export function canWrite(role: string): boolean {
 // Check if role can process payments
 export function canProcessPayment(role: string): boolean {
   const r = normalizeRole(role);
-  return r === "admin" || r === "kasir";
+  return r === "admin" || r === "kasir" || r === "supervisor";
 }
 
 // Get accessible sidebar items for a role

@@ -159,6 +159,27 @@ function printViaCopy(escpData, portMapping, cb) {
 }
 
 function printRaw(escpData, cb) {
+  const platform = os.platform();
+
+  // macOS / Linux — gunakan CUPS (lp)
+  if (platform !== 'win32') {
+    const tmpFile = path.join(os.tmpdir(), `pedami_${Date.now()}.prn`);
+    fs.writeFile(tmpFile, escpData, 'binary', (err) => {
+      if (err) return cb(err);
+      const printerArg = config.printerName ? `-d "${config.printerName.replace(/"/g, '\\"')}"` : '';
+      exec(`lp ${printerArg} -o raw "${tmpFile}"`,
+        { timeout: 10000 },
+        (err2, stdout, stderr) => {
+          setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch {} }, 3000);
+          if (err2) return cb(new Error(stderr || err2.message));
+          cb(null);
+        }
+      );
+    });
+    return;
+  }
+
+  // Windows
   if (config.printMode === 'copy') {
     printViaCopy(escpData, config.portMapping, cb);
   } else {

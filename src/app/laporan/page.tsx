@@ -218,7 +218,75 @@ const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "te
 ];
 
 function getDetailFields(item: DetailItem): Array<{ label: string; value: string; discount?: boolean }> {
-  // Pedami items: build fields directly from item + providerDetail
+  // Items imported from pedami-payment (metadata.source === 'pedami-payment') — PLN only
+  // PDAM items fall through to the PDAM_FIELDS loop below so zero-value fields are shown
+  if (item.metadata?.source === "pedami-payment" && item.jenis !== "PDAM") {
+    const m = item.metadata as Record<string, unknown>;
+    const result: Array<{ label: string; value: string; discount?: boolean }> = [];
+
+    const str = (k: string) => (m[k] != null && String(m[k]) !== "" ? String(m[k]) : null);
+    const num = (k: string) => { const n = parseFloat(String(m[k] ?? "")); return isNaN(n) ? null : n; };
+
+    if (item.periode && item.periode !== "-") result.push({ label: "Periode Tagihan", value: item.periode });
+
+    // PLN_PREPAID (token)
+    if (item.kodeProduk === "pln-prepaid") {
+      const tarif = str("subscriber_segment");
+      if (tarif) result.push({ label: "Tarif", value: tarif });
+      const daya = str("power_categorie");
+      if (daya) result.push({ label: "Daya (VA)", value: daya });
+      const nometer = str("material_number");
+      if (nometer) result.push({ label: "No. Meter", value: nometer });
+      const kwh = str("purchase_kwh");
+      if (kwh) result.push({ label: "kWh", value: String(parseFloat(kwh)) });
+      const rupiahToken = num("rupiah_token");
+      if (rupiahToken != null && rupiahToken > 0) result.push({ label: "Nilai Token", value: formatRupiah(rupiahToken) });
+      const token = str("token_number");
+      if (token) result.push({ label: "Token PLN", value: fmtToken(token) });
+      const stump = num("stump_duty");
+      if (stump != null && stump > 0) result.push({ label: "Materai", value: formatRupiah(stump) });
+      const ppj = num("ligthingtax");
+      if (ppj != null && ppj > 0) result.push({ label: "PPJ", value: formatRupiah(ppj) });
+      const refPln = str("pln_ref_number");
+      if (refPln) result.push({ label: "Ref PLN", value: refPln });
+      const refLunasin = str("switcher_ref_number");
+      if (refLunasin) result.push({ label: "Ref Lunasin", value: refLunasin });
+      const audit = str("trace_audit_number");
+      if (audit) result.push({ label: "No. Audit", value: audit });
+    }
+
+    // PLN_POSTPAID (tagihan)
+    if (item.kodeProduk === "pln-postpaid") {
+      const tarif = str("subcriber_segment") ?? str("subscriber_segment");
+      if (tarif) result.push({ label: "Tarif", value: tarif });
+      const daya = str("power_consumtion") ?? str("power_categorie");
+      if (daya) result.push({ label: "Daya (VA)", value: daya });
+      const billPeriode = str("bill_periode");
+      if (billPeriode) result.push({ label: "Periode Tagihan Biller", value: billPeriode });
+      const jenisTagihan = str("jenis");
+      if (jenisTagihan) result.push({ label: "Jenis Tagihan", value: jenisTagihan });
+      const outstanding = str("outstanding_bill");
+      if (outstanding && outstanding !== "0") result.push({ label: "Tunggakan", value: outstanding });
+      const penalty = num("penalty_fee");
+      if (penalty != null && penalty > 0) result.push({ label: "Denda", value: formatRupiah(penalty) });
+      const addedTax = num("added_tax");
+      if (addedTax != null && addedTax > 0) result.push({ label: "PPJ", value: formatRupiah(addedTax) });
+      const refLunasin = str("switcher_ref");
+      if (refLunasin) result.push({ label: "Ref Lunasin", value: refLunasin });
+      const audit = str("trace_audit_number");
+      if (audit) result.push({ label: "No. Audit", value: audit });
+    }
+
+    const jenisLoket = str("jenis_loket");
+    if (jenisLoket) result.push({ label: "Jenis Loket", value: jenisLoket });
+
+    result.push({ label: "Tagihan", value: formatRupiah(item.tagihan) });
+    if (item.admin > 0) result.push({ label: "Biaya Admin", value: formatRupiah(item.admin) });
+    result.push({ label: "Total Bayar", value: formatRupiah(item.total) });
+    return result;
+  }
+
+  // Pedami live API items
   if (item._source === "pedami") {
     const prov = (item.providerDetail || {}) as Record<string, unknown>;
     const result: Array<{ label: string; value: string; discount?: boolean }> = [];
@@ -244,7 +312,7 @@ function getDetailFields(item: DetailItem): Array<{ label: string; value: string
     const raw = pv(item, ...f.key);
     if (raw == null) continue;
     const num = parseFloat(raw);
-    // For non-PDAM items, skip zero-value rupiah fields
+    // For non-PDAM items, skip zero-value rupiah fields; for PDAM always show even if 0
     if (!isPdam && f.format === "rupiah" && !isNaN(num) && num === 0) continue;
     let display: string;
     if (f.format === "rupiah" && !isNaN(num)) {
@@ -335,8 +403,9 @@ export default function LaporanPage() {
   const [data, setData] = useState<LaporanData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Sumber data toggle: "semua" | "portal" | "pedami"
-  const [sourceSel, setSourceSel] = useState<"semua" | "portal" | "pedami">("semua");
+  // Sumber data: pilih sumber laporan
+  const [dataSource, setDataSource] = useState<"percobaan" | "pedami">("percobaan");
+  const includePedami = dataSource === "pedami";
 
   // Pedami data state
   const [pedamiRekap, setPedamiRekap] = useState<RekapItem[]>([]);
@@ -415,7 +484,7 @@ export default function LaporanPage() {
   }, [startDate, endDate, loket, jenisFilter]);
 
   const fetchPedamiData = useCallback(async () => {
-    if (sourceSel === "portal") {
+    if (!includePedami) {
       setPedamiRekap([]);
       setPedamiRekapLoketUser([]);
       setPedamiSummary(null);
@@ -444,7 +513,7 @@ export default function LaporanPage() {
     } finally {
       setPedamiLoading(false);
     }
-  }, [startDate, endDate, jenisFilter, sourceSel]);
+  }, [startDate, endDate, jenisFilter, includePedami]);
 
   useEffect(() => {
     fetchData();
@@ -541,14 +610,13 @@ export default function LaporanPage() {
     (l) => l.nama.toLowerCase().includes(loketSearch.toLowerCase()) || l.loketCode.toLowerCase().includes(loketSearch.toLowerCase())
   );
 
-  // Merged rekap based on sourceSel
+  // Rekap: tampilkan sumber yang dipilih saja (bukan gabungan)
   const mergedRekap = React.useMemo(() => {
-    const portalRows = rekap.map((r) => ({ ...r, source: "portal" as const }));
-    const pedamiRows = pedamiRekap.map((r) => ({ ...r, source: "pedami" as const }));
-    if (sourceSel === "portal") return portalRows;
-    if (sourceSel === "pedami") return pedamiRows;
-    return [...portalRows, ...pedamiRows].sort((a, b) => b.totalNominal - a.totalNominal);
-  }, [rekap, pedamiRekap, sourceSel]);
+    if (dataSource === "pedami") {
+      return pedamiRekap.map((r) => ({ ...r, source: "pedami" as const }));
+    }
+    return rekap.map((r) => ({ ...r, source: "portal" as const }));
+  }, [rekap, pedamiRekap, dataSource]);
 
   const totalPages = Math.max(1, Math.ceil(mergedRekap.length / itemsPerPage));
   const paginatedRekap = mergedRekap.slice(
@@ -675,19 +743,18 @@ export default function LaporanPage() {
             <p className="text-xs text-slate-500 font-medium">PDAM</p>
             <p className="text-xl font-bold mt-0.5">
               {loading ? "..." : formatNumber(
-                (summary?.pdam.totalTrx ?? 0) +
-                (sourceSel !== "portal" ? (pedamiSummary?.pdam.totalTrx ?? 0) : 0)
+                dataSource === "pedami"
+                  ? (pedamiSummary?.pdam.totalTrx ?? 0)
+                  : (summary?.pdam.totalTrx ?? 0)
               )} <span className="text-xs font-normal text-slate-400">Trx</span>
             </p>
             <p className="text-[11px] text-cyan-600 font-semibold mt-0.5 truncate">
               {loading ? "..." : formatRupiah(
-                (summary?.pdam.totalNominal ?? 0) +
-                (sourceSel !== "portal" ? (pedamiSummary?.pdam.totalNominal ?? 0) : 0)
+                dataSource === "pedami"
+                  ? (pedamiSummary?.pdam.totalNominal ?? 0)
+                  : (summary?.pdam.totalNominal ?? 0)
               )}
             </p>
-            {sourceSel !== "portal" && pedamiSummary && pedamiSummary.pdam.totalTrx > 0 && (
-              <p className="text-[10px] text-indigo-500 mt-0.5">+{formatNumber(pedamiSummary.pdam.totalTrx)} Pedami</p>
-            )}
           </div>
         </div>
 
@@ -698,8 +765,12 @@ export default function LaporanPage() {
           const trx = found?.totalTrx ?? 0;
           const nominal = found?.totalNominal ?? 0;
           // Add pedami PLN totals to PLN card when showing combined
-          const pedamiPlnTrx = (sourceSel !== "portal" && kat === "PLN") ? (pedamiSummary?.lunasin.totalTrx ?? 0) : 0;
-          const pedamiPlnNominal = (sourceSel !== "portal" && kat === "PLN") ? (pedamiSummary?.lunasin.totalNominal ?? 0) : 0;
+          const activeTrx = dataSource === "pedami"
+            ? (kat === "PLN" ? (pedamiSummary?.lunasin.totalTrx ?? 0) : 0)
+            : trx;
+          const activeNominal = dataSource === "pedami"
+            ? (kat === "PLN" ? (pedamiSummary?.lunasin.totalNominal ?? 0) : 0)
+            : nominal;
           return (
             <div key={kat} className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-start gap-4">
               <div className={`p-2.5 ${cfg.bgColor} rounded-lg shrink-0`}>
@@ -708,18 +779,39 @@ export default function LaporanPage() {
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 font-medium">{kat}</p>
                 <p className="text-xl font-bold mt-0.5">
-                  {loading ? "..." : formatNumber(trx + pedamiPlnTrx)} <span className="text-xs font-normal text-slate-400">Trx</span>
+                  {loading ? "..." : formatNumber(activeTrx)} <span className="text-xs font-normal text-slate-400">Trx</span>
                 </p>
                 <p className={`text-[11px] ${cfg.color} font-semibold mt-0.5 truncate`}>
-                  {loading ? "..." : formatRupiah(nominal + pedamiPlnNominal)}
+                  {loading ? "..." : formatRupiah(activeNominal)}
                 </p>
-                {pedamiPlnTrx > 0 && (
-                  <p className="text-[10px] text-indigo-500 mt-0.5">+{formatNumber(pedamiPlnTrx)} Pedami</p>
-                )}
               </div>
             </div>
           );
         })}
+
+        {/* Total Semua Transaksi */}
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border-2 border-primary/30 dark:border-primary/40 flex items-start gap-4 shadow-sm">
+          <div className="p-2.5 bg-primary/10 text-primary rounded-lg shrink-0">
+            <span className="material-symbols-outlined text-2xl">summarize</span>
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500 font-medium">Total Semua</p>
+            <p className="text-xl font-bold mt-0.5">
+              {loading ? "..." : formatNumber(
+                dataSource === "pedami"
+                  ? (pedamiSummary?.gabungan.totalTrx ?? 0)
+                  : (summary?.gabungan.totalTrx ?? 0)
+              )} <span className="text-xs font-normal text-slate-400">Trx</span>
+            </p>
+            <p className="text-[11px] text-primary font-semibold mt-0.5 truncate">
+              {loading ? "..." : formatRupiah(
+                dataSource === "pedami"
+                  ? (pedamiSummary?.gabungan.totalNominal ?? 0)
+                  : (summary?.gabungan.totalNominal ?? 0)
+              )}
+            </p>
+          </div>
+        </div>
       </section>
 
       {/* Main Content */}
@@ -887,17 +979,17 @@ export default function LaporanPage() {
               </div>
               <div className="flex items-end">
                 <button
-                  onClick={() => { fetchData(); fetchPedamiData(); }}
-                  disabled={loading || pedamiLoading}
+                  onClick={() => { fetchData(); if (includePedami) fetchPedamiData(); }}
+                  disabled={loading || (includePedami && pedamiLoading)}
                   className="w-full h-11 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold rounded-lg flex items-center justify-center gap-2 transition-all"
                 >
-                  {(loading || pedamiLoading) ? (
+                  {(loading || (includePedami && pedamiLoading)) ? (
                     <>
                       <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
-                      <span>Memuat{pedamiLoading && loading ? " semua..." : pedamiLoading ? " Pedami..." : " Portal..."}</span>
+                      <span>Memuat {dataSource === "pedami" ? "Pedami..." : "Portal..."}</span>
                     </>
                   ) : (
                     <>
@@ -909,31 +1001,26 @@ export default function LaporanPage() {
               </div>
             </div>
 
-            {/* Sumber Data Toggle */}
+            {/* Sumber Data Select */}
             <div className="mt-4 flex items-center gap-3">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Sumber Data:</span>
-              <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden text-xs font-bold">
-                {(["semua", "portal", "pedami"] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setSourceSel(s)}
-                    className={`px-3 py-1.5 transition-colors ${
-                      sourceSel === s
-                        ? s === "pedami"
-                          ? "bg-indigo-600 text-white"
-                          : s === "portal"
-                          ? "bg-primary text-white"
-                          : "bg-slate-700 text-white"
-                        : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    }`}
-                  >
-                    {s === "semua" ? "Gabungan" : s === "portal" ? "Portal Utilitas" : "Pedami Payment"}
-                    {s === "pedami" && pedamiLoading && (
-                      <span className="ml-1 inline-block w-2 h-2 rounded-full bg-indigo-300 animate-pulse" />
-                    )}
-                  </button>
-                ))}
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0">Sumber Laporan</label>
+              <div className="relative">
+                <select
+                  value={dataSource}
+                  onChange={(e) => setDataSource(e.target.value as "percobaan" | "pedami")}
+                  className="h-8 pl-3 pr-8 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 appearance-none cursor-pointer"
+                >
+                  <option value="percobaan">Aplikasi Percobaan (data lokal)</option>
+                  <option value="pedami">API Pedami Payment (live)</option>
+                </select>
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">▾</span>
               </div>
+              {includePedami && pedamiLoading && (
+                <span className="inline-flex items-center gap-1 text-xs text-indigo-500">
+                  <span className="inline-block w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                  Memuat...
+                </span>
+              )}
             </div>
           </div>
 

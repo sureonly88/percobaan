@@ -120,8 +120,9 @@ export default function InquiryMonitoringTab({ autoRefresh }: { autoRefresh: boo
   const [search, setSearch] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [providerFilter, setProviderFilter] = useState<InquiryProviderFilter>("ALL");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const todayStr = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD format
+  const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState(todayStr);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
 

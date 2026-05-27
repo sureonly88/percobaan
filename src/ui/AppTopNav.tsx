@@ -69,6 +69,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Dokumentasi API", href: "/provider/docs", icon: "menu_book" },
       { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
       { label: "DB Manager", href: "/db-manage", icon: "database" },
+      { label: "Import Transaksi", href: "/import-transaksi", icon: "move_to_inbox" },
     ],
   },
 ];
