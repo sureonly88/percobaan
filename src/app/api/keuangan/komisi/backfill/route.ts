@@ -22,6 +22,7 @@ interface ItemRow extends RowDataPacket {
   admin_fee: string;
   total: string;
   paid_at: string | null;
+  created_at: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -56,13 +57,13 @@ export async function POST(req: NextRequest) {
     `SELECT i.id, i.item_code, i.transaction_code, r.multi_payment_code,
             r.loket_code, r.username,
             i.provider, i.service_type, i.product_code,
-            i.amount, i.admin_fee, i.total, i.paid_at
+            i.amount, i.admin_fee, i.total, i.paid_at, i.created_at
        FROM multi_payment_items i
        JOIN multi_payment_requests r ON r.id = i.multi_payment_id
       WHERE i.status = 'SUCCESS'
-        AND i.paid_at >= ?
-        AND i.paid_at < DATE_ADD(?, INTERVAL 1 DAY)
-      ORDER BY i.paid_at ASC`,
+        AND COALESCE(i.paid_at, i.created_at) >= ?
+        AND COALESCE(i.paid_at, i.created_at) < DATE_ADD(?, INTERVAL 1 DAY)
+      ORDER BY COALESCE(i.paid_at, i.created_at) ASC`,
     [startDate, endDate]
   );
 
@@ -72,6 +73,13 @@ export async function POST(req: NextRequest) {
   const errors: string[] = [];
 
   for (const row of rows) {
+    // Hapus entry ACCRUED lama agar perubahan aturan komisi langsung berlaku.
+    // Entry berstatus PAID tidak dihapus karena sudah diselesaikan.
+    await pool.execute(
+      `DELETE FROM commission_ledger WHERE payment_item_id = ? AND status = 'ACCRUED'`,
+      [row.id]
+    );
+
     const ctx: CommissionContext = {
       paymentItemId: row.id,
       itemCode: row.item_code,
@@ -85,7 +93,7 @@ export async function POST(req: NextRequest) {
       amount: parseFloat(row.amount),
       adminFee: parseFloat(row.admin_fee),
       total: parseFloat(row.total),
-      paidAt: row.paid_at ? new Date(row.paid_at) : new Date(),
+      paidAt: row.paid_at ? new Date(row.paid_at) : (row.created_at ? new Date(row.created_at) : new Date()),
     };
 
     const result = await recordCommissionsSafe(ctx);
@@ -94,7 +102,7 @@ export async function POST(req: NextRequest) {
       failed++;
       errors.push(`${row.item_code}: recordCommissions threw an error`);
     } else if (result.inserted === 0) {
-      skipped++; // tidak ada rule cocok, atau semua sudah ada (duplicate)
+      skipped++; // tidak ada rule yang cocok untuk item ini
     } else {
       processed++;
     }

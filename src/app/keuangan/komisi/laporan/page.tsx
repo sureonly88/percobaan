@@ -92,6 +92,7 @@ export default function LaporanKomisiPage() {
   const [data, setData] = useState<Report | null>(null);
   const [loading, setLoading] = useState(false);
   const [lokets, setLokets] = useState<Array<{ loket_code: string; nama: string }>>([]); 
+  const [detailPage, setDetailPage] = useState(1);
   const [showBackfill, setShowBackfill] = useState(false);
   const [backfillStart, setBackfillStart] = useState(defaultStart());
   const [backfillEnd, setBackfillEnd] = useState(todayStr());
@@ -118,6 +119,7 @@ export default function LaporanKomisiPage() {
       const res = await fetch(`/api/keuangan/komisi/laporan?${sp.toString()}`);
       const j = await res.json();
       setData(j);
+      setDetailPage(1);
     } finally {
       setLoading(false);
     }
@@ -486,60 +488,137 @@ export default function LaporanKomisiPage() {
       </div>
 
       {/* Detail */}
-      {showDetail && data && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-          <h2 className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100 border-b border-slate-100 dark:border-slate-800">
-            Detail Transaksi <span className="text-xs font-normal text-slate-400">(max 1000)</span>
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                <tr>
-                  <th className="text-left px-2 py-2">Tanggal</th>
-                  <th className="text-left px-2 py-2">Loket</th>
-                  <th className="text-left px-2 py-2">User</th>
-                  <th className="text-left px-2 py-2">Provider</th>
-                  <th className="text-left px-2 py-2">Item</th>
-                  <th className="text-left px-2 py-2">Target</th>
-                  <th className="text-left px-2 py-2">Rule</th>
-                  <th className="text-right px-2 py-2">Base</th>
-                  <th className="text-right px-2 py-2">Komisi</th>
-                  <th className="text-center px-2 py-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.detail.length === 0 && (
-                  <tr><td colSpan={10} className="text-center py-6 text-slate-400">Tidak ada detail</td></tr>
-                )}
-                {data.detail.map((d) => (
-                  <tr key={d.id} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-2 py-1.5">{fmtDate(d.paidAt)}</td>
-                    <td className="px-2 py-1.5 font-mono">{d.loketCode}</td>
-                    <td className="px-2 py-1.5">{d.username}</td>
-                    <td className="px-2 py-1.5">{d.provider}</td>
-                    <td className="px-2 py-1.5 font-mono">{d.itemCode}</td>
-                    <td className="px-2 py-1.5">
-                      <span className={`px-1.5 py-0.5 rounded text-xs ${
-                        d.target === "KASIR" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
-                      }`}>{d.target}</span>
-                    </td>
-                    <td className="px-2 py-1.5">{d.ruleName} <span className="text-slate-400">({d.ruleType === "PERCENT" ? `${d.ruleValue}%` : fmtRp(d.ruleValue)})</span></td>
-                    <td className="px-2 py-1.5 text-right">{fmtRp(d.baseAmount)}</td>
-                    <td className="px-2 py-1.5 text-right font-semibold text-emerald-700 dark:text-emerald-400">{fmtRp(d.commissionAmount)}</td>
-                    <td className="px-2 py-1.5 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-xs ${
-                        d.status === "ACCRUED" ? "bg-amber-100 text-amber-700" :
-                        d.status === "PAID" ? "bg-emerald-100 text-emerald-700" :
-                        "bg-slate-200 text-slate-500"
-                      }`}>{d.status}</span>
-                    </td>
+      {showDetail && data && (() => {
+        const DETAIL_PER_PAGE = 50;
+        const totalPages = Math.max(1, Math.ceil(data.detail.length / DETAIL_PER_PAGE));
+        const safePage = Math.min(detailPage, totalPages);
+        const pageRows = data.detail.slice((safePage - 1) * DETAIL_PER_PAGE, safePage * DETAIL_PER_PAGE);
+        return (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800">
+              <h2 className="font-bold text-slate-800 dark:text-slate-100">
+                Detail Transaksi
+                <span className="ml-2 text-xs font-normal text-slate-400">{data.detail.length.toLocaleString("id-ID")} baris</span>
+              </h2>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2 text-sm">
+                  <button
+                    onClick={() => setDetailPage(1)}
+                    disabled={safePage === 1}
+                    className="h-8 w-8 rounded border border-slate-200 dark:border-slate-700 flex items-center justify-center disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <span className="material-symbols-outlined text-base">first_page</span>
+                  </button>
+                  <button
+                    onClick={() => setDetailPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage === 1}
+                    className="h-8 w-8 rounded border border-slate-200 dark:border-slate-700 flex items-center justify-center disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <span className="material-symbols-outlined text-base">chevron_left</span>
+                  </button>
+                  <span className="text-slate-600 dark:text-slate-300 min-w-[6rem] text-center">
+                    Hal {safePage} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setDetailPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage === totalPages}
+                    className="h-8 w-8 rounded border border-slate-200 dark:border-slate-700 flex items-center justify-center disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <span className="material-symbols-outlined text-base">chevron_right</span>
+                  </button>
+                  <button
+                    onClick={() => setDetailPage(totalPages)}
+                    disabled={safePage === totalPages}
+                    className="h-8 w-8 rounded border border-slate-200 dark:border-slate-700 flex items-center justify-center disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <span className="material-symbols-outlined text-base">last_page</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  <tr>
+                    <th className="text-left px-2 py-2">Tanggal</th>
+                    <th className="text-left px-2 py-2">Loket</th>
+                    <th className="text-left px-2 py-2">User</th>
+                    <th className="text-left px-2 py-2">Provider</th>
+                    <th className="text-left px-2 py-2">Item</th>
+                    <th className="text-left px-2 py-2">Target</th>
+                    <th className="text-left px-2 py-2">Rule</th>
+                    <th className="text-right px-2 py-2">Base</th>
+                    <th className="text-right px-2 py-2">Komisi</th>
+                    <th className="text-center px-2 py-2">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.detail.length === 0 && (
+                    <tr><td colSpan={10} className="text-center py-6 text-slate-400">Tidak ada detail</td></tr>
+                  )}
+                  {pageRows.map((d) => (
+                    <tr key={d.id} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="px-2 py-1.5">{fmtDate(d.paidAt)}</td>
+                      <td className="px-2 py-1.5 font-mono">{d.loketCode}</td>
+                      <td className="px-2 py-1.5">{d.username}</td>
+                      <td className="px-2 py-1.5">{d.provider}</td>
+                      <td className="px-2 py-1.5 font-mono">{d.itemCode}</td>
+                      <td className="px-2 py-1.5">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${
+                          d.target === "KASIR" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                        }`}>{d.target}</span>
+                      </td>
+                      <td className="px-2 py-1.5">{d.ruleName} <span className="text-slate-400">({d.ruleType === "PERCENT" ? `${d.ruleValue}%` : fmtRp(d.ruleValue)})</span></td>
+                      <td className="px-2 py-1.5 text-right">{fmtRp(d.baseAmount)}</td>
+                      <td className="px-2 py-1.5 text-right font-semibold text-emerald-700 dark:text-emerald-400">{fmtRp(d.commissionAmount)}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${
+                          d.status === "ACCRUED" ? "bg-amber-100 text-amber-700" :
+                          d.status === "PAID" ? "bg-emerald-100 text-emerald-700" :
+                          "bg-slate-200 text-slate-500"
+                        }`}>{d.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500">
+                <span>
+                  Menampilkan {((safePage - 1) * DETAIL_PER_PAGE + 1).toLocaleString("id-ID")}–{Math.min(safePage * DETAIL_PER_PAGE, data.detail.length).toLocaleString("id-ID")} dari {data.detail.length.toLocaleString("id-ID")} baris
+                </span>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 2)
+                    .reduce<(number | "...")[]>((acc, p, i, arr) => {
+                      if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push("...");
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, i) =>
+                      p === "..." ? (
+                        <span key={`ellipsis-${i}`} className="px-1">…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => setDetailPage(p as number)}
+                          className={`h-7 min-w-[1.75rem] px-1.5 rounded text-xs font-medium ${
+                            p === safePage
+                              ? "bg-primary text-white"
+                              : "border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

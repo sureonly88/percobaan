@@ -36,6 +36,9 @@ const pool =
     idleTimeout: 60000,
     enableKeepAlive: true,
     keepAliveInitialDelay: 30000,
+    // Kembalikan kolom DATE sebagai string 'YYYY-MM-DD' agar tidak ada
+    // konversi timezone saat digunakan di <input type="date">.
+    dateStrings: ["DATE"],
     // Cegah serangan multi-statement injection (defense-in-depth);
     // semua query proyek pakai placeholder, jadi flag ini aman.
     multipleStatements: false,

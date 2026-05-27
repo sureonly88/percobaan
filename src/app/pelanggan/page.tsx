@@ -99,6 +99,11 @@ function formatNumber(num: number): string {
   return num.toLocaleString("id-ID");
 }
 
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function formatPeriode(blth: string): string {
   if (!blth || blth.length < 6) return blth || "-";
   const y = blth.substring(0, 4);
@@ -261,8 +266,8 @@ export default function PelangganPage() {
   const [search, setSearch] = useState("");
   const [filterGolongan, setFilterGolongan] = useState("semua");
   const [filterLoket, setFilterLoket] = useState("semua");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [startDate, setStartDate] = useState(todayStr());
+  const [endDate, setEndDate] = useState(todayStr());
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -289,8 +294,8 @@ export default function PelangganPage() {
   const [plnLoading, setPlnLoading] = useState(true);
   const [plnSearch, setPlnSearch] = useState("");
   const [plnFilterLoket, setPlnFilterLoket] = useState("semua");
-  const [plnStartDate, setPlnStartDate] = useState("");
-  const [plnEndDate, setPlnEndDate] = useState("");
+  const [plnStartDate, setPlnStartDate] = useState(todayStr());
+  const [plnEndDate, setPlnEndDate] = useState(todayStr());
   const [plnPage, setPlnPage] = useState(1);
   const [plnTotalPages, setPlnTotalPages] = useState(1);
   const [plnTotalCount, setPlnTotalCount] = useState(0);

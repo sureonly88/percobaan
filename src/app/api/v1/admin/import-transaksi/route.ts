@@ -324,6 +324,7 @@ export async function POST(request: NextRequest) {
           } else {
             stats.updated++;
           }
+
         } catch (e) {
           stats.errors++;
           if (stats.errorDetails.length < 20) {
