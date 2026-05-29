@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { Breadcrumb, Modal } from "@/ui";
 import { formatRupiah } from "@/data/mock";
-import { printReceipt } from "@/lib/print-receipt";
+import { printReceipt, ReceiptBillItem } from "@/lib/print-receipt";
 import type { CustomerFavorite, FavoriteGroup } from "@/types";
 import { PULSA_OPERATORS, DATA_OPERATORS, PULSA_NOMINALS, DATA_PACKAGES, PDAM_KALIMANTAN } from "@/data/lunasin-products";
 import type { MultiPaymentProgressEvent, MultiPaymentResponse } from "@/lib/multipay/types";
@@ -474,7 +474,7 @@ export default function PembayaranPage() {
     const successBills = receipt.results.filter((r) => r.success);
     if (successBills.length === 0) return;
     const snapshot = daftarTagihanSnapshot;
-    const printableBills = successBills.flatMap((r) => {
+    const printableBills = successBills.flatMap((r): ReceiptBillItem[] => {
       if (r.provider === "LUNASIN") {
         const pd = r.providerData || {};
         const rpAdmin = Number(pd.rp_admin || r.adminFee || 0);
