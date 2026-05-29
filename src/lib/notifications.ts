@@ -43,6 +43,48 @@ export async function createNotificationSafe(input: CreateNotificationInput): Pr
 }
 
 /**
+ * Notify kasir about a successful transaction (personal, not broadcast).
+ */
+export async function notifyTransactionSuccess(opts: {
+  idempotencyKey: string;
+  username: string;
+  loketCode: string;
+  billCount: number;
+  totalAmount: number;
+}): Promise<void> {
+  const formattedAmount = opts.totalAmount.toLocaleString("id-ID");
+  await createNotificationSafe({
+    recipientUsername: opts.username,
+    category: "transaksi",
+    severity: "success",
+    title: "Pembayaran Berhasil",
+    message: `${opts.billCount} tagihan berhasil dibayarkan senilai Rp ${formattedAmount}.`,
+    link: `/monitoring/${opts.idempotencyKey}`,
+  });
+}
+
+/**
+ * Notify kasir about a partial success transaction.
+ */
+export async function notifyTransactionPartial(opts: {
+  idempotencyKey: string;
+  username: string;
+  loketCode: string;
+  successCount: number;
+  totalCount: number;
+  errorMessage: string;
+}): Promise<void> {
+  await createNotificationSafe({
+    recipientUsername: opts.username,
+    category: "transaksi",
+    severity: "warning",
+    title: "Pembayaran Sebagian Berhasil",
+    message: `${opts.successCount} dari ${opts.totalCount} tagihan berhasil diproses. ${opts.totalCount - opts.successCount} tagihan gagal: ${opts.errorMessage}`,
+    link: `/monitoring/${opts.idempotencyKey}`,
+  });
+}
+
+/**
  * Notify all admins + supervisors about a failed transaction.
  */
 export async function notifyTransactionFailed(opts: {

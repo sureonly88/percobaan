@@ -169,8 +169,8 @@ export async function mockPdamPayment(params: {
     throw err;
   }
 
-  // SUCCESS cases
-  const billData = [makeBill(params.idpel, 0, { nama: `PELANGGAN DUMMY ${params.idpel.slice(-4)}` })];
+  // SUCCESS cases — use offsetMonths=1 to match inquiry (which also returns monthsBefore(1))
+  const billData = [makeBill(params.idpel, 1, { nama: `PELANGGAN DUMMY ${params.idpel.slice(-4)}` })];
   const response: PdamPaymentResponse = {
     RequestPaymentBulk_Rev2Result: {
       data: billData,

@@ -20,6 +20,8 @@ import { getProviderAdapter } from "@/lib/multipay/providers";
 interface MultiPaymentRuntimeContext {
   baseUrl: string;
   cookieHeader?: string;
+  /** Authorization header forwarded from original request (e.g. Bearer token from mobile) */
+  authorizationHeader?: string;
   /**
    * Optional callback invoked at each stage of orchestration.
    * Used by the SSE route to stream progress to the client.
@@ -116,6 +118,9 @@ export async function orchestrateMultiPayment(
   });
 
   if (createResult.idempotent) {
+    // Emit `done` so SSE clients (mobile) receive the cached result and don't
+    // time out waiting for an event that will never come.
+    emit(runtimeContext, { type: "done", response: createResult.response });
     return createResult.response;
   }
 
@@ -180,6 +185,7 @@ export async function orchestrateMultiPayment(
         username: input.username,
         baseUrl: runtimeContext.baseUrl,
         cookieHeader: runtimeContext.cookieHeader,
+        authorizationHeader: runtimeContext.authorizationHeader,
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown provider error";

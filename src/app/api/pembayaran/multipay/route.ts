@@ -142,6 +142,8 @@ export async function POST(req: NextRequest) {
   const internalPort = process.env.PORT || "3000";
   const baseUrl = `http://localhost:${internalPort}`;
   const cookieHeader = req.headers.get("cookie") || undefined;
+  // Forward Authorization header so Bearer-token (mobile) callers can reach internal routes.
+  const authorizationHeader = req.headers.get("authorization") || undefined;
 
   const wantsStream = req.nextUrl.searchParams.get("stream") === "1";
 
@@ -171,7 +173,7 @@ export async function POST(req: NextRequest) {
           await assertCashierCanProcessPayment({ username, loketCode: body.loketCode });
           await orchestrateMultiPayment(
             { ...body, username },
-            { baseUrl, cookieHeader, onProgress: sendEvent },
+            { baseUrl, cookieHeader, authorizationHeader, onProgress: sendEvent },
           );
         } catch (error: unknown) {
           const status = error instanceof CashierClosingError ? error.status : 500;
@@ -207,6 +209,7 @@ export async function POST(req: NextRequest) {
     }, {
       baseUrl,
       cookieHeader,
+      authorizationHeader,
     });
 
     return NextResponse.json(result);

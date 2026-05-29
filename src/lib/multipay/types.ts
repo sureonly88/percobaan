@@ -46,6 +46,8 @@ export interface ProviderExecutionContext {
   username: string;
   baseUrl: string;
   cookieHeader?: string;
+  /** Authorization header forwarded from original request (e.g. Bearer token from mobile) */
+  authorizationHeader?: string;
 }
 
 export interface ProviderExecutionItem {

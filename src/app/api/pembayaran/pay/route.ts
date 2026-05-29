@@ -12,7 +12,7 @@ import { CircuitOpenError } from "@/lib/circuit-breaker";
 import pool from "@/lib/db";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { logTransactionEventSafe, logTransactionEventFireAndForget } from "@/lib/transaction-events";
-import { notifyTransactionFailed, notifyLowBalance } from "@/lib/notifications";
+import { notifyTransactionFailed, notifyTransactionSuccess, notifyTransactionPartial, notifyLowBalance } from "@/lib/notifications";
 import { cached } from "@/lib/cache";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
 
@@ -928,8 +928,32 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Auto-notify on failure
-    if (finalStatus === "FAILED" || finalStatus === "PARTIAL_SUCCESS") {
+    // Auto-notify berdasarkan status akhir transaksi
+    if (finalStatus === "SUCCESS") {
+      notifyTransactionSuccess({
+        idempotencyKey: idempotencyKeyTrimmed,
+        username,
+        loketCode,
+        billCount: results.length,
+        totalAmount: results.reduce((s, r) => s + r.total, 0),
+      });
+    } else if (finalStatus === "PARTIAL_SUCCESS") {
+      notifyTransactionPartial({
+        idempotencyKey: idempotencyKeyTrimmed,
+        username,
+        loketCode,
+        successCount,
+        totalCount: results.length,
+        errorMessage: failedSample?.error || "Sebagian tagihan gagal",
+      });
+      notifyTransactionFailed({
+        idempotencyKey: idempotencyKeyTrimmed,
+        username,
+        loketCode,
+        errorMessage: failedSample?.error || "Transaksi gagal",
+        billCount: results.length,
+      });
+    } else {
       notifyTransactionFailed({
         idempotencyKey: idempotencyKeyTrimmed,
         username,

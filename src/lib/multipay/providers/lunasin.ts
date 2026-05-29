@@ -45,10 +45,15 @@ function toLegacyLunasinBill(item: ProviderExecutionItem): LegacyLunasinBill | n
 }
 
 function buildHeaders(ctx: ProviderExecutionContext): HeadersInit {
-  return {
-    "Content-Type": "application/json",
-    ...(ctx.cookieHeader ? { cookie: ctx.cookieHeader } : {}),
-  };
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (ctx.cookieHeader) {
+    headers["cookie"] = ctx.cookieHeader;
+  } else if (ctx.authorizationHeader) {
+    // When called from a mobile Bearer-token context there is no session cookie;
+    // forward the original Authorization header so the internal pay route can auth.
+    headers["authorization"] = ctx.authorizationHeader;
+  }
+  return headers;
 }
 
 function mapLunasinStatus(result: Record<string, unknown>) {

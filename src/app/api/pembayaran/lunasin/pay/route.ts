@@ -6,7 +6,7 @@ import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
 import pool from "@/lib/db";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
-import { notifyTransactionFailed, notifyLowBalance } from "@/lib/notifications";
+import { notifyTransactionFailed, notifyTransactionSuccess, notifyTransactionPartial, notifyLowBalance } from "@/lib/notifications";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
 
 interface LunasinBill {
@@ -608,7 +608,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (finalStatus === "FAILED" || finalStatus === "PARTIAL_SUCCESS") {
+    if (finalStatus === "SUCCESS") {
+      notifyTransactionSuccess({
+        idempotencyKey: idempotencyKeyTrimmed,
+        username,
+        loketCode,
+        billCount: results.length,
+        totalAmount: results.reduce((s, r) => s + r.total, 0),
+      });
+    } else if (finalStatus === "PARTIAL_SUCCESS") {
+      notifyTransactionPartial({
+        idempotencyKey: idempotencyKeyTrimmed,
+        username,
+        loketCode,
+        successCount,
+        totalCount: results.length,
+        errorMessage: failedSample?.error || "Sebagian tagihan gagal",
+      });
+      notifyTransactionFailed({
+        idempotencyKey: idempotencyKeyTrimmed,
+        username,
+        loketCode,
+        errorMessage: failedSample?.error || "Transaksi Lunasin gagal",
+        billCount: results.length,
+      });
+    } else {
       notifyTransactionFailed({
         idempotencyKey: idempotencyKeyTrimmed,
         username,
