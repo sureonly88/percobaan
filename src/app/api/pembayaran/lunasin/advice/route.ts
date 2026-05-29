@@ -3,7 +3,7 @@ import { getToken } from "next-auth/jwt";
 import { canProcessPayment, normalizeRole } from "@/lib/rbac";
 import { LunasinApiError, lunasinAdvice } from "@/lib/lunasin-api";
 import pool from "@/lib/db";
-import { RowDataPacket } from "mysql2";
+import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { notifyLowBalance } from "@/lib/notifications";
 
@@ -494,10 +494,11 @@ export async function POST(req: NextRequest) {
     } | null = null;
 
     // Update both tables if transactionCode provided
+    let transitionedToSuccess = false;
     if (transactionCode) {
       // ── Update multi_payment_items (primary) ──
       if (result.isSuccess) {
-        await pool.execute(
+        const [successUpdate] = await pool.execute<ResultSetHeader>(
           `UPDATE multi_payment_items
               SET status = 'SUCCESS',
                   provider_error_code = NULL,
@@ -514,6 +515,9 @@ export async function POST(req: NextRequest) {
             transactionCode,
           ]
         );
+        // Hanya advice yang benar-benar mentransisikan item ke SUCCESS yang
+        // boleh memotong saldo (cegah double-deduct bila item sudah SUCCESS).
+        transitionedToSuccess = successUpdate.affectedRows > 0;
       } else if (result.isFailed) {
         await pool.execute(
           `UPDATE multi_payment_items
@@ -550,11 +554,12 @@ export async function POST(req: NextRequest) {
         // non-critical
       }
 
-      // Deduct saldo from loket on success
-      if (result.isSuccess) {
+      // Deduct saldo from loket on success — hanya jika advice ini yang
+      // benar-benar mentransisikan item ke SUCCESS (cegah double-deduct).
+      if (result.isSuccess && transitionedToSuccess) {
         try {
           const [txRows] = await pool.query<RowDataPacket[]>(
-            `SELECT i.total as rp_total, r.loket_code, r.loket_name
+            `SELECT i.total as item_total, r.loket_code, r.loket_name
                FROM multi_payment_items i
                JOIN multi_payment_requests r ON r.id = i.multi_payment_id
               WHERE i.transaction_code = ? LIMIT 1`,
@@ -563,8 +568,34 @@ export async function POST(req: NextRequest) {
           if (txRows.length > 0) {
             const txRow = txRows[0];
             const txLoketCode = txRow.loket_code;
-            const txTotal = Number(txRow.rp_total || 0);
-            await pool.execute("UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?", [txTotal, txLoketCode]);
+            // Nominal otoritatif dari provider; fallback ke nilai item.
+            const providerRpTotal = Number((result.data as Record<string, unknown>)?.rp_total ?? 0);
+            const txTotal = providerRpTotal > 0 ? providerRpTotal : Number(txRow.item_total || 0);
+
+            const [deductRes] = await pool.execute<ResultSetHeader>(
+              "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ? AND pulsa >= ?",
+              [txTotal, txLoketCode, txTotal]
+            );
+            if (deductRes.affectedRows === 0) {
+              // Saldo tak mencukupi — provider sudah memotong, paksa potong &
+              // catat anomali agar bisa direkonsiliasi keuangan.
+              await pool.execute(
+                "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?",
+                [txTotal, txLoketCode]
+              );
+              await logTransactionEventSafe({
+                idempotencyKey: relatedIdempotencyKey,
+                transactionCode,
+                provider: "LUNASIN",
+                eventType: "LOKET_BALANCE_NEGATIVE",
+                severity: "ERROR",
+                username,
+                loketCode: txLoketCode,
+                custId: idpel.trim(),
+                message: `Saldo loket ${txLoketCode} menjadi negatif setelah advice success (potong Rp ${txTotal.toLocaleString("id-ID")})`,
+                payload: { txTotal },
+              });
+            }
 
             const [balRows] = await pool.query<RowDataPacket[]>(
               "SELECT pulsa FROM lokets WHERE loket_code = ? LIMIT 1",

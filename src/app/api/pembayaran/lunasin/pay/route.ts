@@ -365,10 +365,35 @@ export async function POST(req: NextRequest) {
             providerData: payResult.data as unknown as Record<string, unknown>,
           });
 
-          // Deduct saldo (bill.total sudah mencakup admin fee)
-          const billTotal = bill.total;
+          // Deduct saldo — gunakan nominal otoritatif dari provider bila tersedia
+          // (anti-manipulasi nilai dari client). Fallback ke bill.total.
+          const providerData = (payResult.data ?? {}) as Record<string, unknown>;
+          const providerRpTotal = Number(providerData.rp_total ?? 0);
+          const providerRpAmount = Number(providerData.rp_amount ?? 0);
+          const providerRpAdmin = Number(providerData.rp_admin ?? 0);
+          const billTotal = providerRpTotal > 0 ? providerRpTotal : bill.total;
           try {
-            await pool.execute("UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?", [billTotal, loketCode]);
+            const [deductRes] = await pool.execute<ResultSetHeader>(
+              "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ? AND pulsa >= ?",
+              [billTotal, loketCode, billTotal]
+            );
+            if (deductRes.affectedRows === 0) {
+              // Saldo tak mencukupi (kemungkinan race) — provider sudah memotong,
+              // paksa potong & catat anomali agar bisa direkonsiliasi keuangan.
+              await pool.execute("UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?", [billTotal, loketCode]);
+              await logTransactionEventSafe({
+                idempotencyKey: idempotencyKeyTrimmed,
+                transactionCode,
+                provider: "LUNASIN",
+                eventType: "LOKET_BALANCE_NEGATIVE",
+                severity: "ERROR",
+                username,
+                loketCode,
+                custId: bill.idpel,
+                message: `Saldo loket ${loketCode} menjadi negatif setelah payment success (potong Rp ${billTotal.toLocaleString("id-ID")})`,
+                payload: { billTotal },
+              });
+            }
             try {
               const [balRows] = await pool.query<RowDataPacket[]>(
                 "SELECT pulsa FROM lokets WHERE loket_code = ? LIMIT 1",
@@ -391,8 +416,8 @@ export async function POST(req: NextRequest) {
           // Posting jurnal GL (best-effort)
           try {
             const { postPaymentSuccess } = await import("@/lib/gl/posting-rules");
-            const billAmount = Math.max(0, billTotal - (biayaAdmin || 0));
-            const billAdmin = Math.max(0, billTotal - billAmount);
+            const billAmount = providerRpAmount > 0 ? providerRpAmount : Math.max(0, billTotal - (biayaAdmin || 0));
+            const billAdmin = providerRpAdmin > 0 ? providerRpAdmin : Math.max(0, billTotal - billAmount);
             await postPaymentSuccess({
               idempotencyKey: transactionCode,
               provider: "LUNASIN",

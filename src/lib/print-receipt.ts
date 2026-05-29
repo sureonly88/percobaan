@@ -53,6 +53,15 @@ export interface ReceiptBillItem {
   noreg?: string;
   tglReg?: string;
   jenisReg?: string;
+  // PDAM Lunasin-specific (via Lunasin API — berbeda dari field PDAM lama)
+  namaPdam?: string;
+  meterAwal?: number;   // meter_awal per periode
+  meterAkhir?: number;  // meter_akhir per periode
+  rpAir?: number;
+  rpDanameter?: number;
+  rpSampah?: number;
+  rpAdministrasi?: number;
+  extraBillFields?: Array<{ label: string; value: string }>; // nama_field_1 dll
   // BPJS-specific
   nova?: string;
   novaKepalaKeluarga?: string;
@@ -225,12 +234,15 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
 
   data.bills.forEach((b, idx) => {
     const isPln = b.type === "pln";
+    const isPdamLunasin = isPln && (b.kodeProduk?.startsWith("pdam") ?? false);
 
     push(`[${idx + 1}] ${b.nama}`);
     let idLine = `    ID   : ${b.idpel}`;
-    if (!isPln && b.periode) idLine += "  Periode : " + fmtPeriode(b.periode);
+    if (isPdamLunasin && b.periode) idLine += "  Periode : " + fmtPeriode(b.periode);
+    else if (!isPln && b.periode) idLine += "  Periode : " + fmtPeriode(b.periode);
     push(idLine);
-    if (b.alamat) push("    Alamat: " + b.alamat.substring(0, COLS - 12));
+    if (b.namaPdam) push("    PDAM  : " + b.namaPdam);
+    if (!isPdamLunasin && b.alamat) push("    Alamat: " + b.alamat.substring(0, COLS - 12));
     if (b.transactionCode) push("    Kode  : " + b.transactionCode);
 
     const pairs: [string, string][] = [];
@@ -240,8 +252,32 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
       const isBpjs   = b.kodeProduk?.startsWith("bpjs");
       const isTelkom = b.kodeProduk?.startsWith("telkom");
       const isPulsa  = b.kodeProduk?.startsWith("pulsa") || b.kodeProduk?.startsWith("paketdata");
-      if (prod) pairs.push(["Produk", b.namaProduk || prod]);
-      if (isBpjs) {
+      if (isPdamLunasin) {
+        // ── PDAM via Lunasin API ─────────────────────────────────────────────
+        if (b.alamat)   pairs.push(["Alamat", b.alamat.substring(0, 21)]);
+        if (b.gol)      pairs.push(["Golongan", b.gol]);
+        if (b.meterAwal != null && b.meterAkhir != null) {
+          pairs.push(["Stand Meter", `${b.meterAwal} -> ${b.meterAkhir}`]);
+          pairs.push(["Pemakaian", `${(b.meterAkhir - b.meterAwal).toLocaleString("id-ID")} m3`]);
+        } else if (b.standMeter) {
+          pairs.push(["Stand Meter", b.standMeter]);
+        }
+        // Komponen tagihan — tampilkan semua meski nilainya 0
+        pairs.push(["Rek. Air",     fmtRp(b.rpAir          ?? 0)]);
+        pairs.push(["Dana Meter",   fmtRp(b.rpDanameter    ?? 0)]);
+        pairs.push(["Ret. Sampah",  fmtRp(b.rpSampah       ?? 0)]);
+        pairs.push(["Administrasi", fmtRp(b.rpAdministrasi ?? 0)]);
+        pairs.push(["Materai",      fmtRp(b.materai        ?? 0)]);
+        pairs.push(["Denda",        fmtRp(b.denda          ?? 0)]);
+        if (b.extraBillFields) {
+          for (const ef of b.extraBillFields) pairs.push([ef.label.substring(0, 12), ef.value]);
+        }
+        if (b.refnumLunasin) pairs.push(["Ref Lunasin", b.refnumLunasin]);
+        if (b.tglLunas)      pairs.push(["Tgl Lunas",   fmtTanggal(b.tglLunas)]);
+      } else if (!isPdamLunasin && prod) {
+        pairs.push(["Produk", b.namaProduk || prod]);
+      }
+      if (!isPdamLunasin && isBpjs) {
         if (b.nova)                                                 pairs.push(["No VA",        b.nova]);
         if (b.novaKepalaKeluarga && b.novaKepalaKeluarga !== b.nova) pairs.push(["VA Kepala Kel", b.novaKepalaKeluarga]);
         if (b.jumPeserta)   pairs.push(["Jml Peserta",  b.jumPeserta + " orang"]);
@@ -250,36 +286,42 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
         if (b.refnum)       pairs.push(["Ref Biller",   b.refnum]);
         if (b.tglLunas)     pairs.push(["Tgl Lunas",    fmtTanggal(b.tglLunas)]);
         if (b.pesanBiller)  pairs.push(["Info",         b.pesanBiller.substring(0, 60)]);
-      } else if (isNonrek) {
+        if ((b.rpAmount ?? b.tagihan) > 0) pairs.push(["Tagihan",      fmtRp(b.rpAmount ?? b.tagihan)]);
+        if (b.admin > 0)     pairs.push(["Biaya Admin",   fmtRp(b.admin)]);
+      } else if (!isPdamLunasin && isNonrek) {
         if (b.noreg)    pairs.push(["No Registrasi", b.noreg]);
         if (b.tglReg)   pairs.push(["Tgl Registrasi", fmtTglReg(b.tglReg)]);
         if (b.jenisReg) pairs.push(["Jenis Reg", b.jenisReg]);
-      } else if (isTelkom) {
+      } else if (!isPdamLunasin && isTelkom) {
         const jum = Number(b.jumBill || 1);
         if (jum > 1) pairs.push(["Jml Tagihan", String(jum) + " bulan"]);
         if (b.periode) pairs.push(["Periode", fmtPeriodeList(b.periode)]);
         if (b.refnum)  pairs.push(["Ref Biller", b.refnum]);
         if (b.tglLunas) pairs.push(["Tgl Lunas", fmtTanggal(b.tglLunas)]);
         if (b.refnumLunasin) pairs.push(["Ref Lunasin", b.refnumLunasin]);
-      } else if (isPulsa) {
+        if ((b.rpAmount ?? b.tagihan) > 0) pairs.push(["Tagihan",     fmtRp(b.rpAmount ?? b.tagihan)]);
+        if (b.admin > 0)      pairs.push(["Biaya Admin",  fmtRp(b.admin)]);
+      } else if (!isPdamLunasin && isPulsa) {
         if (b.nomor)             pairs.push(["No. HP",       b.nomor]);
         if (b.denom)             pairs.push(["Denominasi",   "Rp " + Number(b.denom).toLocaleString("id-ID")]);
         if (b.serialNumber)      pairs.push(["Serial No",    b.serialNumber]);
         if (b.masaBerlaku)       pairs.push(["Masa Berlaku", b.masaBerlaku]);
         if (b.tglLunas)          pairs.push(["Tgl Lunas",    fmtTanggal(b.tglLunas)]);
         if (b.refnumLunasin)     pairs.push(["Ref Lunasin",  b.refnumLunasin]);
-      } else {
+        if ((b.rpAmount ?? b.tagihan) > 0) pairs.push(["Tagihan",      fmtRp(b.rpAmount ?? b.tagihan)]);
+        if (b.admin > 0)         pairs.push(["Biaya Admin",  fmtRp(b.admin)]);
+      } else if (!isPdamLunasin) {
         if (b.tarif || b.daya) pairs.push(["Tarif/Daya", `${b.tarif ?? ""}${b.daya ? "/" + b.daya + " VA" : ""}`]);
         if (b.noMeter) pairs.push(["No Meter", b.noMeter]);
         if (b.standMeter) pairs.push(["Stand Meter", b.standMeter]);
         if (b.jumBill && b.jumBill !== "1" && b.jumBill !== "0") pairs.push(["Jml Tagihan", b.jumBill]);
         if (b.periode && !b.kodeProduk?.startsWith("pln-prepaid")) pairs.push(["Periode", fmtPeriode(b.periode)]);
       }
-      if (!isBpjs && !isTelkom && !isPulsa) {
+      if (!isPdamLunasin && !isBpjs && !isTelkom && !isPulsa) {
         if ((b.rpAmount ?? 0) > 0) pairs.push(["Tagihan", fmtRp(b.rpAmount!)]);
         if ((b.rpAdmin ?? 0) > 0) pairs.push(["Admin", fmtRp(b.rpAdmin!)]);
       }
-      if (!isBpjs && !isPulsa) {
+      if (!isPdamLunasin && !isBpjs && !isPulsa) {
         if (b.refnumLunasin) pairs.push(["Ref Lunasin", b.refnumLunasin]);
         if (b.kwh) pairs.push(["kWh", b.kwh]);
         if ((b.rpMaterai ?? 0) > 0) pairs.push(["Materai", fmtRp(b.rpMaterai!)]);
@@ -289,24 +331,27 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
         if ((b.rpToken ?? 0) > 0) pairs.push(["Nilai Token", fmtRp(b.rpToken!)]);
         if ((b.rpTotal ?? 0) > 0) pairs.push(["Total", fmtRp(b.rpTotal!)]);
       }
-      if (!isBpjs && !isTelkom && !isPulsa) {
+      if (!isPdamLunasin && !isBpjs && !isTelkom && !isPulsa) {
         if (b.refnum) pairs.push(["Ref Number", b.refnum]);
         if (b.tglLunas) pairs.push(["Tgl Lunas", b.tglLunas]);
         if (b.pesanBiller) pairs.push(["Pesan Biller", b.pesanBiller.substring(0, 21)]);
       }
     } else {
-      const pemakaian = b.pemakaian ?? ((b.standKini ?? 0) - (b.standLalu ?? 0));
-      pairs.push(["Golongan", b.gol || "-"]);
-      pairs.push(["Stand Meter", `${b.standLalu ?? 0} -> ${b.standKini ?? 0}`]);
-      pairs.push(["Pemakaian", `${pemakaian.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m3`]);
-      pairs.push(["Harga Air", fmtRp(b.hargaAir ?? 0)]);
-      pairs.push(["Beban Tetap", fmtRp(b.bebanTetap ?? 0)]);
-      pairs.push(["Biaya Meter", fmtRp(b.biayaMeter ?? 0)]);
-      pairs.push(["Limbah", fmtRp(b.limbah ?? 0)]);
-      pairs.push(["Retribusi", fmtRp(b.retribusi ?? 0)]);
-      pairs.push(["Denda", fmtRp(b.denda ?? 0)]);
-      pairs.push(["Materai", fmtRp(b.materai ?? 0)]);
-      pairs.push(["Diskon", `- ${fmtRp(b.diskon ?? 0)}`]);
+      {
+        // ── PDAM lama (pedami) ───────────────────────────────────────────────
+        const pemakaian = b.pemakaian ?? ((b.standKini ?? 0) - (b.standLalu ?? 0));
+        pairs.push(["Golongan",   b.gol || "-"]);
+        pairs.push(["Stand Meter", `${b.standLalu ?? 0} -> ${b.standKini ?? 0}`]);
+        pairs.push(["Pemakaian",  `${pemakaian.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m3`]);
+        pairs.push(["Harga Air",  fmtRp(b.hargaAir  ?? 0)]);
+        pairs.push(["Beban Tetap",fmtRp(b.bebanTetap ?? 0)]);
+        pairs.push(["Biaya Meter",fmtRp(b.biayaMeter ?? 0)]);
+        pairs.push(["Limbah",     fmtRp(b.limbah     ?? 0)]);
+        pairs.push(["Retribusi",  fmtRp(b.retribusi  ?? 0)]);
+        pairs.push(["Denda",      fmtRp(b.denda      ?? 0)]);
+        pairs.push(["Materai",    fmtRp(b.materai    ?? 0)]);
+        pairs.push(["Diskon",     `- ${fmtRp(b.diskon ?? 0)}`]);
+      }
     }
 
     for (let j = 0; j < pairs.length; j += 2) {
@@ -326,6 +371,8 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
     if (!isPln) {
       pushC2("  Tagihan", fmtRp(b.tagihan));
       pushC2("  Admin  ", fmtRp(b.admin));
+    } else if (isPdamLunasin) {
+      if ((b.admin ?? 0) > 0) pushC2("  Biaya Admin", fmtRp(b.admin));
     }
     pushC2("  SUBTOTAL", fmtRp(b.total));
 

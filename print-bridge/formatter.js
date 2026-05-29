@@ -140,12 +140,15 @@ function formatEscp(data, cfg = {}) {
   // ── Bills ──
   (data.bills || []).forEach((b, idx) => {
     const isPln = b.type === 'pln';
+    const isPdamLunasin = isPln && b.kodeProduk && b.kodeProduk.startsWith('pdam');
 
     chunks.push(bold(`[${idx + 1}] ${b.nama}`) + LF);
     let idLine = `    ID   : ${b.idpel}`;
-    if (!isPln && b.periode) idLine += '  Periode : ' + fmtPeriode(b.periode);
+    if (isPdamLunasin && b.periode) idLine += '  Periode : ' + fmtPeriode(b.periode);
+    else if (!isPln && b.periode) idLine += '  Periode : ' + fmtPeriode(b.periode);
     line(idLine);
-    if (b.alamat)          line('    Alamat: ' + b.alamat.substring(0, W - 12));
+    if (b.namaPdam)        line('    PDAM  : ' + b.namaPdam);
+    if (!isPdamLunasin && b.alamat) line('    Alamat: ' + b.alamat.substring(0, W - 12));
     if (b.transactionCode) line('    Kode  : ' + b.transactionCode);
 
     const pairs = [];
@@ -155,6 +158,28 @@ function formatEscp(data, cfg = {}) {
       const isBpjs   = b.kodeProduk && b.kodeProduk.startsWith('bpjs');
       const isTelkom = b.kodeProduk && b.kodeProduk.startsWith('telkom');
       const isPulsa  = b.kodeProduk && (b.kodeProduk.startsWith('pulsa') || b.kodeProduk.startsWith('paketdata'));
+      if (isPdamLunasin) {
+        // ── PDAM via Lunasin API ──────────────────────────────────────────
+        if (b.alamat) pairs.push(['Alamat', b.alamat.substring(0, 21)]);
+        if (b.gol)    pairs.push(['Golongan', b.gol]);
+        if (b.meterAwal != null && b.meterAkhir != null) {
+          pairs.push(['Stand Meter', `${b.meterAwal} -> ${b.meterAkhir}`]);
+          pairs.push(['Pemakaian', `${(b.meterAkhir - b.meterAwal).toLocaleString('id-ID')} m3`]);
+        } else if (b.standMeter) {
+          pairs.push(['Stand Meter', b.standMeter]);
+        }
+        pairs.push(['Rek. Air',     fmtRp(b.rpAir          || 0)]);
+        pairs.push(['Dana Meter',   fmtRp(b.rpDanameter    || 0)]);
+        pairs.push(['Ret. Sampah',  fmtRp(b.rpSampah       || 0)]);
+        pairs.push(['Administrasi', fmtRp(b.rpAdministrasi || 0)]);
+        pairs.push(['Materai',      fmtRp(b.materai        || 0)]);
+        pairs.push(['Denda',        fmtRp(b.denda          || 0)]);
+        if (b.extraBillFields) {
+          for (const ef of b.extraBillFields) pairs.push([String(ef.label).substring(0, 12), ef.value]);
+        }
+        if (b.refnumLunasin) pairs.push(['Ref Lunasin', b.refnumLunasin]);
+        if (b.tglLunas)      pairs.push(['Tgl Lunas',   fmtTanggal(b.tglLunas)]);
+      } else {
       if (prod) pairs.push(['Produk', b.namaProduk || prod]);
       if (isBpjs) {
         if (b.nova)                                                  pairs.push(['No VA',          b.nova]);
@@ -209,6 +234,7 @@ function formatEscp(data, cfg = {}) {
         if (b.tglLunas)    pairs.push(['Tgl Lunas',    b.tglLunas]);
         if (b.pesanBiller) pairs.push(['Pesan Biller', b.pesanBiller.substring(0, 21)]);
       }
+      }
     } else {
       const pemakaian = b.pemakaian ?? ((b.standKini || 0) - (b.standLalu || 0));
       pairs.push(['Golongan',    b.gol || '-']);
@@ -240,6 +266,8 @@ function formatEscp(data, cfg = {}) {
     if (!isPln) {
       c2('  Tagihan', fmtRp(b.tagihan));
       c2('  Admin  ', fmtRp(b.admin));
+    } else if (isPdamLunasin) {
+      if ((b.admin || 0) > 0) c2('  Biaya Admin', fmtRp(b.admin));
     }
     c2('  SUBTOTAL', fmtRp(b.total), true);
 

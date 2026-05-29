@@ -1531,58 +1531,272 @@ export default function LaporanPage() {
                   ) : null;
                 })()}
 
-                {/* PDAM: detail per periode */}
-                {group.jenis === "PDAM" ? (
-                  <div className="space-y-3">
-                    {group.items.map((item) => {
-                      const fields = getDetailFields(item);
-                      if (fields.length === 0) return null;
-                      return (
-                        <div key={item.id} className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
-                          <div className="px-3 py-2 bg-cyan-50/60 dark:bg-cyan-900/10 flex items-center justify-between">
-                            <span className="text-xs font-bold text-cyan-700 dark:text-cyan-300 flex items-center gap-1.5">
-                              <span className="material-symbols-outlined text-sm">calendar_month</span>
-                              Periode: {item.periode || "-"}
-                            </span>
-                            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                              {formatRupiah(item.total)}
-                            </span>
+                {/* Transaction detail — PDAM lama / PLN Postpaid multi-period / PDAM Lunasin multi-period / single Lunasin */}
+                {(() => {
+                  const baseKode = firstItem.kodeProduk?.replace(/-\d+$/, "") ?? "";
+                  const isPlnPostpaid = baseKode === "pln-postpaid";
+                  const isPdamLunasin = group.jenis !== "PDAM" && (firstItem.kodeProduk?.startsWith("pdam") ?? false);
+                  const isMultiPeriodLunasin = hasMultiple && (isPlnPostpaid || isPdamLunasin);
+
+                  // ── Old PDAM (pedami system) ───────────────────────────────────
+                  if (group.jenis === "PDAM") {
+                    return (
+                      <div className="space-y-3">
+                        {group.items.map((item) => {
+                          const fields = getDetailFields(item);
+                          if (fields.length === 0) return null;
+                          return (
+                            <div key={item.id} className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
+                              <div className="px-3 py-2 bg-cyan-50/60 dark:bg-cyan-900/10 flex items-center justify-between">
+                                <span className="text-xs font-bold text-cyan-700 dark:text-cyan-300 flex items-center gap-1.5">
+                                  <span className="material-symbols-outlined text-sm">calendar_month</span>
+                                  Periode: {item.periode || "-"}
+                                </span>
+                                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(item.total)}</span>
+                              </div>
+                              <table className="w-full text-xs">
+                                <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                                  {fields.map((f, idx) => (
+                                    <tr key={idx} className={idx % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-800/30"}>
+                                      <td className={`px-3 py-2 font-medium w-1/3 ${f.discount ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}`}>{f.label}</td>
+                                      <td className={`px-3 py-2 font-medium ${f.discount ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{f.value}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+                        })}
+                        {hasMultiple && (
+                          <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-500 flex items-center gap-1">
+                                <span className="material-symbols-outlined text-sm">summarize</span>
+                                Total {group.jumlahRekening} Periode
+                              </span>
+                              <div className="flex gap-4">
+                                <span className="text-slate-500">Tagihan: <span className="font-bold text-slate-700 dark:text-slate-200">{formatRupiah(group.totalTagihan)}</span></span>
+                                <span className="text-slate-500">Admin: <span className="font-bold text-slate-700 dark:text-slate-200">{formatRupiah(group.totalAdmin)}</span></span>
+                                <span className="text-slate-500">Total: <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(group.totalBayar)}</span></span>
+                              </div>
+                            </div>
                           </div>
-                          <table className="w-full text-xs">
-                            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-                              {fields.map((f, idx) => (
-                                <tr key={idx} className={idx % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-800/30"}>
-                                  <td className={`px-3 py-2 font-medium w-1/3 ${f.discount ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400"}`}>{f.label}</td>
-                                  <td className={`px-3 py-2 font-medium ${f.discount ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{f.value}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      );
-                    })}
-                    {hasMultiple && (
-                      <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-slate-500 flex items-center gap-1">
-                            <span className="material-symbols-outlined text-sm">summarize</span>
-                            Total {group.jumlahRekening} Periode
-                          </span>
-                          <div className="flex gap-4">
-                            <span className="text-slate-500">Tagihan: <span className="font-bold text-slate-700 dark:text-slate-200">{formatRupiah(group.totalTagihan)}</span></span>
-                            <span className="text-slate-500">Admin: <span className="font-bold text-slate-700 dark:text-slate-200">{formatRupiah(group.totalAdmin)}</span></span>
-                            <span className="text-slate-500">Total: <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(group.totalBayar)}</span></span>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // ── PLN Postpaid / PDAM Lunasin multi-periode ─────────────────
+                  if (isMultiPeriodLunasin) {
+                    const commonFields: Array<{ label: string; value: string }> = [];
+                    if (isPlnPostpaid) {
+                      const tarif = pv(firstItem, "tarif"); if (tarif) commonFields.push({ label: "Tarif", value: tarif });
+                      const daya = pv(firstItem, "daya"); if (daya) commonFields.push({ label: "Daya (VA)", value: daya });
+                      const noMeter = pv(firstItem, "nometer"); if (noMeter) commonFields.push({ label: "No. Meter", value: noMeter });
+                    } else {
+                      const namaPdam = pv(firstItem, "nama_pdam"); if (namaPdam) commonFields.push({ label: "Nama PDAM", value: namaPdam });
+                      const alamat = pv(firstItem, "alamat"); if (alamat) commonFields.push({ label: "Alamat", value: alamat });
+                      const gol = pv(firstItem, "golongan", "gol"); if (gol) commonFields.push({ label: "Golongan", value: gol });
+                    }
+                    const refLunasin = pv(firstItem, "refnum_lunasin"); if (refLunasin) commonFields.push({ label: "Ref Lunasin", value: refLunasin });
+
+                    const headerBg = isPlnPostpaid ? "bg-amber-50/60 dark:bg-amber-900/10" : "bg-sky-50/60 dark:bg-sky-900/10";
+                    const headerText = isPlnPostpaid ? "text-amber-700 dark:text-amber-300" : "text-sky-700 dark:text-sky-300";
+
+                    return (
+                      <div className="space-y-3">
+                        {commonFields.length > 0 && (
+                          <div className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
+                            <table className="w-full text-xs">
+                              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                                {commonFields.map((f, idx) => (
+                                  <tr key={idx} className={idx % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-800/30"}>
+                                    <td className="px-3 py-2 font-medium w-1/3 text-slate-400">{f.label}</td>
+                                    <td className="px-3 py-2 font-medium">{f.value}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {group.items.map((item) => {
+                          const meta = item.metadata || {};
+                          const standMeter = meta.stand_meter ? String(meta.stand_meter) : null;
+                          // Fallback: jika metadata belum punya field detail (transaksi lama),
+                          // cari dari providerDetail.detail[] yang cocok dengan periode item ini
+                          const provRaw = item.providerDetail || {};
+                          const provDetailArr = Array.isArray(provRaw.detail)
+                            ? (provRaw.detail as Array<Record<string, unknown>>)
+                            : [];
+                          const matchedProvDetail =
+                            provDetailArr.find((d) => String(d.periode ?? "") === String(item.periode ?? "")) ??
+                            (provDetailArr.length === 1 ? provDetailArr[0] : null);
+
+                          // Untuk setiap field: prioritaskan metadata (disimpan saat payment),
+                          // fallback ke providerDetail.detail[] yang dicocokkan per periode
+                          const getField = (key: string): string | null => {
+                            if (meta[key] != null && String(meta[key]) !== "") return String(meta[key]);
+                            if (matchedProvDetail && matchedProvDetail[key] != null && String(matchedProvDetail[key]) !== "") return String(matchedProvDetail[key]);
+                            return null;
+                          };
+                          const getNum = (key: string): number | null => {
+                            const v = getField(key);
+                            if (v == null) return null;
+                            const n = Number(v);
+                            return isNaN(n) ? null : n;
+                          };
+
+                          const meterAwal = getField("meter_awal");
+                          const meterAkhir = getField("meter_akhir");
+                          const rpAir = getNum("rp_air");
+                          const rpDenda = getNum("rp_denda");
+                          const rpDanameter = getNum("rp_danameter");
+                          const rpAdministrasi = getNum("rp_administrasi");
+                          const rpSampah = getNum("rp_sampah");
+                          const rpMaterai = getNum("rp_materai");
+                          // Keterangan tambahan dinamis (retribusi, dll)
+                          const extraFields: Array<{ label: string; value: string }> = [];
+                          for (let n = 1; n <= 3; n++) {
+                            const nama = getField(`nama_field_${n}`);
+                            const val = getField(`value_field_${n}`);
+                            if (nama && nama !== "" && val != null) {
+                              extraFields.push({
+                                label: nama.charAt(0).toUpperCase() + nama.slice(1),
+                                value: !isNaN(Number(val)) ? formatRupiah(Number(val)) : val,
+                              });
+                            }
+                          }
+                          return (
+                            <div key={item.id} className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
+                              <div className={`px-3 py-2 ${headerBg} flex items-center justify-between`}>
+                                <span className={`text-xs font-bold ${headerText} flex items-center gap-1.5`}>
+                                  <span className="material-symbols-outlined text-sm">calendar_month</span>
+                                  Periode: {item.periode || "-"}
+                                </span>
+                                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(item.total)}</span>
+                              </div>
+                              <table className="w-full text-xs">
+                                <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                                  {isPdamLunasin ? (
+                                    <>
+                                      {/* Meter air per periode */}
+                                      {meterAwal && meterAkhir && (
+                                        <tr className="bg-white dark:bg-slate-900">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Meter Lalu → Kini</td>
+                                          <td className="px-3 py-2 font-mono font-medium">{meterAwal} → {meterAkhir} m³</td>
+                                        </tr>
+                                      )}
+                                      {!meterAwal && standMeter && (
+                                        <tr className="bg-white dark:bg-slate-900">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Stand Meter</td>
+                                          <td className="px-3 py-2 font-mono font-medium">{standMeter}</td>
+                                        </tr>
+                                      )}
+                                      {/* Komponen tagihan air */}
+                                      {rpAir != null && (
+                                        <tr className="bg-slate-50/50 dark:bg-slate-800/30">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Rekening Air</td>
+                                          <td className="px-3 py-2 font-medium">{formatRupiah(rpAir)}</td>
+                                        </tr>
+                                      )}
+                                      {rpDanameter != null && (
+                                        <tr className="bg-white dark:bg-slate-900">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Dana Meter</td>
+                                          <td className="px-3 py-2 font-medium">{formatRupiah(rpDanameter)}</td>
+                                        </tr>
+                                      )}
+                                      {rpSampah != null && (
+                                        <tr className="bg-slate-50/50 dark:bg-slate-800/30">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Retribusi Sampah</td>
+                                          <td className="px-3 py-2 font-medium">{formatRupiah(rpSampah)}</td>
+                                        </tr>
+                                      )}
+                                      {rpAdministrasi != null && (
+                                        <tr className="bg-white dark:bg-slate-900">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Administrasi</td>
+                                          <td className="px-3 py-2 font-medium">{formatRupiah(rpAdministrasi)}</td>
+                                        </tr>
+                                      )}
+                                      {rpMaterai != null && (
+                                        <tr className="bg-slate-50/50 dark:bg-slate-800/30">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Materai</td>
+                                          <td className="px-3 py-2 font-medium">{formatRupiah(rpMaterai)}</td>
+                                        </tr>
+                                      )}
+                                      {rpDenda != null && (
+                                        <tr className="bg-white dark:bg-slate-900">
+                                          <td className={`px-3 py-2 font-medium w-1/3 ${rpDenda > 0 ? "text-red-500" : "text-slate-400"}`}>Denda</td>
+                                          <td className={`px-3 py-2 font-medium ${rpDenda > 0 ? "text-red-600 dark:text-red-400" : ""}`}>{formatRupiah(rpDenda)}</td>
+                                        </tr>
+                                      )}
+                                      {extraFields.map((ef, efIdx) => (
+                                        <tr key={efIdx} className={efIdx % 2 === 0 ? "bg-slate-50/50 dark:bg-slate-800/30" : "bg-white dark:bg-slate-900"}>
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">{ef.label}</td>
+                                          <td className="px-3 py-2 font-medium">{ef.value}</td>
+                                        </tr>
+                                      ))}
+                                      <tr className="bg-sky-50/40 dark:bg-sky-900/10">
+                                        <td className="px-3 py-2 font-bold w-1/3 text-slate-500">Subtotal Tagihan</td>
+                                        <td className="px-3 py-2 font-bold">{formatRupiah(item.tagihan)}</td>
+                                      </tr>
+                                      <tr className="bg-white dark:bg-slate-900">
+                                        <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Biaya Admin</td>
+                                        <td className="px-3 py-2 font-medium">{formatRupiah(item.admin)}</td>
+                                      </tr>
+                                      <tr className="bg-sky-50/60 dark:bg-sky-900/20">
+                                        <td className="px-3 py-2 font-bold w-1/3 text-slate-600">Total Periode</td>
+                                        <td className="px-3 py-2 font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(item.total)}</td>
+                                      </tr>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {standMeter && (
+                                        <tr className="bg-white dark:bg-slate-900">
+                                          <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Stand Meter</td>
+                                          <td className="px-3 py-2 font-mono font-medium">{standMeter}</td>
+                                        </tr>
+                                      )}
+                                      <tr className="bg-slate-50/50 dark:bg-slate-800/30">
+                                        <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Tagihan</td>
+                                        <td className="px-3 py-2 font-medium">{formatRupiah(item.tagihan)}</td>
+                                      </tr>
+                                      <tr className="bg-white dark:bg-slate-900">
+                                        <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Biaya Admin</td>
+                                        <td className="px-3 py-2 font-medium">{formatRupiah(item.admin)}</td>
+                                      </tr>
+                                      <tr className="bg-slate-50/50 dark:bg-slate-800/30">
+                                        <td className="px-3 py-2 font-medium w-1/3 text-slate-400">Total</td>
+                                        <td className="px-3 py-2 font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(item.total)}</td>
+                                      </tr>
+                                    </>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+                        })}
+                        <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-slate-500 flex items-center gap-1">
+                              <span className="material-symbols-outlined text-sm">summarize</span>
+                              Total {group.jumlahRekening} Periode
+                            </span>
+                            <div className="flex gap-4">
+                              <span className="text-slate-500">Tagihan: <span className="font-bold text-slate-700 dark:text-slate-200">{formatRupiah(group.totalTagihan)}</span></span>
+                              <span className="text-slate-500">Admin: <span className="font-bold text-slate-700 dark:text-slate-200">{formatRupiah(group.totalAdmin)}</span></span>
+                              <span className="text-slate-500">Total: <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatRupiah(group.totalBayar)}</span></span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  /* Lunasin: detail fields */
-                  (() => {
-                    const fields = getDetailFields(firstItem);
-                    if (fields.length === 0) return null;
-                    return (
+                    );
+                  }
+
+                  // ── Single Lunasin (BPJS / Pulsa / Telkom / PLN Prabayar / 1-period) ──
+                  const fields = getDetailFields(firstItem);
+                  if (fields.length === 0) return null;
+                  return (
+                    <>
                       <div className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
                         <table className="w-full text-xs">
                           <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
@@ -1595,49 +1809,48 @@ export default function LaporanPage() {
                           </tbody>
                         </table>
                       </div>
-                    );
-                  })()
-                )}
-
-                {/* Multi-rekening breakdown (Lunasin only) */}
-                {hasMultiple && isLunasin && (
-                  <div>
-                    <div className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-1">
-                      <span className="material-symbols-outlined text-sm">receipt</span>
-                      Rincian {group.jumlahRekening} Rekening
-                    </div>
-                    <div className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead className="bg-slate-50 dark:bg-slate-800/50">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-slate-400 font-semibold">Periode</th>
-                            <th className="px-3 py-2 text-right text-slate-400 font-semibold">Tagihan</th>
-                            <th className="px-3 py-2 text-right text-slate-400 font-semibold">Admin</th>
-                            <th className="px-3 py-2 text-right text-slate-400 font-semibold">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-                          {group.items.map((d) => (
-                            <tr key={d.id}>
-                              <td className="px-3 py-2 font-medium">{firstItem.kodeProduk?.replace(/-\d+$/, "") === "pln-prepaid" ? "-" : d.periode}</td>
-                              <td className="px-3 py-2 text-right">{formatRupiah(d.tagihan)}</td>
-                              <td className="px-3 py-2 text-right">{formatRupiah(d.admin)}</td>
-                              <td className="px-3 py-2 text-right font-bold">{formatRupiah(d.total)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="bg-slate-50 dark:bg-slate-800/50">
-                          <tr className="font-bold">
-                            <td className="px-3 py-2">Total</td>
-                            <td className="px-3 py-2 text-right">{formatRupiah(group.totalTagihan)}</td>
-                            <td className="px-3 py-2 text-right">{formatRupiah(group.totalAdmin)}</td>
-                            <td className="px-3 py-2 text-right">{formatRupiah(group.totalBayar)}</td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                )}
+                      {/* Multi-rekening breakdown untuk produk selain PLN Postpaid & PDAM Lunasin */}
+                      {hasMultiple && (
+                        <div>
+                          <div className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-1">
+                            <span className="material-symbols-outlined text-sm">receipt</span>
+                            Rincian {group.jumlahRekening} Rekening
+                          </div>
+                          <div className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
+                            <table className="w-full text-xs">
+                              <thead className="bg-slate-50 dark:bg-slate-800/50">
+                                <tr>
+                                  <th className="px-3 py-2 text-left text-slate-400 font-semibold">Periode</th>
+                                  <th className="px-3 py-2 text-right text-slate-400 font-semibold">Tagihan</th>
+                                  <th className="px-3 py-2 text-right text-slate-400 font-semibold">Admin</th>
+                                  <th className="px-3 py-2 text-right text-slate-400 font-semibold">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                                {group.items.map((d) => (
+                                  <tr key={d.id}>
+                                    <td className="px-3 py-2 font-medium">{baseKode === "pln-prepaid" ? "-" : d.periode}</td>
+                                    <td className="px-3 py-2 text-right">{formatRupiah(d.tagihan)}</td>
+                                    <td className="px-3 py-2 text-right">{formatRupiah(d.admin)}</td>
+                                    <td className="px-3 py-2 text-right font-bold">{formatRupiah(d.total)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot className="bg-slate-50 dark:bg-slate-800/50">
+                                <tr className="font-bold">
+                                  <td className="px-3 py-2">Total</td>
+                                  <td className="px-3 py-2 text-right">{formatRupiah(group.totalTagihan)}</td>
+                                  <td className="px-3 py-2 text-right">{formatRupiah(group.totalAdmin)}</td>
+                                  <td className="px-3 py-2 text-right">{formatRupiah(group.totalBayar)}</td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Modal Footer */}
@@ -1651,15 +1864,27 @@ export default function LaporanPage() {
                     onClick={() => {
                       const bills: ReceiptBillItem[] = group.items.map((item) => {
                         const isPdam = item.jenis === "PDAM";
+                        const isPdamLunasin = !isPdam && (item.kodeProduk?.startsWith("pdam") ?? false);
                         const meta = item.metadata || {};
                         const prov = item.providerDetail || {};
+
+                        // Helper: cari dari metadata dulu, fallback ke providerDetail.detail[] per periode
+                        const provDetailArr = Array.isArray(prov.detail)
+                          ? (prov.detail as Array<Record<string, unknown>>)
+                          : [];
+                        const matchedProvDetail =
+                          provDetailArr.find((d) => String(d.periode ?? "") === String(item.periode ?? "")) ??
+                          (provDetailArr.length === 1 ? provDetailArr[0] : null);
                         const get = (...keys: string[]) => {
                           for (const k of keys) {
-                            if (prov[k] != null && String(prov[k]) !== "") return prov[k];
                             if (meta[k] != null && String(meta[k]) !== "") return meta[k];
+                            if (matchedProvDetail && matchedProvDetail[k] != null && String(matchedProvDetail[k]) !== "") return matchedProvDetail[k];
+                            if (prov[k] != null && String(prov[k]) !== "") return prov[k];
                           }
                           return undefined;
                         };
+                        const getNum = (...keys: string[]) => Number(get(...keys) ?? 0);
+
                         if (isPdam) {
                           return {
                             idpel: item.idPelanggan,
@@ -1667,22 +1892,64 @@ export default function LaporanPage() {
                             alamat: String(get("alamat") ?? ""),
                             gol: String(get("gol", "idgol") ?? ""),
                             periode: item.periode,
-                            standLalu: Number(get("standLalu", "stand_lalu") ?? 0),
-                            standKini: Number(get("standKini", "stand_kini") ?? 0),
-                            hargaAir: Number(get("harga", "harga_air", "hargaAir") ?? 0),
-                            denda: Number(get("denda") ?? 0),
-                            materai: Number(get("materai") ?? 0),
-                            limbah: Number(get("limbah") ?? 0),
-                            retribusi: Number(get("retribusi") ?? 0),
-                            bebanTetap: Number(get("bebanTetap", "beban_tetap") ?? 0),
-                            biayaMeter: Number(get("biayaMeter", "biaya_meter") ?? 0),
-                            diskon: Number(get("diskon") ?? 0),
+                            standLalu: getNum("standLalu", "stand_lalu"),
+                            standKini: getNum("standKini", "stand_kini"),
+                            hargaAir: getNum("harga", "harga_air", "hargaAir"),
+                            denda: getNum("denda"),
+                            materai: getNum("materai"),
+                            limbah: getNum("limbah"),
+                            retribusi: getNum("retribusi"),
+                            bebanTetap: getNum("bebanTetap", "beban_tetap"),
+                            biayaMeter: getNum("biayaMeter", "biaya_meter"),
+                            diskon: getNum("diskon"),
                             tagihan: item.tagihan,
                             admin: item.admin,
                             total: item.total,
                             transactionCode: item.transactionCode,
                           };
                         }
+
+                        if (isPdamLunasin) {
+                          // Keterangan tambahan dinamis (retribusi dll dari nama_field_N)
+                          const extraBillFields: Array<{ label: string; value: string }> = [];
+                          for (let n = 1; n <= 3; n++) {
+                            const nama = get(`nama_field_${n}`);
+                            const val  = get(`value_field_${n}`);
+                            if (nama && String(nama) !== "" && val != null) {
+                              extraBillFields.push({
+                                label: String(nama).charAt(0).toUpperCase() + String(nama).slice(1),
+                                value: !isNaN(Number(val)) ? formatRupiah(Number(val)) : String(val),
+                              });
+                            }
+                          }
+                          return {
+                            type: "pln" as const,
+                            kodeProduk: item.kodeProduk || "",
+                            idpel: item.idPelanggan,
+                            nama: item.nama,
+                            namaPdam: String(get("nama_pdam") ?? ""),
+                            alamat: String(get("alamat") ?? ""),
+                            gol: String(get("golongan", "gol") ?? ""),
+                            periode: item.periode,
+                            meterAwal: get("meter_awal") != null ? Number(get("meter_awal")) : undefined,
+                            meterAkhir: get("meter_akhir") != null ? Number(get("meter_akhir")) : undefined,
+                            standMeter: String(get("stand_meter") ?? ""),
+                            rpAir: getNum("rp_air"),
+                            rpDanameter: getNum("rp_danameter"),
+                            rpSampah: getNum("rp_sampah"),
+                            rpAdministrasi: getNum("rp_administrasi"),
+                            materai: getNum("rp_materai"),
+                            denda: getNum("rp_denda"),
+                            extraBillFields,
+                            refnumLunasin: String(get("refnum_lunasin") ?? ""),
+                            tglLunas: String(get("tgl_lunas") ?? ""),
+                            tagihan: item.tagihan,
+                            admin: item.admin,
+                            total: item.total,
+                            transactionCode: item.transactionCode,
+                          };
+                        }
+
                         return {
                           type: "pln" as const,
                           idpel: item.idPelanggan,
@@ -1696,15 +1963,15 @@ export default function LaporanPage() {
                           jumBill: String(get("jum_bill", "jumBill") ?? ""),
                           tokenPln: String(get("token", "tokenPln", "token_pln") ?? ""),
                           kwh: String(get("kwh") ?? ""),
-                          rpAmount: Number(get("rp_amount") ?? 0),
-                          rpAdmin: Number(get("rp_admin") ?? 0),
-                          rpMaterai: Number(get("rp_materai") ?? 0),
-                          rpPpn: Number(get("rp_ppn") ?? 0),
-                          rpPju: Number(get("rp_pju") ?? 0),
-                          rpAngsuran: Number(get("rp_angsuran") ?? 0),
-                          rpToken: Number(get("rp_token") ?? 0),
-                          rpTotal: Number(get("rp_total") ?? 0),
-                          saldoTerpotong: Number(get("saldo_terpotong") ?? 0),
+                          rpAmount: getNum("rp_amount"),
+                          rpAdmin: getNum("rp_admin"),
+                          rpMaterai: getNum("rp_materai"),
+                          rpPpn: getNum("rp_ppn"),
+                          rpPju: getNum("rp_pju"),
+                          rpAngsuran: getNum("rp_angsuran"),
+                          rpToken: getNum("rp_token"),
+                          rpTotal: getNum("rp_total"),
+                          saldoTerpotong: getNum("saldo_terpotong"),
                           refnum: String(get("refnum") ?? ""),
                           refnumLunasin: String(get("refnum_lunasin") ?? ""),
                           tglLunas: String(get("tgl_lunas") ?? ""),

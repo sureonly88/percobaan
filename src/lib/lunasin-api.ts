@@ -31,8 +31,19 @@ export interface LunasinRequest {
 
 export interface LunasinDetailItem {
   periode?: string;
+  // PLN Pascabayar
   stand_meter?: string;
   rp_amount?: string;
+  // PDAM via Lunasin (doc.lunasin.co.id)
+  rp_total?: string;
+  meter_awal?: string;
+  meter_akhir?: string;
+  rp_air?: string;
+  rp_denda?: string;
+  rp_materai?: string;
+  rp_administrasi?: string;
+  rp_danameter?: string;
+  rp_sampah?: string;
   [key: string]: unknown;
 }
 
@@ -44,15 +55,39 @@ export interface LunasinResponseData {
   rp_admin: string;
   rp_total: string;
   idpel: string;
-  // PLN Postpaid fields
+  // PLN Postpaid / Prepaid / Nonrek shared
   periode?: string;
   jum_tunggakan?: string;
   tarif?: string;
   daya?: string;
   stand_meter?: string;
-  // PLN Prepaid fields
-  token?: string;
-  // Payment-specific fields
+  // PLN Prepaid specific
+  nometer?: string;       // meter number (= input1, may differ from idpel)
+  rp_materai?: string;    // materai fee (decimal string, e.g. "0.00")
+  rp_ppn?: string;        // PPn (decimal string)
+  rp_pju?: string;        // Pajak Penerangan Jalan (decimal string)
+  rp_angsuran?: string;   // installment (decimal string)
+  rp_token?: string;      // net token value (decimal string)
+  kwh?: string;           // kilowatt hours (decimal string)
+  token?: string;         // 20-digit token with dashes (payment/advice only)
+  // PLN Nonrek specific
+  noreg?: string;         // registration order number (= input1)
+  tgl_reg?: string;       // registration date YYYYMMDD
+  jenis_reg?: string;     // registration type e.g. "PB", "TAMBAH DAYA"
+  // BPJS specific
+  nova?: string;          // virtual account number
+  nova_kepala_keluarga?: string;
+  jum_peserta?: string;
+  kode_cabang?: string;
+  nama_cabang?: string;
+  sisa?: string;
+  // Pulsa / Paket Data specific
+  nomor?: string;         // phone number
+  denom?: string;         // denomination
+  nama_produk?: string;   // product display name
+  serial_number?: string; // SN (payment/advice only)
+  masa_berlaku?: string;  // validity period (payment/advice only)
+  // Payment-specific fields (all products)
   saldo_terpotong?: string;
   sisa_saldo?: string;
   tgl_lunas?: string;
@@ -205,7 +240,7 @@ export async function lunasinInquiry(opts: {
 }): Promise<LunasinInquiryResult> {
   const idTrx = generateLunasinTrxId();
 
-  if (LUNASIN_MOCK) return mockLunasinInquiry({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx });
+  if (LUNASIN_MOCK) return mockLunasinInquiry({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, input2: opts.input2, idTrx });
 
   const payload: LunasinRequest = {
     tipe_pesan: "inquiry",

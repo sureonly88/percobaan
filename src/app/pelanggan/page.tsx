@@ -227,6 +227,101 @@ function getLunasinDetailFields(item: PlnTransaksiData): Array<{ label: string; 
 
   // Standard Lunasin fields (live API — provider_response / metadata)
   const result: Array<{ label: string; value: string }> = [];
+  const base = item.kodeProduk?.replace(/-\d+$/, "");
+
+  // PLN Pascabayar — tiap row sudah = 1 periode, baca nilai per-periode dari DB + metadata
+  if (base === "pln-postpaid") {
+    const prov = item.providerDetail as Record<string, unknown> ?? {};
+    const provData = (prov.data && typeof prov.data === "object" && !Array.isArray(prov.data))
+      ? (prov.data as Record<string, unknown>) : prov;
+    const meta = (item.metadata as Record<string, unknown>) ?? {};
+
+    const tarif = String(provData.tarif ?? "");
+    if (tarif) result.push({ label: "Tarif", value: tarif });
+    const daya = String(provData.daya ?? "");
+    if (daya) result.push({ label: "Daya (VA)", value: daya });
+    const nometer = String(provData.nometer ?? "");
+    if (nometer) result.push({ label: "No. Meter", value: nometer });
+
+    // Stand meter: metadata menyimpan nilai per-periode, fallback ke providerDetail
+    const standMeterMeta = meta.stand_meter != null && String(meta.stand_meter) !== "" ? String(meta.stand_meter) : null;
+    const standMeter = standMeterMeta ?? String(provData.stand_meter ?? "");
+    if (standMeter) result.push({ label: "Stand Meter", value: standMeter });
+
+    // Per row = 1 periode
+    result.push({ label: "Jumlah Tagihan", value: "1" });
+    result.push({ label: "Jumlah Tunggakan", value: "1" });
+
+    // Nilai keuangan dari DB (sudah per-periode)
+    if (item.rpAmount > 0) result.push({ label: "Tagihan Listrik", value: formatRupiah(item.rpAmount) });
+    if (item.rpAdmin > 0) result.push({ label: "Biaya Admin", value: formatRupiah(item.rpAdmin) });
+    const total = item.rpTotal > 0 && item.rpTotal !== item.rpAdmin ? item.rpTotal : item.rpAmount + item.rpAdmin;
+    result.push({ label: "Total", value: formatRupiah(total) });
+
+    const refnum = String(provData.refnum ?? "");
+    if (refnum) result.push({ label: "Ref Number", value: refnum });
+    const refnumLunasin = String(provData.refnum_lunasin ?? "");
+    if (refnumLunasin) result.push({ label: "Ref Lunasin", value: refnumLunasin });
+
+    return result;
+  }
+
+  // PDAM Lunasin — tiap row sudah = 1 periode, baca nilai per-periode dari DB + metadata
+  if (base?.startsWith("pdam")) {
+    const prov = item.providerDetail as Record<string, unknown> ?? {};
+    const provData = (prov.data && typeof prov.data === "object" && !Array.isArray(prov.data))
+      ? (prov.data as Record<string, unknown>) : prov;
+    const meta = (item.metadata as Record<string, unknown>) ?? {};
+
+    const namaPdam = String(provData.nama_pdam ?? "");
+    if (namaPdam) result.push({ label: "Nama PDAM", value: namaPdam });
+    const golongan = String(provData.golongan ?? "");
+    if (golongan) result.push({ label: "Golongan", value: golongan });
+
+    // Stand meter per-periode dari metadata (format "awal-akhir"), fallback ke providerDetail
+    const standMeterMeta = meta.stand_meter != null && String(meta.stand_meter) !== "" ? String(meta.stand_meter) : null;
+    const standMeter = standMeterMeta ?? String(provData.stand_meter ?? "");
+    if (standMeter) result.push({ label: "Meter (Awal→Akhir)", value: standMeter });
+
+    // Per row = 1 periode
+    result.push({ label: "Jumlah Tagihan", value: "1" });
+    result.push({ label: "Jumlah Tunggakan", value: "1" });
+
+    // Cari detail per-periode yang cocok dari detail array di providerDetail
+    const detailArr = Array.isArray(provData.detail)
+      ? (provData.detail as Array<Record<string, unknown>>)
+      : [];
+    const currentPeriode = item.periode ?? String(meta.periode ?? "");
+    const periodeDetail = detailArr.find((d) => String(d.periode ?? "") === currentPeriode) ?? {};
+
+    // Tampilkan semua field keuangan per-periode, termasuk yang bernilai 0
+    result.push({ label: "Biaya Air", value: formatRupiah(Number(periodeDetail.rp_air ?? item.rpAmount)) });
+    result.push({ label: "Denda", value: formatRupiah(Number(periodeDetail.rp_denda ?? 0)) });
+    result.push({ label: "Materai", value: formatRupiah(Number(periodeDetail.rp_materai ?? 0)) });
+    result.push({ label: "Administrasi", value: formatRupiah(Number(periodeDetail.rp_administrasi ?? 0)) });
+    result.push({ label: "Dana Meter", value: formatRupiah(Number(periodeDetail.rp_danameter ?? 0)) });
+    result.push({ label: "Sampah", value: formatRupiah(Number(periodeDetail.rp_sampah ?? 0)) });
+
+    // Custom field dinamis dari biller (nama_field_1/2/3)
+    for (let i = 1; i <= 3; i++) {
+      const namaField = String(periodeDetail[`nama_field_${i}`] ?? "");
+      const valField = String(periodeDetail[`value_field_${i}`] ?? "");
+      if (namaField) result.push({ label: namaField.charAt(0).toUpperCase() + namaField.slice(1), value: valField || "0" });
+    }
+
+    // Biaya Admin & Total dari DB (sudah per-periode)
+    result.push({ label: "Biaya Admin", value: formatRupiah(item.rpAdmin) });
+    const total = item.rpTotal > 0 && item.rpTotal !== item.rpAdmin ? item.rpTotal : item.rpAmount + item.rpAdmin;
+    result.push({ label: "Total", value: formatRupiah(total) });
+
+    const refnum = String(provData.refnum ?? "");
+    if (refnum) result.push({ label: "Ref Number", value: refnum });
+    const refnumLunasin = String(provData.refnum_lunasin ?? "");
+    if (refnumLunasin) result.push({ label: "Ref Lunasin", value: refnumLunasin });
+
+    return result;
+  }
+
   for (const f of LUNASIN_FIELDS) {
     const raw = pvLunasin(item, ...f.key);
     if (raw == null) continue;
@@ -1985,8 +2080,8 @@ export default function PelangganPage() {
                   <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-4">
                     <p className="text-xs text-slate-400 font-medium">Periode</p>
                     <p className="text-sm font-bold mt-1">{plnDetailData.kodeProduk?.replace(/-\d+$/, "") === "pln-prepaid" ? "-" : (plnDetailData.periode || "-")}</p>
-                    {plnDetailData.kodeProduk?.replace(/-\d+$/, "") !== "pln-prepaid" && plnDetailData.jumBill > 0 && (
-                      <p className="text-[10px] text-primary font-medium mt-0.5">{plnDetailData.jumBill} bulan tagihan</p>
+                    {plnDetailData.kodeProduk?.replace(/-\d+$/, "") !== "pln-prepaid" && (
+                      <p className="text-[10px] text-primary font-medium mt-0.5">1 bulan tagihan</p>
                     )}
                   </div>
                 </div>

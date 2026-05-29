@@ -474,12 +474,175 @@ export default function PembayaranPage() {
     const successBills = receipt.results.filter((r) => r.success);
     if (successBills.length === 0) return;
     const snapshot = daftarTagihanSnapshot;
-    const printableBills = successBills.map((r) => {
+    const printableBills = successBills.flatMap((r) => {
       if (r.provider === "LUNASIN") {
         const pd = r.providerData || {};
         const rpAdmin = Number(pd.rp_admin || r.adminFee || 0);
+        const isPlnPostpaid = (r.kodeProduk || "").startsWith("pln-postpaid");
+        const isPdamLunasin = (r.kodeProduk || "").startsWith("pdam");
+        const rawDetail = Array.isArray(pd.detail) ? (pd.detail as Array<Record<string, unknown>>) : [];
+
+        // PLN Pascabayar & PDAM Lunasin dengan multi-bulan: cetak 1 struk per periode
+        if ((isPlnPostpaid || isPdamLunasin) && rawDetail.length > 1) {
+          const adminFeePerPeriod = Math.round(rpAdmin / rawDetail.length);
+          return rawDetail.map((d, i) => {
+            // rp_amount = PLN Pascabayar; rp_total = PDAM Lunasin (field berbeda per docs)
+            const periodAmount = Number(d.rp_amount ?? d.rp_total ?? 0);
+            const periodAdmin =
+              i === 0
+                ? rpAdmin - adminFeePerPeriod * (rawDetail.length - 1)
+                : adminFeePerPeriod;
+            const periodTotal = periodAmount + periodAdmin;
+
+            if (isPdamLunasin) {
+              // Keterangan tambahan dinamis (retribusi dll dari nama_field_N)
+              const extraBillFields: Array<{ label: string; value: string }> = [];
+              for (let n = 1; n <= 3; n++) {
+                const nama = d[`nama_field_${n}`];
+                const val  = d[`value_field_${n}`];
+                if (nama && String(nama) !== "" && val != null) {
+                  extraBillFields.push({
+                    label: String(nama).charAt(0).toUpperCase() + String(nama).slice(1),
+                    value: !isNaN(Number(val)) ? `Rp ${Number(val).toLocaleString("id-ID")}` : String(val),
+                  });
+                }
+              }
+              return {
+                type: "pln" as const,
+                kodeProduk: r.kodeProduk || "",
+                idpel: r.idpel,
+                nama: r.nama,
+                namaPdam: String(pd.nama_pdam || ""),
+                alamat: String(pd.alamat || ""),
+                gol: String(pd.golongan || pd.gol || ""),
+                periode: String(d.periode ?? ""),
+                meterAwal: d.meter_awal != null ? Number(d.meter_awal) : undefined,
+                meterAkhir: d.meter_akhir != null ? Number(d.meter_akhir) : undefined,
+                standMeter: String(
+                  d.stand_meter ??
+                  (d.meter_awal != null && d.meter_akhir != null ? `${d.meter_awal}-${d.meter_akhir}` : "")
+                ),
+                rpAir: Number(d.rp_air ?? 0),
+                rpDanameter: Number(d.rp_danameter ?? 0),
+                rpSampah: Number(d.rp_sampah ?? 0),
+                rpAdministrasi: Number(d.rp_administrasi ?? 0),
+                materai: Number(d.rp_materai ?? 0),
+                denda: Number(d.rp_denda ?? 0),
+                extraBillFields,
+                refnumLunasin: String(pd.refnum_lunasin || ""),
+                tglLunas: String(pd.tgl_lunas || ""),
+                jumBill: "1",
+                tagihan: periodAmount,
+                admin: periodAdmin,
+                total: periodTotal,
+                transactionCode: r.transactionCode,
+              };
+            }
+
+            return {
+              type: "pln" as const,
+              idpel: r.idpel,
+              nama: r.nama,
+              kodeProduk: r.kodeProduk || "",
+              periode: String(d.periode ?? ""),
+              tarif: String(pd.tarif || ""),
+              daya: String(pd.daya || ""),
+              // stand_meter = PLN; meter_awal/meter_akhir = PDAM Lunasin
+              standMeter: String(
+                d.stand_meter ??
+                (d.meter_awal != null && d.meter_akhir != null
+                  ? `${d.meter_awal}-${d.meter_akhir}`
+                  : "")
+              ),
+              noMeter: String(pd.nometer || ""),
+              jumBill: "1",
+              tokenPln: "",
+              refnumLunasin: String(pd.refnum_lunasin || ""),
+              noreg: "",
+              tglReg: "",
+              jenisReg: "",
+              rpAmount: periodAmount,
+              rpAdmin: periodAdmin,
+              tagihan: periodAmount,
+              admin: periodAdmin,
+              total: periodTotal,
+              transactionCode: r.transactionCode,
+              kwh: String(d.kwh ?? pd.kwh ?? ""),
+              rpMaterai: Number(d.rp_materai ?? pd.rp_materai ?? 0),
+              rpPpn: Number(d.rp_ppn ?? pd.rp_ppn ?? 0),
+              rpPju: Number(d.rp_pju ?? pd.rp_pju ?? 0),
+              rpAngsuran: Number(d.rp_angsuran ?? pd.rp_angsuran ?? 0),
+              rpToken: Number(d.rp_token ?? pd.rp_token ?? 0),
+              rpTotal: periodTotal,
+              saldoTerpotong: 0,
+              refnum: String(pd.refnum || ""),
+              tglLunas: String(pd.tgl_lunas || ""),
+              pesanBiller: String(pd.pesan_biller || ""),
+              nova: "",
+              novaKepalaKeluarga: "",
+              jumPeserta: "",
+              kodeCabang: "",
+              namaCabang: "",
+              sisaSaldoBpjs: "",
+              nomor: "",
+              denom: "",
+              namaProduk: "",
+              serialNumber: "",
+              masaBerlaku: "",
+            };
+          });
+        }
+
+        // Single period: prepaid, BPJS, Telkom, Pulsa, dll
+        // Khusus PDAM Lunasin 1 bulan: gunakan field PDAM bukan PLN
+        if (isPdamLunasin) {
+          const d = rawDetail.length === 1 ? rawDetail[0] : {};
+          const extraBillFields: Array<{ label: string; value: string }> = [];
+          for (let n = 1; n <= 3; n++) {
+            const nama = d[`nama_field_${n}`];
+            const val  = d[`value_field_${n}`];
+            if (nama && String(nama) !== "" && val != null) {
+              extraBillFields.push({
+                label: String(nama).charAt(0).toUpperCase() + String(nama).slice(1),
+                value: !isNaN(Number(val)) ? `Rp ${Number(val).toLocaleString("id-ID")}` : String(val),
+              });
+            }
+          }
+          const singleAmount = Number(d.rp_total ?? pd.rp_total ?? Math.max(0, r.total - rpAdmin));
+          return [{
+            type: "pln" as const,
+            kodeProduk: r.kodeProduk || "",
+            idpel: r.idpel,
+            nama: r.nama,
+            namaPdam: String(pd.nama_pdam || ""),
+            alamat: String(pd.alamat || ""),
+            gol: String(pd.golongan || pd.gol || ""),
+            periode: String(d.periode ?? pd.periode ?? ""),
+            meterAwal: d.meter_awal != null ? Number(d.meter_awal) : undefined,
+            meterAkhir: d.meter_akhir != null ? Number(d.meter_akhir) : undefined,
+            standMeter: String(
+              d.stand_meter ??
+              (d.meter_awal != null && d.meter_akhir != null ? `${d.meter_awal}-${d.meter_akhir}` : "")
+            ),
+            rpAir: Number(d.rp_air ?? 0),
+            rpDanameter: Number(d.rp_danameter ?? 0),
+            rpSampah: Number(d.rp_sampah ?? 0),
+            rpAdministrasi: Number(d.rp_administrasi ?? 0),
+            materai: Number(d.rp_materai ?? 0),
+            denda: Number(d.rp_denda ?? 0),
+            extraBillFields,
+            refnumLunasin: String(pd.refnum_lunasin || ""),
+            tglLunas: String(pd.tgl_lunas || ""),
+            jumBill: "1",
+            tagihan: singleAmount,
+            admin: rpAdmin,
+            total: r.total,
+            transactionCode: r.transactionCode,
+          }];
+        }
+
         const rpAmount = Number(pd.rp_amount || Math.max(0, r.total - rpAdmin));
-        return {
+        return [{
           type: "pln" as const,
           idpel: r.idpel,
           nama: r.nama,
@@ -523,10 +686,10 @@ export default function PembayaranPage() {
           namaProduk: String(pd.nama_produk || ""),
           serialNumber: String(pd.serial_number || ""),
           masaBerlaku: String(pd.masa_berlaku || ""),
-        };
+        }];
       }
       const orig = snapshot.find((b) => b.idpel === r.idpel && b.thbln === r.blth);
-      return {
+      return [{
         type: "pdam" as const,
         idpel: r.idpel,
         nama: r.nama,
@@ -548,7 +711,7 @@ export default function PembayaranPage() {
         admin: r.adminFee || receipt.biayaAdmin || 0,
         total: r.total,
         transactionCode: r.transactionCode,
-      };
+      }];
     });
     printReceipt({
       loketName: receipt.loketName,
@@ -3032,8 +3195,17 @@ export default function PembayaranPage() {
                                   <span className="material-symbols-outlined text-primary text-base">calendar_month</span>
                                   <span className="font-semibold">{d.periode || "-"}</span>
                                   {d.stand_meter && <span className="text-slate-400">Stand: {d.stand_meter}</span>}
+                                  {!d.stand_meter && d.meter_awal != null && d.meter_akhir != null && (
+                                    <span className="text-slate-400">{d.meter_awal} → {d.meter_akhir} m³</span>
+                                  )}
                                 </div>
-                                <span className="font-bold">{d.rp_amount ? formatRupiah(Number(d.rp_amount)) : "-"}</span>
+                                <span className="font-bold">
+                                  {d.rp_amount
+                                    ? formatRupiah(Number(d.rp_amount))
+                                    : d.rp_total
+                                    ? formatRupiah(Number(d.rp_total))
+                                    : "-"}
+                                </span>
                               </div>
                             ))}
                           </div>
