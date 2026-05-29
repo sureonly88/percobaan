@@ -188,7 +188,7 @@ interface LunasinBill {
   standMeter: string;
   tokenPln: string;
   input2: string;
-  detail: Array<{ periode?: string; stand_meter?: string; rp_amount?: string; [key: string]: unknown }>;
+  detail: Array<{ periode?: string; stand_meter?: string; rp_amount?: string; rp_total?: string; meter_awal?: string; meter_akhir?: string; [key: string]: unknown }>;
   // PLN Non-Rekening specific
   noreg: string;
   tgl_reg: string;
