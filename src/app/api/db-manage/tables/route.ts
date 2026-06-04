@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
-import { verifyDbManageToken } from "@/lib/db-manage-auth";
+import { authorizeDbManage } from "@/lib/db-manage-auth";
 import { RowDataPacket } from "mysql2";
 
 export async function GET(req: NextRequest) {
-  if (!verifyDbManageToken(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeDbManage(req);
+  if (auth) return auth;
 
   try {
     const [rows] = await pool.execute<RowDataPacket[]>(

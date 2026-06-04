@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
-import { verifyDbManageToken } from "@/lib/db-manage-auth";
+import { authorizeDbManage, getDbManageActor } from "@/lib/db-manage-auth";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { auditLog } from "@/lib/audit-log";
 
 type Params = Promise<{ table: string }>;
 
@@ -39,7 +40,8 @@ async function getColumns(tableName: string): Promise<RowDataPacket[]> {
 
 // GET: list rows or schema
 export async function GET(req: NextRequest, { params }: { params: Params }) {
-  if (!verifyDbManageToken(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeDbManage(req);
+  if (auth) return auth;
 
   const { table } = await params;
   const tableName = await getValidTable(table);
@@ -110,7 +112,8 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
 
 // POST: insert row
 export async function POST(req: NextRequest, { params }: { params: Params }) {
-  if (!verifyDbManageToken(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeDbManage(req);
+  if (auth) return auth;
 
   const { table } = await params;
   const tableName = await getValidTable(table);
@@ -147,6 +150,18 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
       insertVals as (string | number | boolean | null)[]
     );
 
+    const actor = await getDbManageActor(req);
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor.username,
+      actorRole: actor.role,
+      actorIp: actor.ip,
+      action: "DB_MANAGE_TABLE_INSERT",
+      entityType: tableName,
+      entityId: result.insertId || null,
+      context: { columns: insertCols },
+    });
+
     return NextResponse.json({ success: true, insertId: result.insertId });
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Insert gagal" }, { status: 400 });
@@ -155,7 +170,8 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 
 // PUT: update row
 export async function PUT(req: NextRequest, { params }: { params: Params }) {
-  if (!verifyDbManageToken(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeDbManage(req);
+  if (auth) return auth;
 
   const { table } = await params;
   const tableName = await getValidTable(table);
@@ -180,13 +196,24 @@ export async function PUT(req: NextRequest, { params }: { params: Params }) {
     const setClause   = setCols.map(c => `\`${c}\` = ?`).join(", ");
     const whereClause = whereCols.map(c => `\`${c}\` = ?`).join(" AND ");
 
-    await pool.execute(
+    const [result] = await pool.execute<ResultSetHeader>(
       `UPDATE \`${tableName}\` SET ${setClause} WHERE ${whereClause}`,
       [
         ...setCols.map(c => (data[c] === "" ? null : data[c])),
         ...whereCols.map(c => where[c]),
       ] as (string | number | boolean | null)[]
     );
+
+    const actor = await getDbManageActor(req);
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor.username,
+      actorRole: actor.role,
+      actorIp: actor.ip,
+      action: "DB_MANAGE_TABLE_UPDATE",
+      entityType: tableName,
+      context: { setColumns: setCols, whereColumns: whereCols, affectedRows: result.affectedRows },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
@@ -196,7 +223,8 @@ export async function PUT(req: NextRequest, { params }: { params: Params }) {
 
 // DELETE: delete row
 export async function DELETE(req: NextRequest, { params }: { params: Params }) {
-  if (!verifyDbManageToken(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeDbManage(req);
+  if (auth) return auth;
 
   const { table } = await params;
   const tableName = await getValidTable(table);
@@ -214,10 +242,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Params }) {
 
     const whereClause = whereCols.map(c => `\`${c}\` = ?`).join(" AND ");
 
-    await pool.execute(
+    const [result] = await pool.execute<ResultSetHeader>(
       `DELETE FROM \`${tableName}\` WHERE ${whereClause}`,
       whereCols.map(c => where[c]) as (string | number | boolean | null)[]
     );
+
+    const actor = await getDbManageActor(req);
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor.username,
+      actorRole: actor.role,
+      actorIp: actor.ip,
+      action: "DB_MANAGE_TABLE_DELETE",
+      entityType: tableName,
+      context: { whereColumns: whereCols, affectedRows: result.affectedRows },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {

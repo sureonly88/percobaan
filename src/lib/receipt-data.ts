@@ -2,6 +2,7 @@ import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { findInvoiceByReceiptToken } from "@/lib/payment-links/repository";
 import { getAppBaseUrl } from "@/lib/payment-links/code";
+import { maskIdentifier } from "@/lib/payment-links/public-sanitizer";
 
 function parseJson(value: unknown): Record<string, unknown> {
   if (!value) return {};
@@ -63,7 +64,7 @@ export async function buildDigitalReceipt(receiptToken: string) {
         itemCode: row.item_code,
         provider: row.provider,
         serviceType: row.service_type,
-        customerId: row.customer_id,
+        customerId: maskIdentifier(row.customer_id),
         customerName: row.customer_name,
         productCode: row.product_code,
         periodLabel: row.period_label,

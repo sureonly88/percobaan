@@ -262,6 +262,38 @@ export async function listPaidGatewayInvoices(limit = 20) {
   return rows.map(mapInvoice);
 }
 
+export async function listProviderProcessableInvoices(limit = 20, staleMinutes = 15) {
+  const staleCutoff = new Date(Date.now() - Math.max(1, staleMinutes) * 60_000);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT * FROM payment_invoices
+      WHERE multi_payment_code IS NULL
+        AND (
+          status = 'PAID_GATEWAY'
+          OR (status = 'PROCESSING_PROVIDER' AND updated_at < ?)
+        )
+      ORDER BY FIELD(status, 'PAID_GATEWAY', 'PROCESSING_PROVIDER'), paid_gateway_at ASC, updated_at ASC, id ASC
+      LIMIT ?`,
+    [staleCutoff, limit]
+  );
+  return rows.map(mapInvoice);
+}
+
+export async function claimInvoiceForProviderProcessing(invoiceId: number, staleMinutes = 15) {
+  const staleCutoff = new Date(Date.now() - Math.max(1, staleMinutes) * 60_000);
+  const [res] = await pool.execute<ResultSetHeader>(
+    `UPDATE payment_invoices
+        SET status = 'PROCESSING_PROVIDER', updated_at = NOW()
+      WHERE id = ?
+        AND multi_payment_code IS NULL
+        AND (
+          status = 'PAID_GATEWAY'
+          OR (status = 'PROCESSING_PROVIDER' AND updated_at < ?)
+        )`,
+    [invoiceId, staleCutoff]
+  );
+  return Number(res.affectedRows || 0) > 0;
+}
+
 export async function expirePaymentInvoices() {
   const [res] = await pool.execute<ResultSetHeader>(
     `UPDATE payment_invoices

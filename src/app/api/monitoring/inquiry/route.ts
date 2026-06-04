@@ -20,6 +20,18 @@ function categorizeInquiryError(errorCode: string | null, eventType: string | nu
   return "-";
 }
 
+function toDateParam(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function normalizeDateRange(startDate: string | null, endDate: string | null) {
+  const now = new Date();
+  let start = startDate || toDateParam(new Date(now.getFullYear(), now.getMonth(), 1));
+  let end = endDate || toDateParam(now);
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
 function buildWhereClause(
   searchParams: URLSearchParams
 ): {
@@ -30,6 +42,7 @@ function buildWhereClause(
   const errorCategory = (searchParams.get("errorCategory") || "ALL") as InquiryErrorCategoryFilter;
   const startDate = searchParams.get("startDate");
   const endDate = searchParams.get("endDate");
+  const dateRange = normalizeDateRange(startDate, endDate);
   const search = searchParams.get("search")?.trim();
   const username = searchParams.get("username")?.trim();
   const provider = searchParams.get("provider")?.trim().toUpperCase();
@@ -64,10 +77,8 @@ function buildWhereClause(
     whereClauses.push("provider_error_code NOT LIKE 'HTTP_%'");
   }
 
-  if (startDate && endDate) {
-    whereClauses.push("DATE(created_at) BETWEEN ? AND ?");
-    params.push(startDate, endDate);
-  }
+  whereClauses.push("DATE(created_at) BETWEEN ? AND ?");
+  params.push(dateRange.start, dateRange.end);
 
   if (search) {
     const searchValue = `%${search}%`;

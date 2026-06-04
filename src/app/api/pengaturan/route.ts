@@ -5,6 +5,16 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { canWrite } from "@/lib/rbac";
 import { cached, invalidateCache } from "@/lib/cache";
+import { auditLog } from "@/lib/audit-log";
+
+function maskSensitiveSettings(settings: Record<string, string>) {
+  return Object.fromEntries(
+    Object.entries(settings).map(([key, value]) => [
+      key,
+      /secret|password|pass|token|key/i.test(key) ? "[REDACTED]" : value,
+    ])
+  );
+}
 
 // GET: Retrieve all settings (authenticated users only)
 export async function GET() {
@@ -39,7 +49,8 @@ export async function GET() {
 // PUT: Update settings (key-value pairs) - admin only
 export async function PUT(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const user = session?.user as { role?: string; username?: string; name?: string } | undefined;
+  const role = user?.role;
   if (!role || !canWrite(role)) {
     return NextResponse.json({ error: "Anda tidak memiliki akses untuk operasi ini" }, { status: 403 });
   }
@@ -62,6 +73,16 @@ export async function PUT(request: NextRequest) {
 
     invalidateCache("app_settings");
     invalidateCache("feature_flags");
+
+    await auditLog({
+      actorType: "user",
+      actorUsername: user?.username || user?.name || null,
+      actorRole: role || null,
+      actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+      action: "APP_SETTINGS_UPDATE",
+      entityType: "app_settings",
+      after: maskSensitiveSettings(Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, String(value)]))),
+    });
 
     return NextResponse.json({ message: "Pengaturan berhasil disimpan" });
   } catch (error) {

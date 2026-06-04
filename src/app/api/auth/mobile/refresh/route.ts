@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT u.id, u.name, u.username, u.role,
+      `SELECT u.id, u.name, u.username, u.role, u.status,
               l.loket_code, l.nama AS loket_name
          FROM users u
          LEFT JOIN lokets l ON u.loket_id = l.id
@@ -47,6 +47,11 @@ export async function POST(req: NextRequest) {
     const user = rows[0];
     if (!user) {
       return NextResponse.json({ error: "User tidak ditemukan" }, { status: 401 });
+    }
+
+    const status = String(user.status || "active").toLowerCase();
+    if (!["active", "aktif"].includes(status)) {
+      return NextResponse.json({ error: "Akun belum aktif atau dinonaktifkan" }, { status: 403 });
     }
 
     const tokens = createTokenPair({

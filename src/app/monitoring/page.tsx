@@ -155,6 +155,16 @@ const ERROR_CATEGORY_CONFIG: Record<string, { label: string; className: string }
   "-": { label: "-", className: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" },
 };
 
+function toDateInputValue(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getDefaultMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  return { startDate: toDateInputValue(start), endDate: toDateInputValue(now) };
+}
+
 export default function MonitoringPage() {
   const [data, setData] = useState<MonitoringData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -166,12 +176,9 @@ export default function MonitoringPage() {
   const [search, setSearch] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>("ALL");
-  const todayStrMon = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  })();
-  const [startDate, setStartDate] = useState(todayStrMon);
-  const [endDate, setEndDate] = useState(todayStrMon);
+  const defaultDateRange = getDefaultMonthRange();
+  const [startDate, setStartDate] = useState(defaultDateRange.startDate);
+  const [endDate, setEndDate] = useState(defaultDateRange.endDate);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [resolving, setResolving] = useState<number | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -553,7 +560,7 @@ export default function MonitoringPage() {
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-bold text-lg">Tren Transaksi 7 Hari</h3>
+              <h3 className="font-bold text-lg">Tren Transaksi</h3>
               <p className="text-xs text-slate-500">Perbandingan total, sukses, dan gagal per hari</p>
             </div>
           </div>

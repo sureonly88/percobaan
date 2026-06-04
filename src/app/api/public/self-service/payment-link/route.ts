@@ -4,11 +4,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { createPaymentLink } from "@/lib/payment-links/service";
 import { inquirySelfService } from "@/lib/payment-links/self-service";
 import { isPaymentLinksEnabled, isPublicSelfServiceEnabled } from "@/lib/feature-flags";
-
-function clientKey(req: NextRequest) {
-  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || req.headers.get("x-real-ip") || "unknown";
-}
+import { getRateLimitKey } from "@/lib/request-client";
 
 export async function POST(req: NextRequest) {
   if (!(await isPublicSelfServiceEnabled())) {
@@ -17,7 +13,7 @@ export async function POST(req: NextRequest) {
   if (!(await isPaymentLinksEnabled())) {
     return NextResponse.json({ error: "Fitur Payment Link sedang nonaktif" }, { status: 503 });
   }
-  const limit = checkRateLimit(`public-self-service-link:${clientKey(req)}`, { max: 6, windowMs: 10 * 60 * 1000 });
+  const limit = checkRateLimit(getRateLimitKey(req, "public-self-service-link"), { max: 6, windowMs: 10 * 60 * 1000 });
   if (!limit.allowed) {
     return NextResponse.json({ error: "Terlalu banyak pembuatan invoice. Coba lagi beberapa menit." }, { status: 429 });
   }

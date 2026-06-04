@@ -91,6 +91,16 @@ const ERROR_FILTER_TABS: Array<{ key: InquiryErrorCategoryFilter; label: string 
   { key: "APPLICATION", label: "App" },
 ];
 
+function toDateInputValue(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getDefaultMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  return { startDate: toDateInputValue(start), endDate: toDateInputValue(now) };
+}
+
 function formatTime(dateStr: string): string {
   return new Date(dateStr).toLocaleString("id-ID", {
     day: "2-digit",
@@ -120,9 +130,9 @@ export default function InquiryMonitoringTab({ autoRefresh }: { autoRefresh: boo
   const [search, setSearch] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [providerFilter, setProviderFilter] = useState<InquiryProviderFilter>("ALL");
-  const todayStr = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD format
-  const [startDate, setStartDate] = useState(todayStr);
-  const [endDate, setEndDate] = useState(todayStr);
+  const defaultDateRange = getDefaultMonthRange();
+  const [startDate, setStartDate] = useState(defaultDateRange.startDate);
+  const [endDate, setEndDate] = useState(defaultDateRange.endDate);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
 

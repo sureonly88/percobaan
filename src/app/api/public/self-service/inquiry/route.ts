@@ -2,17 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { inquirySelfService } from "@/lib/payment-links/self-service";
 import { isPublicSelfServiceEnabled } from "@/lib/feature-flags";
-
-function clientKey(req: NextRequest) {
-  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || req.headers.get("x-real-ip") || "unknown";
-}
+import { getRateLimitKey } from "@/lib/request-client";
 
 export async function POST(req: NextRequest) {
   if (!(await isPublicSelfServiceEnabled())) {
     return NextResponse.json({ error: "Fitur self-service publik sedang nonaktif" }, { status: 503 });
   }
-  const limit = checkRateLimit(`public-self-service-inquiry:${clientKey(req)}`, { max: 12, windowMs: 10 * 60 * 1000 });
+  const limit = checkRateLimit(getRateLimitKey(req, "public-self-service-inquiry"), { max: 12, windowMs: 10 * 60 * 1000 });
   if (!limit.allowed) {
     return NextResponse.json({ error: "Terlalu banyak percobaan. Coba lagi beberapa menit." }, { status: 429 });
   }

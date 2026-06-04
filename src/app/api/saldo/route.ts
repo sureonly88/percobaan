@@ -5,6 +5,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { getAuthToken } from "@/lib/api-auth";
+import { auditLog } from "@/lib/audit-log";
 
 // GET: list saldo history + loket saldo info
 export async function GET(request: NextRequest) {
@@ -120,54 +121,81 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Keterangan harus diisi" }, { status: 400 });
     }
 
-    // Verify loket exists
-    const [loketRows] = await pool.query<RowDataPacket[]>(
-      "SELECT id, loket_code, nama, pulsa FROM lokets WHERE loket_code = ? LIMIT 1",
-      [loketCode]
-    );
-    if (loketRows.length === 0) {
-      return NextResponse.json({ error: "Loket tidak ditemukan" }, { status: 404 });
-    }
-
-    const loket = loketRows[0];
-    const saldoSebelum = Number(loket.pulsa || 0);
-    const saldoSesudah = saldoSebelum + nominal;
-
-    if (saldoSesudah < 0) {
-      return NextResponse.json(
-        { error: `Saldo tidak mencukupi. Saldo saat ini: Rp ${saldoSebelum.toLocaleString("id-ID")}` },
-        { status: 400 }
-      );
-    }
-
     // Generate request code
     const now = new Date();
     const requestCode = `SALDO-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const connection = await pool.getConnection();
+    let loketNama = "";
+    let saldoSebelum = 0;
+    let saldoSesudah = 0;
+    try {
+      await connection.beginTransaction();
 
-    // Insert saldo request record
-    await pool.execute<ResultSetHeader>(
-      `INSERT INTO request_saldo 
-       (request_code, username, kode_loket, request_saldo, tgl_request, ket_request,
-        is_verifikasi, verifikasi_saldo, username_verifikasi, tgl_verifikasi, 
-        status_verifikasi, ket_verifikasi, id_bank_tujuan, created_at, updated_at)
-       VALUES (?, ?, ?, ?, NOW(), ?, 1, ?, ?, NOW(), 'APPROVED', ?, 0, NOW(), NOW())`,
-      [
-        requestCode,
-        username,
-        loketCode,
-        nominal,
-        keterangan.trim(),
-        nominal,
-        username,
-        `Diproses langsung oleh ${username}`,
-      ]
-    );
+      const [loketRows] = await connection.query<RowDataPacket[]>(
+        "SELECT id, loket_code, nama, pulsa FROM lokets WHERE loket_code = ? LIMIT 1 FOR UPDATE",
+        [loketCode]
+      );
+      if (loketRows.length === 0) {
+        await connection.rollback();
+        return NextResponse.json({ error: "Loket tidak ditemukan" }, { status: 404 });
+      }
 
-    // Update loket saldo
-    await pool.execute(
-      "UPDATE lokets SET pulsa = pulsa + ? WHERE loket_code = ?",
-      [nominal, loketCode]
-    );
+      const loket = loketRows[0];
+      loketNama = String(loket.nama || loketCode);
+      saldoSebelum = Number(loket.pulsa || 0);
+      saldoSesudah = saldoSebelum + nominal;
+
+      if (saldoSesudah < 0) {
+        await connection.rollback();
+        return NextResponse.json(
+          { error: `Saldo tidak mencukupi. Saldo saat ini: Rp ${saldoSebelum.toLocaleString("id-ID")}` },
+          { status: 400 }
+        );
+      }
+
+      await connection.execute<ResultSetHeader>(
+        `INSERT INTO request_saldo 
+         (request_code, username, kode_loket, request_saldo, tgl_request, ket_request,
+          is_verifikasi, verifikasi_saldo, username_verifikasi, tgl_verifikasi, 
+          status_verifikasi, ket_verifikasi, id_bank_tujuan, created_at, updated_at)
+         VALUES (?, ?, ?, ?, NOW(), ?, 1, ?, ?, NOW(), 'APPROVED', ?, 0, NOW(), NOW())`,
+        [
+          requestCode,
+          username,
+          loketCode,
+          nominal,
+          keterangan.trim(),
+          nominal,
+          username,
+          `Diproses langsung oleh ${username}`,
+        ]
+      );
+
+      await connection.execute(
+        "UPDATE lokets SET pulsa = ? WHERE loket_code = ?",
+        [saldoSesudah, loketCode]
+      );
+
+      await connection.commit();
+    } catch (error) {
+      try { await connection.rollback(); } catch { /* ignore rollback errors */ }
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    await auditLog({
+      actorType: "user",
+      actorUsername: username,
+      actorRole: role || null,
+      actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+      action: "SALDO_MUTATION",
+      entityType: "loket",
+      entityId: loketCode,
+      before: { pulsa: saldoSebelum },
+      after: { pulsa: saldoSesudah, nominal, requestCode },
+      context: { keterangan: keterangan.trim() },
+    });
 
     // Posting jurnal GL (best-effort)
     try {
@@ -185,7 +213,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Saldo loket ${loket.nama} berhasil ${nominal > 0 ? "ditambahkan" : "dikurangi"} sebesar Rp ${Math.abs(nominal).toLocaleString("id-ID")}`,
+      message: `Saldo loket ${loketNama} berhasil ${nominal > 0 ? "ditambahkan" : "dikurangi"} sebesar Rp ${Math.abs(nominal).toLocaleString("id-ID")}`,
       saldoSebelum,
       saldoSesudah,
       requestCode,

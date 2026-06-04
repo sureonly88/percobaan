@@ -5,6 +5,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import bcrypt from "bcryptjs";
 import { denyIfUnauthorized } from "@/lib/rbac";
+import { auditLog } from "@/lib/audit-log";
 
 // GET: List all users (with optional search)
 export async function GET(request: NextRequest) {
@@ -68,7 +69,8 @@ export async function GET(request: NextRequest) {
 // POST: Create new user
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const actor = session?.user as { role?: string; username?: string; name?: string } | undefined;
+  const role = actor?.role;
   const check = denyIfUnauthorized(role, "/api/users", "POST");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
@@ -100,6 +102,17 @@ export async function POST(request: NextRequest) {
       [username, hashedPassword, name || null, email || null, role || "user", loketId || null]
     );
 
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor?.username || actor?.name || null,
+      actorRole: actor?.role || null,
+      actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+      action: "USER_CREATE",
+      entityType: "user",
+      entityId: result.insertId,
+      after: { username, name: name || null, email: email || null, role: role || "user", loketId: loketId || null },
+    });
+
     return NextResponse.json({ message: "User berhasil dibuat", id: result.insertId });
   } catch (error) {
     console.error("Users POST Error:", error);
@@ -110,7 +123,8 @@ export async function POST(request: NextRequest) {
 // PUT: Update user
 export async function PUT(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const userRole = (session?.user as { role?: string })?.role;
+  const actor = session?.user as { role?: string; username?: string; name?: string } | undefined;
+  const userRole = actor?.role;
   const check = denyIfUnauthorized(userRole, "/api/users", "PUT");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
@@ -172,10 +186,22 @@ export async function PUT(request: NextRequest) {
     }
 
     values.push(Number(id));
+    const changedFields = fields.map((field) => field.split(" = ")[0]);
     await pool.query<ResultSetHeader>(
       `UPDATE users SET ${fields.join(", ")} WHERE id = ?`,
       values
     );
+
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor?.username || actor?.name || null,
+      actorRole: actor?.role || null,
+      actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+      action: "USER_UPDATE",
+      entityType: "user",
+      entityId: id,
+      after: { changedFields, passwordChanged: Boolean(newPassword) },
+    });
 
     return NextResponse.json({ message: "User berhasil diperbarui" });
   } catch (error) {
@@ -187,7 +213,8 @@ export async function PUT(request: NextRequest) {
 // DELETE: Delete user
 export async function DELETE(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const actor = session?.user as { role?: string; username?: string; name?: string } | undefined;
+  const role = actor?.role;
   const check = denyIfUnauthorized(role, "/api/users", "DELETE");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
@@ -200,6 +227,15 @@ export async function DELETE(request: NextRequest) {
 
   try {
     await pool.query<ResultSetHeader>("DELETE FROM users WHERE id = ?", [Number(id)]);
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor?.username || actor?.name || null,
+      actorRole: actor?.role || null,
+      actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+      action: "USER_DELETE",
+      entityType: "user",
+      entityId: id,
+    });
     return NextResponse.json({ message: "User berhasil dihapus" });
   } catch (error) {
     console.error("Users DELETE Error:", error);

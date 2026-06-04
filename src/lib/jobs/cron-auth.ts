@@ -1,8 +1,7 @@
 /**
  * Helper bersama untuk endpoint cron.
  * Auth: header `X-Cron-Secret: <env CRON_SECRET>` ATAU bearer dari role admin.
- * Loopback (127.0.0.1 / ::1) tanpa secret diperbolehkan agar mudah dijadwalkan
- * via crontab/systemd di host yang sama.
+ * Fallback loopback tanpa secret hanya diperbolehkan untuk development lokal.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -13,11 +12,14 @@ export async function authorizeCron(req: NextRequest): Promise<NextResponse | nu
   const header = req.headers.get("x-cron-secret");
   if (secret && header && timingSafeEqual(secret, header)) return null;
 
-  // Loopback fallback (cron lokal)
+  const bearer = req.headers.get("authorization") || "";
+  if (secret && bearer === `Bearer ${secret}`) return null;
+
+  // Loopback fallback hanya untuk development lokal yang eksplisit tidak punya secret.
   const fwd = req.headers.get("x-forwarded-for") || "";
   const ip = fwd.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "";
-  if (ip === "127.0.0.1" || ip === "::1" || ip === "") {
-    if (!secret) return null; // dev tanpa secret
+  if (process.env.NODE_ENV === "development" && !secret && (ip === "127.0.0.1" || ip === "::1" || ip === "")) {
+    return null;
   }
 
   // Admin web/mobile token juga boleh memicu cron (untuk debug)

@@ -37,6 +37,29 @@ function formatTrendDate(value: string): string {
   });
 }
 
+function toDateParam(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function normalizeDateRange(startDate: string | null, endDate: string | null) {
+  const now = new Date();
+  let start = startDate || toDateParam(new Date(now.getFullYear(), now.getMonth(), 1));
+  let end = endDate || toDateParam(now);
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
+function enumerateDates(start: string, end: string) {
+  const dates: string[] = [];
+  const current = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (current <= last) {
+    dates.push(toDateParam(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
 export async function GET(request: NextRequest) {
   const authToken = await getAuthToken(request);
   const role = authToken?.role;
@@ -50,6 +73,8 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get("status"); // PENDING, SUCCESS, PARTIAL_SUCCESS, FAILED, or null for all
   const startDate = searchParams.get("startDate");
   const endDate = searchParams.get("endDate");
+  const dateRange = normalizeDateRange(startDate, endDate);
+  const dateParams = [dateRange.start, dateRange.end];
   const search = searchParams.get("search");
   const username = searchParams.get("username")?.trim();
   const errorCategoryFilter = searchParams.get("errorCategory");
@@ -84,17 +109,18 @@ export async function GET(request: NextRequest) {
             END
           ), 0) as bill_count
         FROM payment_requests
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
+        WHERE DATE(created_at) BETWEEN ? AND ?${providerClause}${kasirClause}
         GROUP BY status
-      `, [...providerParams, ...kasirParams]),
+      `, [...dateParams, ...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT COUNT(*) as count
         FROM payment_requests
-        WHERE status = 'PENDING'
+        WHERE DATE(created_at) BETWEEN ? AND ?
+          AND status = 'PENDING'
           AND COALESCE(error_code, '') <> 'LUNASIN_PENDING'
           AND created_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)
           ${providerClause}${kasirClause}
-      `, [...providerParams, ...kasirParams]),
+      `, [...dateParams, ...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT
           COUNT(*) AS total_count,
@@ -105,38 +131,38 @@ export async function GET(request: NextRequest) {
           SUM(CASE WHEN error_code LIKE 'NETWORK_%' THEN 1 ELSE 0 END) AS network_failures,
           SUM(CASE WHEN error_code LIKE 'PDAM_%' OR error_code LIKE 'LUNASIN_%' OR error_code LIKE 'HTTP_%' OR error_code REGEXP '^[0-9]{4}$' THEN 1 ELSE 0 END) AS provider_failures
         FROM payment_requests
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
-      `, [...providerParams, ...kasirParams]),
+        WHERE DATE(created_at) BETWEEN ? AND ?${providerClause}${kasirClause}
+      `, [...dateParams, ...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT error_code, COUNT(*) AS count
         FROM payment_requests
         WHERE error_code IS NOT NULL AND error_code <> ''
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
+          AND DATE(created_at) BETWEEN ? AND ?${providerClause}${kasirClause}
         GROUP BY error_code
         ORDER BY count DESC, error_code ASC
         LIMIT 1
-      `, [...providerParams, ...kasirParams]),
+      `, [...dateParams, ...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT COALESCE(SUM(GREATEST(CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.attempts')) AS UNSIGNED) - 1, 0)), 0) AS total_retries
         FROM transaction_events
         WHERE event_type IN ('PAYMENT_PROVIDER_SUCCESS', 'PAYMENT_PROVIDER_FAILED')
           AND JSON_EXTRACT(payload_json, '$.attempts') IS NOT NULL
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}
-      `, providerParams).catch(() => [[{ total_retries: 0 }] as RowDataPacket[]]),
+          AND DATE(created_at) BETWEEN ? AND ?${providerClause}${kasirClause}
+      `, [...dateParams, ...providerParams, ...kasirParams]).catch(() => [[{ total_retries: 0 }] as RowDataPacket[]]),
       pool.query<RowDataPacket[]>(`
         SELECT DATE(created_at) AS trx_date, status, COUNT(*) AS count
         FROM payment_requests
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)${providerClause}${kasirClause}
+        WHERE DATE(created_at) BETWEEN ? AND ?${providerClause}${kasirClause}
         GROUP BY DATE(created_at), status
         ORDER BY trx_date ASC
-      `, [...providerParams, ...kasirParams]),
+      `, [...dateParams, ...providerParams, ...kasirParams]),
       pool.query<RowDataPacket[]>(`
         SELECT error_code, COUNT(*) AS count
         FROM payment_requests
         WHERE error_code IS NOT NULL AND error_code <> ''
-          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${providerClause}${kasirClause}
+          AND DATE(created_at) BETWEEN ? AND ?${providerClause}${kasirClause}
         GROUP BY error_code
-      `, [...providerParams, ...kasirParams]),
+      `, [...dateParams, ...providerParams, ...kasirParams]),
     ]);
 
     const summary: Record<string, { count: number; billCount: number }> = {
@@ -181,10 +207,7 @@ export async function GET(request: NextRequest) {
       partialSuccess: number;
     }>();
 
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    for (const iso of enumerateDates(dateRange.start, dateRange.end)) {
       trendMap.set(iso, {
         date: iso,
         label: formatTrendDate(iso),
@@ -295,10 +318,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (startDate && endDate) {
-      listQuery += " AND DATE(pr.created_at) BETWEEN ? AND ?";
-      params.push(startDate, endDate);
-    }
+    listQuery += " AND DATE(pr.created_at) BETWEEN ? AND ?";
+    params.push(dateRange.start, dateRange.end);
 
     if (search) {
       listQuery += " AND (pr.idempotency_key LIKE ? OR pr.username LIKE ? OR pr.loket_code LIKE ?)";

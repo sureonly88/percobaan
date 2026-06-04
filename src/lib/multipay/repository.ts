@@ -64,7 +64,7 @@ export async function createMultiPaymentRequest(params: {
 
     // Idempotency key already exists — check the existing row
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT id, status, CAST(response_payload AS CHAR) AS response_payload
+      `SELECT id, status, updated_at, CAST(response_payload AS CHAR) AS response_payload
          FROM multi_payment_requests
         WHERE idempotency_key = ? LIMIT 1`,
       [input.idempotencyKey]
@@ -73,7 +73,11 @@ export async function createMultiPaymentRequest(params: {
     const existing = rows[0];
     if (!existing) throw error;
 
-    if (existing.status === "PENDING") {
+    const pendingRetryMinutes = Math.max(5, Number(process.env.MULTIPAY_PENDING_RETRY_MINUTES || 15));
+    const pendingUpdatedAt = existing.updated_at ? new Date(existing.updated_at).getTime() : Date.now();
+    const pendingIsStale = Date.now() - pendingUpdatedAt >= pendingRetryMinutes * 60_000;
+
+    if (existing.status === "PENDING" && !pendingIsStale) {
       throw new Error("Transaksi dengan idempotencyKey ini sedang diproses");
     }
 

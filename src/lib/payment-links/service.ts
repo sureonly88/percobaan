@@ -1,4 +1,4 @@
-import { createSnapTransaction, mapMidtransStatus } from "@/lib/midtrans";
+import { createSnapTransaction, getTransactionStatus, mapMidtransStatus } from "@/lib/midtrans";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { createNotificationSafe } from "@/lib/notifications";
 import { orchestrateMultiPayment } from "@/lib/multipay/orchestrator";
@@ -7,6 +7,7 @@ import { generateGatewayOrderId, getAppBaseUrl } from "./code";
 import type { CreatePaymentLinkInput, PaymentInvoice, PaymentInvoiceStatus } from "./types";
 import {
   addInvoiceEvent,
+  claimInvoiceForProviderProcessing,
   createPaymentInvoice,
   finalizeInvoiceProvider,
   findInvoiceByGatewayOrderId,
@@ -107,8 +108,21 @@ export async function handlePaymentLinkWebhook(body: Record<string, unknown>) {
   }
 
   const mapped = mapMidtransStatus(transactionStatus, fraudStatus);
+  const alreadyGatewayPaid = ["PAID_GATEWAY", "PROCESSING_PROVIDER"].includes(invoice.status);
+  if (alreadyGatewayPaid && mapped !== "SUCCESS") {
+    await addInvoiceEvent({
+      invoiceId: invoice.id,
+      eventType: "PAYMENT_LINK_GATEWAY_NO_DOWNGRADE",
+      actorType: "gateway",
+      beforeStatus: invoice.status,
+      afterStatus: invoice.status,
+      payload: body,
+    });
+    return { ignored: true, reason: "paid_status_no_downgrade", status: invoice.status, mapped, statusCode };
+  }
+
   let nextStatus: PaymentInvoiceStatus = "PAYMENT_PENDING";
-  if (mapped === "SUCCESS") nextStatus = "PAID_GATEWAY";
+  if (mapped === "SUCCESS") nextStatus = alreadyGatewayPaid ? invoice.status : "PAID_GATEWAY";
   if (mapped === "FAILED") nextStatus = "UNPAID";
   if (mapped === "EXPIRED") nextStatus = "EXPIRED";
 
@@ -133,6 +147,12 @@ export async function handlePaymentLinkWebhook(body: Record<string, unknown>) {
   return { ok: true, status: nextStatus, mapped, statusCode };
 }
 
+export async function syncInvoiceGatewayStatus(invoice: PaymentInvoice) {
+  if (!invoice.gatewayOrderId) throw new Error("Invoice belum memiliki gateway order ID");
+  const status = await getTransactionStatus(invoice.gatewayOrderId);
+  return handlePaymentLinkWebhook(status as unknown as Record<string, unknown>);
+}
+
 function mapMultipayStatus(status: MultiPaymentRequestStatus): PaymentInvoiceStatus {
   if (status === "SUCCESS") return "SUCCESS";
   if (status === "PARTIAL_SUCCESS") return "PARTIAL_SUCCESS";
@@ -140,10 +160,15 @@ function mapMultipayStatus(status: MultiPaymentRequestStatus): PaymentInvoiceSta
   return "FAILED_PROVIDER";
 }
 
-export async function processPaidInvoice(invoice: PaymentInvoice, options?: { baseUrl?: string; internalSecret?: string }) {
-  if (invoice.status !== "PAID_GATEWAY" || invoice.multiPaymentCode) return null;
-  await updateInvoiceStatus(invoice.id, "PROCESSING_PROVIDER");
-  await addInvoiceEvent({ invoiceId: invoice.id, eventType: "PAYMENT_LINK_PROVIDER_PROCESSING", actorType: "system", beforeStatus: "PAID_GATEWAY", afterStatus: "PROCESSING_PROVIDER" });
+export async function processPaidInvoice(invoice: PaymentInvoice, options?: { baseUrl?: string; internalSecret?: string; retryStaleMinutes?: number }) {
+  if (!["PAID_GATEWAY", "PROCESSING_PROVIDER"].includes(invoice.status) || invoice.multiPaymentCode) return null;
+  const internalSecret = options?.internalSecret || process.env.CRON_SECRET || (process.env.NODE_ENV === "development" ? "dev-local" : "");
+  if (!internalSecret) throw new Error("CRON_SECRET wajib diset untuk proses provider internal");
+
+  const claimed = await claimInvoiceForProviderProcessing(invoice.id, options?.retryStaleMinutes);
+  if (!claimed) return null;
+
+  await addInvoiceEvent({ invoiceId: invoice.id, eventType: "PAYMENT_LINK_PROVIDER_PROCESSING", actorType: "system", beforeStatus: invoice.status, afterStatus: "PROCESSING_PROVIDER" });
 
   const items = await getInvoiceItems(invoice.id);
   const multipayItems: UnifiedPaymentItemInput[] = items.map((item) => ({
@@ -170,7 +195,7 @@ export async function processPaidInvoice(invoice: PaymentInvoice, options?: { ba
     items: multipayItems,
   }, {
     baseUrl: options?.baseUrl || `http://localhost:${process.env.PORT || "3000"}`,
-    authorizationHeader: `Internal ${options?.internalSecret || "dev-local"}`,
+    authorizationHeader: `Internal ${internalSecret}`,
   });
 
   const nextStatus = mapMultipayStatus(result.status);

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
+import { auditLog } from "@/lib/audit-log";
 
 // GET: Daftar loket + performa
 export async function GET() {
@@ -100,7 +101,8 @@ export async function GET() {
 // POST: Tambah loket baru
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const actor = session?.user as { role?: string; username?: string; name?: string } | undefined;
+  const role = actor?.role;
   const check = denyIfUnauthorized(role, "/api/loket", "POST");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
@@ -121,10 +123,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Kode loket sudah ada" }, { status: 409 });
     }
 
-    await pool.query<ResultSetHeader>(
+    const [result] = await pool.query<ResultSetHeader>(
       "INSERT INTO lokets (loket_code, nama, alamat, jenis, pulsa, biaya_admin, is_blok, blok_message, byadmin, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif')",
       [loketCode, nama, alamat || "", jenis || "", Number(pulsa || 0), Number(biayaAdmin ?? 0), isBlok ? 1 : 0, blokMessage || "", byadmin || ""]
     );
+
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor?.username || actor?.name || null,
+      actorRole: actor?.role || null,
+      actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+      action: "LOKET_CREATE",
+      entityType: "loket",
+      entityId: result.insertId || loketCode,
+      after: { loketCode, nama, jenis: jenis || "", pulsa: Number(pulsa || 0), biayaAdmin: Number(biayaAdmin ?? 0), isBlok: Boolean(isBlok) },
+    });
 
     return NextResponse.json({ message: "Loket berhasil ditambahkan" });
   } catch (error) {
@@ -136,7 +149,8 @@ export async function POST(request: NextRequest) {
 // PUT: Edit loket
 export async function PUT(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  const role = (session?.user as { role?: string })?.role;
+  const actor = session?.user as { role?: string; username?: string; name?: string } | undefined;
+  const role = actor?.role;
   const check = denyIfUnauthorized(role, "/api/loket", "PUT");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
@@ -171,10 +185,22 @@ export async function PUT(request: NextRequest) {
     }
 
     values.push(loketCode);
+    const changedFields = fields.map((field) => field.split(" = ")[0]);
     await pool.query<ResultSetHeader>(
       `UPDATE lokets SET ${fields.join(", ")} WHERE loket_code = ?`,
       values
     );
+
+    await auditLog({
+      actorType: "user",
+      actorUsername: actor?.username || actor?.name || null,
+      actorRole: actor?.role || null,
+      actorIp: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null,
+      action: "LOKET_UPDATE",
+      entityType: "loket",
+      entityId: loketCode,
+      after: { changedFields },
+    });
 
     return NextResponse.json({ message: "Loket berhasil diperbarui" });
   } catch (error) {

@@ -7,6 +7,13 @@ function maskPhone(phone: string | null): string | null {
   return `${phone.slice(0, 4)}****${phone.slice(-3)}`;
 }
 
+export function maskIdentifier(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const text = String(value);
+  if (text.length <= 4) return `${text[0] || ""}***`;
+  return `${text.slice(0, 2)}****${text.slice(-3)}`;
+}
+
 export function toPublicInvoice(invoice: PaymentInvoice, items: PaymentInvoiceItem[]) {
   const appUrl = getAppBaseUrl();
   return {
@@ -25,7 +32,7 @@ export function toPublicInvoice(invoice: PaymentInvoice, items: PaymentInvoiceIt
     items: items.map((item) => ({
       provider: item.provider,
       serviceType: item.serviceType,
-      customerId: item.customerId,
+      customerId: maskIdentifier(item.customerId),
       customerName: item.customerName,
       productCode: item.productCode,
       periodLabel: item.periodLabel,

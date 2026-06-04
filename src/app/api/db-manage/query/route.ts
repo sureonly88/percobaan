@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
-import { verifyDbManageToken } from "@/lib/db-manage-auth";
+import { authorizeDbManage, getDbManageActor } from "@/lib/db-manage-auth";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import { auditLog } from "@/lib/audit-log";
 
 function serialize(val: unknown): unknown {
   if (val === null || val === undefined) return null;
@@ -12,9 +13,8 @@ function serialize(val: unknown): unknown {
 }
 
 export async function POST(req: NextRequest) {
-  if (!verifyDbManageToken(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await authorizeDbManage(req);
+  if (auth) return auth;
 
   const { sql } = await req.json();
   if (!sql || typeof sql !== "string" || !sql.trim()) {
@@ -29,9 +29,29 @@ export async function POST(req: NextRequest) {
         Object.fromEntries(Object.entries(row).map(([k, v]) => [k, serialize(v)]))
       );
       const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+      const actor = await getDbManageActor(req);
+      await auditLog({
+        actorType: "user",
+        actorUsername: actor.username,
+        actorRole: actor.role,
+        actorIp: actor.ip,
+        action: "DB_MANAGE_QUERY_SELECT",
+        entityType: "db_manage_query",
+        context: { sql: sql.trim().slice(0, 500), rowCount: rows.length },
+      });
       return NextResponse.json({ type: "SELECT", columns, rows, count: rows.length });
     } else {
       const r = result as ResultSetHeader;
+      const actor = await getDbManageActor(req);
+      await auditLog({
+        actorType: "user",
+        actorUsername: actor.username,
+        actorRole: actor.role,
+        actorIp: actor.ip,
+        action: "DB_MANAGE_QUERY_MODIFY",
+        entityType: "db_manage_query",
+        context: { sql: sql.trim().slice(0, 500), affectedRows: r.affectedRows, insertId: r.insertId || null },
+      });
       return NextResponse.json({
         type: "MODIFY",
         affectedRows: r.affectedRows,
