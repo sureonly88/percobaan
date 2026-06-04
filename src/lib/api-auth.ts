@@ -22,8 +22,38 @@ export interface AuthToken {
 }
 
 export async function getAuthToken(req: NextRequest): Promise<AuthToken | null> {
+  // 0. Internal system call (cron/worker) — digunakan untuk proses background yang
+  // perlu memanggil endpoint internal tanpa cookie user. Wajib memakai CRON_SECRET.
+  const authHeaderRaw = req.headers.get("authorization") || "";
+  if (authHeaderRaw.startsWith("Internal ")) {
+    const raw = authHeaderRaw.slice(9).trim();
+    if (process.env.CRON_SECRET && raw === process.env.CRON_SECRET) {
+      return {
+        sub:       "system",
+        username:  "SYSTEM",
+        name:      "System Worker",
+        role:      "admin",
+        loketCode: null,
+        loketName: null,
+        source:    "web",
+      };
+    }
+    if (!process.env.CRON_SECRET && process.env.NODE_ENV !== "production" && raw === "dev-local") {
+      return {
+        sub:       "system-dev",
+        username:  "SYSTEM",
+        name:      "System Worker Dev",
+        role:      "admin",
+        loketCode: null,
+        loketName: null,
+        source:    "web",
+      };
+    }
+    return null;
+  }
+
   // 1. Coba Bearer token (mobile)
-  const authHeader = req.headers.get("authorization") || "";
+  const authHeader = authHeaderRaw;
   if (authHeader.startsWith("Bearer ")) {
     const raw = authHeader.slice(7).trim();
     try {

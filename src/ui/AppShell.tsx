@@ -12,6 +12,12 @@ function formatRupiah(amount: number): string {
   return `Rp ${amount.toLocaleString("id-ID")}`;
 }
 
+const PUBLIC_PATHS = ["/login", "/register", "/topup/finish", "/topup/unfinish", "/topup/error", "/i", "/invoice", "/r", "/cek-tagihan"];
+
+function isPublicPath(pathname: string) {
+  return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
@@ -52,15 +58,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Redirect to login when unauthenticated (skip public pages)
   useEffect(() => {
-    const isPublic = ["/login", "/register", "/topup/finish", "/topup/unfinish", "/topup/error"].some(p => pathname.startsWith(p));
-    if (status === "unauthenticated" && !isPublic) {
+    if (status === "unauthenticated" && !isPublicPath(pathname)) {
       router.replace("/login");
     }
   }, [status, router, pathname]);
 
   // Public pages — render without shell or auth checks
-  const publicPaths = ["/login", "/register", "/topup/finish", "/topup/unfinish", "/topup/error"];
-  if (publicPaths.some(p => pathname.startsWith(p))) {
+  if (isPublicPath(pathname)) {
     return <>{children}</>;
   }
 

@@ -45,6 +45,11 @@ export interface SnapRequest {
   customerName: string;
   customerEmail?: string;
   itemName: string;
+  callbacks?: {
+    finish?: string;
+    unfinish?: string;
+    error?: string;
+  };
 }
 
 export interface SnapResponse {
@@ -74,9 +79,9 @@ export async function createSnapTransaction(req: SnapRequest): Promise<SnapRespo
       },
     ],
     callbacks: {
-      finish:   `${appUrl}/topup/finish`,
-      unfinish: `${appUrl}/topup/unfinish`,
-      error:    `${appUrl}/topup/error`,
+      finish:   req.callbacks?.finish   || `${appUrl}/topup/finish`,
+      unfinish: req.callbacks?.unfinish || `${appUrl}/topup/unfinish`,
+      error:    req.callbacks?.error    || `${appUrl}/topup/error`,
     },
   };
 

@@ -15,6 +15,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Dashboard", href: "/", icon: "dashboard" },
       { label: "Multi-Payment", href: "/pembayaran", icon: "receipt_long" },
+      { label: "Payment Link", href: "/payment-links", icon: "link" },
       { label: "Advice Lunasin", href: "/advice-lunasin", icon: "fact_check" },
       { label: "Advice PDAM", href: "/advice-pdam", icon: "water_drop" },
       { label: "Transaksi Tergantung", href: "/pending-transaksi", icon: "pending_actions" },
@@ -30,6 +31,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Riwayat", href: "/riwayat", icon: "history" },
       { label: "Cetak Ulang Struk", href: "/cetak-ulang", icon: "print" },
       { label: "Monitoring", href: "/monitoring", icon: "monitor_heart" },
+      { label: "Risiko Transaksi", href: "/monitoring/risiko", icon: "crisis_alert" },
       { label: "Rekonsiliasi Data", href: "/rekonsiliasi", icon: "table_view" },
       { label: "Health Provider", href: "/monitoring/provider-health", icon: "health_metrics" },
     ],

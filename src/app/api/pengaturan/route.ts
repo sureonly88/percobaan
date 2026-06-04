@@ -61,6 +61,7 @@ export async function PUT(request: NextRequest) {
     }
 
     invalidateCache("app_settings");
+    invalidateCache("feature_flags");
 
     return NextResponse.json({ message: "Pengaturan berhasil disimpan" });
   } catch (error) {

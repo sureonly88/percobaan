@@ -46,7 +46,7 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string }> = {
 // Pages each role can access
 const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: [
-    "/", "/pembayaran", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/cetak-ulang",
+    "/", "/pembayaran", "/payment-links", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/laporan", "/rekonsiliasi", "/tutup-kasir", "/verifikasi-kasir", "/riwayat", "/cetak-ulang",
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
     "/db-manage", "/import-transaksi",
     "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun", "/keuangan/komisi", "/keuangan/komisi/laporan",
@@ -54,7 +54,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
   ],
   supervisor: [
     // Operasional
-    "/", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/notifikasi",
+    "/", "/payment-links", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/notifikasi",
     // Kasir & Laporan
     "/tutup-kasir", "/verifikasi-kasir", "/laporan", "/rekonsiliasi", "/riwayat", "/cetak-ulang", "/monitoring",
     // Pelanggan & Loket
@@ -67,7 +67,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
   ],
   kasir: [
     // Operasional
-    "/", "/pembayaran", "/notifikasi",
+    "/", "/pembayaran", "/payment-links", "/notifikasi",
     // Kasir & Laporan
     "/tutup-kasir", "/laporan", "/riwayat", "/cetak-ulang",
     // Pelanggan & Loket
@@ -136,6 +136,9 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor", "kasir"],
     PATCH: ["admin"],
   },
+  "/api/monitoring/risiko": {
+    GET: ["admin", "supervisor"],
+  },
   "/api/v1/transactions": {
     GET: ["admin", "supervisor", "kasir"],
   },
@@ -161,6 +164,14 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
   },
   "/api/topup/create": {
     POST: ["admin", "kasir"],
+  },
+  "/api/payment-links": {
+    GET: ["admin", "supervisor", "kasir"],
+    POST: ["admin", "supervisor", "kasir"],
+  },
+  "/api/payment-links/disputes": {
+    GET: ["admin", "supervisor"],
+    PATCH: ["admin", "supervisor"],
   },
   "/api/pembayaran/stale-pending": {
     GET: ["admin", "supervisor"],

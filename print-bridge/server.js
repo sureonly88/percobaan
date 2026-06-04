@@ -116,23 +116,50 @@ public class RawPrint {
 }
 '@
 $h=[IntPtr]::Zero
-[RawPrint]::OpenPrinter('${safePrinter}',[ref]$h,[IntPtr]::Zero)|Out-Null
+if (-not [RawPrint]::OpenPrinter('${safePrinter}',[ref]$h,[IntPtr]::Zero)) {
+  throw "OpenPrinter gagal untuk '${safePrinter}'. Win32Error=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
 $di=New-Object RawPrint+DOC; $di.Name='Receipt'; $di.Type='RAW'
-[RawPrint]::StartDocPrinter($h,1,$di)|Out-Null
-[RawPrint]::StartPagePrinter($h)|Out-Null
+$docId=[RawPrint]::StartDocPrinter($h,1,$di)
+if ($docId -le 0) {
+  $e=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  [RawPrint]::ClosePrinter($h)|Out-Null
+  throw "StartDocPrinter gagal. Win32Error=$e"
+}
+if (-not [RawPrint]::StartPagePrinter($h)) {
+  $e=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  [RawPrint]::EndDocPrinter($h)|Out-Null
+  [RawPrint]::ClosePrinter($h)|Out-Null
+  throw "StartPagePrinter gagal. Win32Error=$e"
+}
 $gc=[System.Runtime.InteropServices.GCHandle]::Alloc($bytes,[System.Runtime.InteropServices.GCHandleType]::Pinned)
 $ptr=$gc.AddrOfPinnedObject(); [int]$w=0
-[RawPrint]::WritePrinter($h,$ptr,$bytes.Length,[ref]$w)|Out-Null
+if (-not [RawPrint]::WritePrinter($h,$ptr,$bytes.Length,[ref]$w)) {
+  $e=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  $gc.Free()
+  [RawPrint]::EndPagePrinter($h)|Out-Null
+  [RawPrint]::EndDocPrinter($h)|Out-Null
+  [RawPrint]::ClosePrinter($h)|Out-Null
+  throw "WritePrinter gagal. Win32Error=$e"
+}
 $gc.Free()
+if ($w -ne $bytes.Length) {
+  [RawPrint]::EndPagePrinter($h)|Out-Null
+  [RawPrint]::EndDocPrinter($h)|Out-Null
+  [RawPrint]::ClosePrinter($h)|Out-Null
+  throw "WritePrinter tidak menulis semua data. Written=$w Expected=$($bytes.Length)"
+}
 [RawPrint]::EndPagePrinter($h)|Out-Null
 [RawPrint]::EndDocPrinter($h)|Out-Null
 [RawPrint]::ClosePrinter($h)|Out-Null
+Write-Output "RAW bytes written: $w"
 `;
     exec(`powershell -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`,
       { shell: 'cmd.exe', timeout: 15000 },
       (err2, stdout, stderr) => {
         setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch {} }, 3000);
         if (err2) return cb(new Error(stderr || err2.message));
+        if (stdout && stdout.trim()) console.log('[Bridge]', stdout.trim());
         cb(null);
       }
     );
@@ -327,7 +354,7 @@ function requestHandler(req, res) {
         const ts = new Date().toLocaleTimeString('id-ID');
         const copyTag = data.isCopy ? ` [COPY${data.copyNumber ? '#'+data.copyNumber : ''}]` : '';
         console.log(`[Bridge] ${ts} — Printed OK${copyTag}: ${data.loketCode || ''} ${data.kasir || ''} (${(data.bills || []).length} bill)`);
-        sendJson(res, 200, { ok: true });
+        sendJson(res, 200, { ok: true, printer: config.printerName, mode: config.printMode });
       });
     });
     return;
@@ -418,7 +445,7 @@ function requestHandler(req, res) {
     });
     printRaw(escpData, (perr) => {
       if (perr) return sendJson(res, 500, { ok: false, error: perr.message });
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, printer: config.printerName, mode: config.printMode });
     });
     return;
   }

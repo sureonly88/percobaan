@@ -305,6 +305,15 @@ export default function PembayaranPage() {
   // Log progress real-time saat orchestrator memproses multi-payment (via SSE).
   const [paymentProgress, setPaymentProgress] = useState<Array<{ label: string; type: MultiPaymentProgressEvent["type"] }>>([]); 
   const progressLogRef = useRef<HTMLDivElement>(null);
+
+  // Payment Link dari hasil inquiry/cart aktif
+  const [paymentLinkModalOpen, setPaymentLinkModalOpen] = useState(false);
+  const [paymentLinkCustomerName, setPaymentLinkCustomerName] = useState("");
+  const [paymentLinkCustomerPhone, setPaymentLinkCustomerPhone] = useState("");
+  const [paymentLinkExpiresInMinutes, setPaymentLinkExpiresInMinutes] = useState(1440);
+  const [paymentLinkLoading, setPaymentLinkLoading] = useState(false);
+  const [paymentLinkError, setPaymentLinkError] = useState("");
+  const [paymentLinkUrl, setPaymentLinkUrl] = useState("");
   useEffect(() => {
     if (progressLogRef.current) {
       progressLogRef.current.scrollTop = progressLogRef.current.scrollHeight;
@@ -831,6 +840,53 @@ export default function PembayaranPage() {
   const hasPlnBills = unifiedCart.some((item) => item.provider === "LUNASIN");
   const hasMultiProvider = hasPdamBills && hasPlnBills;
   const hasAnyBills = unifiedCart.length > 0;
+
+  function openPaymentLinkModal() {
+    if (!hasAnyBills) return;
+    const names = Array.from(new Set(unifiedCart.map((item) => item.customerName).filter(Boolean)));
+    setPaymentLinkCustomerName(names.length === 1 ? names[0] : "");
+    setPaymentLinkCustomerPhone("");
+    setPaymentLinkExpiresInMinutes(1440);
+    setPaymentLinkError("");
+    setPaymentLinkUrl("");
+    setPaymentLinkModalOpen(true);
+  }
+
+  async function handleCreatePaymentLinkFromCart() {
+    if (!hasAnyBills || !loketInfo || paymentLinkLoading) return;
+    setPaymentLinkLoading(true);
+    setPaymentLinkError("");
+    setPaymentLinkUrl("");
+
+    try {
+      const res = await fetch("/api/payment-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: generateIdempotencyKey(),
+          loketCode: loketInfo.loketCode,
+          loketName: loketInfo.nama,
+          customerName: paymentLinkCustomerName || undefined,
+          customerPhone: paymentLinkCustomerPhone || undefined,
+          expiresInMinutes: paymentLinkExpiresInMinutes,
+          items: unifiedCart.map((item) => ({
+            ...item,
+            inquirySnapshot: item.metadata,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPaymentLinkError(data.error || "Gagal membuat payment link");
+        return;
+      }
+      setPaymentLinkUrl(data.publicUrl || "");
+    } catch {
+      setPaymentLinkError("Gagal menghubungi server payment link");
+    } finally {
+      setPaymentLinkLoading(false);
+    }
+  }
 
   // Single unified tunai input
   const [unifiedPaymentInput, setUnifiedPaymentInput] = useState("");
@@ -3356,6 +3412,15 @@ export default function PembayaranPage() {
                 )}
               </button>
 
+              <button
+                onClick={openPaymentLinkModal}
+                disabled={paymentLoading || !hasAnyBills || !loketInfo}
+                className="w-full border-2 border-primary text-primary hover:bg-primary/5 font-black py-3.5 rounded-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span className="material-symbols-outlined">add_link</span>
+                BUAT PAYMENT LINK DARI HASIL INQUIRY
+              </button>
+
               <div className="text-center">
                 <p className="text-[10px] text-slate-400 uppercase tracking-tighter">
                   Dengan menekan bayar, Anda menyetujui syarat dan ketentuan
@@ -3501,6 +3566,100 @@ export default function PembayaranPage() {
       </div>
 
       {/* ===== RECEIPT MODAL ===== */}
+      {paymentLinkModalOpen && (
+        <Modal open={paymentLinkModalOpen} onClose={() => setPaymentLinkModalOpen(false)} title="Buat Payment Link dari Hasil Inquiry">
+          <div className="space-y-4">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800 p-4 border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">Jumlah item</span>
+                <span className="font-bold">{unifiedCart.length} tagihan</span>
+              </div>
+              <div className="flex items-center justify-between text-sm mt-2">
+                <span className="text-slate-500">Total invoice</span>
+                <span className="font-black text-primary text-lg">{formatRupiah(grandTotalBayar)}</span>
+              </div>
+            </div>
+
+            {paymentLinkError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {paymentLinkError}
+              </div>
+            )}
+
+            {paymentLinkUrl && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700 break-all">
+                <p className="font-bold mb-1">Payment link berhasil dibuat:</p>
+                <a href={paymentLinkUrl} target="_blank" rel="noreferrer" className="underline">{paymentLinkUrl}</a>
+                <button
+                  onClick={() => navigator.clipboard.writeText(paymentLinkUrl)}
+                  className="mt-2 block text-xs font-bold underline"
+                >
+                  Salin link
+                </button>
+              </div>
+            )}
+
+            <label className="block text-sm">
+              <span className="font-semibold">Nama Pelanggan</span>
+              <input
+                value={paymentLinkCustomerName}
+                onChange={(e) => setPaymentLinkCustomerName(e.target.value)}
+                placeholder="Opsional"
+                className="mt-1 w-full rounded-lg border-slate-200 dark:border-slate-700 dark:bg-slate-800"
+              />
+            </label>
+
+            <label className="block text-sm">
+              <span className="font-semibold">No. WhatsApp</span>
+              <input
+                value={paymentLinkCustomerPhone}
+                onChange={(e) => setPaymentLinkCustomerPhone(e.target.value)}
+                placeholder="62812..."
+                className="mt-1 w-full rounded-lg border-slate-200 dark:border-slate-700 dark:bg-slate-800"
+              />
+            </label>
+
+            <label className="block text-sm">
+              <span className="font-semibold">Masa Berlaku Invoice (menit)</span>
+              <input
+                type="number"
+                value={paymentLinkExpiresInMinutes}
+                onChange={(e) => setPaymentLinkExpiresInMinutes(Number(e.target.value))}
+                className="mt-1 w-full rounded-lg border-slate-200 dark:border-slate-700 dark:bg-slate-800"
+              />
+            </label>
+
+            <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+              {unifiedCart.map((item) => (
+                <div key={item.itemCode} className="px-3 py-2 flex items-center justify-between gap-3 text-sm">
+                  <div>
+                    <p className="font-bold">{item.customerName || item.customerId}</p>
+                    <p className="text-xs text-slate-500">{item.provider} · {item.serviceType} · {item.customerId}</p>
+                  </div>
+                  <span className="font-black whitespace-nowrap">{formatRupiah(item.total)}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setPaymentLinkModalOpen(false)}
+                className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-bold"
+              >
+                Tutup
+              </button>
+              <button
+                onClick={() => void handleCreatePaymentLinkFromCart()}
+                disabled={paymentLinkLoading || !hasAnyBills}
+                className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-bold disabled:opacity-50"
+              >
+                {paymentLinkLoading ? "Membuat..." : "Generate Link"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {receipt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">

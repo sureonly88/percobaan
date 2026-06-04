@@ -62,6 +62,13 @@ function r2c(left, right, width) {
   return left + ' '.repeat(gap) + right;
 }
 
+function wrapText(text, width) {
+  const out = [];
+  const value = String(text || '');
+  for (let i = 0; i < value.length; i += width) out.push(value.slice(i, i + width));
+  return out.length ? out : [''];
+}
+
 function detailLine(label, value, width) {
   const INDENT = 2, LABEL_W = 14, SEP = ': ';
   const maxVal = (width || 80) - INDENT - LABEL_W - SEP.length;
@@ -277,6 +284,13 @@ function formatEscp(data, cfg = {}) {
       line('');
     }
   });
+
+  if (data.digitalReceiptUrl) {
+    line(LIGHT);
+    ctr('VALIDASI STRUK DIGITAL', true);
+    ctr('Scan QR atau buka URL berikut:', false);
+    for (const part of wrapText(data.digitalReceiptUrl, W)) ctr(part, false);
+  }
 
   // Feed lines (paper advance for easy tear-off)
   for (let i = 0; i < FEED; i++) chunks.push(LF);

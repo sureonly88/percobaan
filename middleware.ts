@@ -3,14 +3,21 @@ import { NextResponse } from "next/server";
 import { canAccessPage } from "@/lib/rbac";
 
 // Public paths that don't require authentication
-const PUBLIC_PATHS = ["/topup/finish", "/topup/unfinish", "/topup/error", "/register"];
+const PUBLIC_PATHS = [
+  "/topup/finish", "/topup/unfinish", "/topup/error", "/register",
+  "/i", "/invoice", "/r", "/cek-tagihan",
+];
+
+function isPublicPath(path: string) {
+  return PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
+}
 
 export default withAuth(
   function middleware(req) {
     const path = req.nextUrl.pathname;
 
     // Allow public paths through without auth
-    if (PUBLIC_PATHS.some(p => path.startsWith(p))) return NextResponse.next();
+    if (isPublicPath(path)) return NextResponse.next();
 
     // Skip API routes, static assets - they handle their own auth
     if (path.startsWith("/api/")) return NextResponse.next();
@@ -29,7 +36,7 @@ export default withAuth(
       authorized({ req, token }) {
         const path = req.nextUrl.pathname;
         // Allow public paths without a session token
-        if (PUBLIC_PATHS.some(p => path.startsWith(p))) return true;
+        if (isPublicPath(path)) return true;
         if (path.startsWith("/api/auth/register")) return true;
         return !!token;
       },

@@ -47,6 +47,11 @@ interface ProfileData {
   } | null;
 }
 
+function settingEnabled(value: unknown, fallback = true) {
+  if (value === null || value === undefined || value === "") return fallback;
+  return !["0", "false", "off", "no", "disabled", "nonaktif"].includes(String(value).trim().toLowerCase());
+}
+
 export default function PengaturanPage() {
   const { data: session, update: updateSession } = useSession();
   const userId = (session?.user as { id?: string })?.id;
@@ -54,7 +59,7 @@ export default function PengaturanPage() {
   const userRole = (session?.user as { role?: string })?.role || "operator";
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<"profil" | "tampilan" | "printer">("profil");
+  const [activeTab, setActiveTab] = useState<"profil" | "tampilan" | "fitur" | "printer">("profil");
 
   // --- Profile ---
   const [profile, setProfile] = useState<ProfileData | null>(null);
@@ -71,6 +76,13 @@ export default function PengaturanPage() {
 
   // --- Theme ---
   const { theme, setTheme } = useTheme();
+
+  // --- Feature flags ---
+  const [paymentLinksEnabled, setPaymentLinksEnabled] = useState(true);
+  const [publicSelfServiceEnabled, setPublicSelfServiceEnabled] = useState(true);
+  const [featureLoading, setFeatureLoading] = useState(true);
+  const [featureSaving, setFeatureSaving] = useState(false);
+  const [featureMsg, setFeatureMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   // Fetch profile data
   useEffect(() => {
@@ -91,6 +103,18 @@ export default function PengaturanPage() {
   useEffect(() => {
     if (userName && !profile) setProfileName(userName);
   }, [userName, profile]);
+
+  useEffect(() => {
+    fetch("/api/pengaturan", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        const settings = data.settings || {};
+        setPaymentLinksEnabled(settingEnabled(settings.payment_links_enabled));
+        setPublicSelfServiceEnabled(settingEnabled(settings.public_self_service_enabled));
+      })
+      .catch(() => {})
+      .finally(() => setFeatureLoading(false));
+  }, []);
 
   // ─────────────────────────── Printer Bridge ───────────────────────────
   const [bridgeUrl, setBridgeUrl] = useState<string>(DEFAULT_BRIDGE_URL);
@@ -290,9 +314,38 @@ export default function PengaturanPage() {
     }
   };
 
+  const saveFeatureFlags = async () => {
+    setFeatureSaving(true);
+    setFeatureMsg(null);
+    try {
+      const res = await fetch("/api/pengaturan", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: {
+            payment_links_enabled: String(paymentLinksEnabled),
+            public_self_service_enabled: String(publicSelfServiceEnabled),
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFeatureMsg({ type: "err", text: data.error || "Gagal menyimpan konfigurasi fitur" });
+        return;
+      }
+      setFeatureMsg({ type: "ok", text: "Konfigurasi fitur berhasil disimpan" });
+      setTimeout(() => setFeatureMsg(null), 3000);
+    } catch {
+      setFeatureMsg({ type: "err", text: "Gagal menghubungi server" });
+    } finally {
+      setFeatureSaving(false);
+    }
+  };
+
   const tabs = [
     { key: "profil" as const, label: "Profil", icon: "person" },
     { key: "tampilan" as const, label: "Tampilan", icon: "palette" },
+    { key: "fitur" as const, label: "Fitur", icon: "tune" },
     { key: "printer" as const, label: "Printer", icon: "print" },
   ];
 
@@ -684,6 +737,83 @@ export default function PengaturanPage() {
                 </div>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Tab: Fitur ===== */}
+      {activeTab === "fitur" && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
+            <div className="flex items-start gap-4 mb-6">
+              <div className="p-3 bg-primary/10 text-primary rounded-lg">
+                <span className="material-symbols-outlined text-2xl">tune</span>
+              </div>
+              <div>
+                <h3 className="font-bold text-lg">Kontrol Fitur Publik</h3>
+                <p className="text-sm text-slate-500 mt-1">Aktifkan atau nonaktifkan fitur Payment Link dan self-service publik.</p>
+              </div>
+            </div>
+
+            {featureLoading ? (
+              <div className="py-10 text-center text-sm text-slate-400">Memuat konfigurasi fitur...</div>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary">link</span>
+                      <h4 className="font-black">Payment Link</h4>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">Mengatur akses dashboard Payment Link, API invoice, halaman invoice publik, dan struk digital payment link.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={userRole !== "admin"}
+                    onClick={() => setPaymentLinksEnabled((prev) => !prev)}
+                    className={`relative h-8 w-16 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${paymentLinksEnabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                  >
+                    <span className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition ${paymentLinksEnabled ? "left-9" : "left-1"}`} />
+                  </button>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-emerald-600">public</span>
+                      <h4 className="font-black">Self-Service Publik</h4>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">Mengatur akses halaman `/cek-tagihan` dan API inquiry mandiri untuk pelanggan publik.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={userRole !== "admin"}
+                    onClick={() => setPublicSelfServiceEnabled((prev) => !prev)}
+                    className={`relative h-8 w-16 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${publicSelfServiceEnabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700"}`}
+                  >
+                    <span className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition ${publicSelfServiceEnabled ? "left-9" : "left-1"}`} />
+                  </button>
+                </div>
+
+                {featureMsg && (
+                  <div className={`rounded-xl px-4 py-3 text-sm font-bold ${featureMsg.type === "ok" ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300" : "bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300"}`}>
+                    {featureMsg.text}
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-slate-100 dark:border-slate-800 pt-4">
+                  <p className="text-xs text-slate-400">Perubahan berlaku untuk request berikutnya. Cache status fitur maksimal 30 detik.</p>
+                  <button
+                    type="button"
+                    onClick={saveFeatureFlags}
+                    disabled={featureSaving || userRole !== "admin"}
+                    className="rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {featureSaving ? "Menyimpan..." : userRole === "admin" ? "Simpan Fitur" : "Hanya Admin"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

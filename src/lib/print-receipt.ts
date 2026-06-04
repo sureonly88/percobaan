@@ -96,6 +96,8 @@ export interface ReceiptPrintData {
   copyBy?: string;
   /** Timestamp ISO ketika cetak ulang dilakukan. */
   copyAt?: string;
+  /** URL publik untuk validasi struk digital, biasanya /r/[receiptToken]. */
+  digitalReceiptUrl?: string;
 }
 
 function fmtRp(n: number): string {
@@ -192,6 +194,12 @@ function r2c(left: string, right: string): string {
   const gap = COLS - left.length - right.length;
   if (gap < 1) return left.substring(0, COLS - right.length - 1) + " " + right;
   return left + " ".repeat(gap) + right;
+}
+
+function wrapText(text: string, width: number): string[] {
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += width) chunks.push(text.slice(i, i + width));
+  return chunks.length ? chunks : [""];
 }
 
 /**
@@ -379,6 +387,13 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
     if (idx < data.bills.length - 1) push(LIGHT);
   });
 
+  if (data.digitalReceiptUrl) {
+    push(LIGHT);
+    pushCtr("VALIDASI STRUK DIGITAL");
+    pushCtr("Scan QR atau buka URL berikut:");
+    for (const line of wrapText(data.digitalReceiptUrl, COLS)) pushCtr(line);
+  }
+
   push(HEAVY);
   push(""); push(""); push(""); push("");
   return lines.join("\n");
@@ -407,6 +422,12 @@ async function tryPrintBridge(data: ReceiptPrintData): Promise<boolean> {
 /** HTML fallback: opens a <pre>-based print window — faster on dot matrix than CSS layout. */
 function printReceiptViaHtml(data: ReceiptPrintData): void {
   const plainText = formatReceiptPlainText(data);
+  const qrHtml = data.digitalReceiptUrl ? `
+<div class="qr-block">
+  <img alt="QR Struk Digital" src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(data.digitalReceiptUrl)}" />
+  <div>Scan untuk validasi struk digital</div>
+  <small>${escapeHtml(data.digitalReceiptUrl)}</small>
+</div>` : "";
   const watermarkCss = data.isCopy ? `
     body { position: relative; }
     body::before {
@@ -429,12 +450,16 @@ function printReceiptViaHtml(data: ReceiptPrintData): void {
     @page { size: 241mm auto; margin: 3mm 8mm; }
     body { font-family: 'Courier New', Courier, monospace; font-size: 9.5pt; line-height: 1.2; color: #000; background: #fff; }
     pre { white-space: pre; word-wrap: normal; overflow: visible; position: relative; z-index: 1; }
+    .qr-block { margin-top: 8px; text-align: center; font-family: Arial, sans-serif; font-size: 9pt; }
+    .qr-block img { width: 35mm; height: 35mm; display: block; margin: 0 auto 4px; }
+    .qr-block small { display: block; word-break: break-all; font-size: 7pt; }
     ${watermarkCss}
     @media print { body { margin: 0; } }
   </style>
 </head>
 <body>
 <pre>${escapeHtml(plainText)}</pre>
+${qrHtml}
 <script>
 window.onload = function() {
   window.print();

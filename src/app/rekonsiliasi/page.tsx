@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 
 type ProviderTab = "pdam" | "lunasin";
 
@@ -60,6 +61,53 @@ interface PreviewResponse<T> {
   rows: T[];
 }
 
+interface ReconciliationBatch {
+  id: number;
+  provider: string;
+  startDate: string;
+  endDate: string;
+  loketCode: string | null;
+  providerImportId: number | null;
+  totalItems: number;
+  matchCount: number;
+  exceptionCount: number;
+  totalInternal: number;
+  totalProvider: number;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+interface ProviderImportItem {
+  id: number;
+  provider: string;
+  startDate: string;
+  endDate: string;
+  loketCode: string | null;
+  originalFilename: string | null;
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  totalProvider: number;
+  importedBy: string | null;
+  createdAt: string;
+}
+
+interface ReconciliationExceptionItem {
+  id: number;
+  transactionCode: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  productCode: string | null;
+  periodLabel: string | null;
+  loketCode: string | null;
+  loketName: string | null;
+  internalTotal: number;
+  providerTotal: number;
+  differenceAmount: number;
+  matchStatus: string;
+  note: string | null;
+}
+
 function formatRupiah(amount: number): string {
   return `Rp ${Number(amount || 0).toLocaleString("id-ID")}`;
 }
@@ -73,6 +121,9 @@ function getToday(): string {
 }
 
 export default function RekonsiliasiPage() {
+  const { data: session } = useSession();
+  const userRole = (session?.user as { role?: string } | undefined)?.role || "";
+  const isAdmin = userRole === "admin";
   const [activeTab, setActiveTab] = useState<ProviderTab>("pdam");
   const [startDate, setStartDate] = useState(getToday());
   const [endDate, setEndDate] = useState(getToday());
@@ -84,6 +135,18 @@ export default function RekonsiliasiPage() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<PreviewResponse<PdamPreviewRow | LunasinPreviewRow> | null>(null);
+  const [batches, setBatches] = useState<ReconciliationBatch[]>([]);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [generatingBatch, setGeneratingBatch] = useState(false);
+  const [selectedBatch, setSelectedBatch] = useState<ReconciliationBatch | null>(null);
+  const [exceptionItems, setExceptionItems] = useState<ReconciliationExceptionItem[]>([]);
+  const [batchError, setBatchError] = useState("");
+  const [providerImports, setProviderImports] = useState<ProviderImportItem[]>([]);
+  const [selectedProviderImportId, setSelectedProviderImportId] = useState<number | null>(null);
+  const [providerFile, setProviderFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
   const loketDropdownRef = useRef<HTMLDivElement>(null);
 
   const summary = data?.summary;
@@ -138,9 +201,143 @@ export default function RekonsiliasiPage() {
     }
   }, [queryString]);
 
+  const loadBatch = useCallback(async (batch: ReconciliationBatch) => {
+    setSelectedBatch(batch);
+    setBatchError("");
+    try {
+      const response = await fetch(`/api/rekonsiliasi/batches/${batch.id}?status=EXCEPTION`, { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Gagal mengambil detail batch");
+      setExceptionItems(json.items || []);
+    } catch (err) {
+      setExceptionItems([]);
+      setBatchError(err instanceof Error ? err.message : "Gagal mengambil detail batch");
+    }
+  }, []);
+
+  const fetchBatches = useCallback(async (autoSelectFirst = false) => {
+    setBatchLoading(true);
+    setBatchError("");
+    try {
+      const response = await fetch(`/api/rekonsiliasi/batches?provider=${activeTab}&pageSize=8`, { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Gagal mengambil batch rekonsiliasi");
+      const items = json.items || [];
+      setBatches(items);
+      if (autoSelectFirst && items[0]) {
+        await loadBatch(items[0]);
+      }
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : "Gagal mengambil batch rekonsiliasi");
+    } finally {
+      setBatchLoading(false);
+    }
+  }, [activeTab, loadBatch]);
+
+  const fetchProviderImports = useCallback(async (autoSelectFirst = false) => {
+    setImportLoading(true);
+    setImportError("");
+    try {
+      const response = await fetch(`/api/rekonsiliasi/imports?provider=${activeTab}&pageSize=8`, { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Gagal mengambil import provider");
+      const items = json.items || [];
+      setProviderImports(items);
+      if (autoSelectFirst && items[0]) setSelectedProviderImportId(items[0].id);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Gagal mengambil import provider");
+    } finally {
+      setImportLoading(false);
+    }
+  }, [activeTab]);
+
+  const handleImportProviderFile = async () => {
+    if (!isAdmin || importing) return;
+    if (!providerFile) {
+      setImportError("Pilih file Excel provider terlebih dahulu");
+      return;
+    }
+    setImporting(true);
+    setImportError("");
+    try {
+      const formData = new FormData();
+      formData.set("provider", activeTab);
+      formData.set("startDate", startDate);
+      formData.set("endDate", endDate);
+      if (loketCode) formData.set("loketCode", loketCode);
+      formData.set("file", providerFile);
+      const response = await fetch("/api/rekonsiliasi/imports", { method: "POST", body: formData });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Gagal import file provider");
+      setProviderFile(null);
+      setSelectedProviderImportId(Number(json.importId));
+      await fetchProviderImports();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Gagal import file provider");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleGenerateBatch = async () => {
+    if (!isAdmin || generatingBatch) return;
+    if (!selectedProviderImportId) {
+      setBatchError("Pilih import Excel provider sebelum generate batch");
+      return;
+    }
+    setGeneratingBatch(true);
+    setBatchError("");
+    try {
+      const response = await fetch("/api/rekonsiliasi/batches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: activeTab, providerImportId: selectedProviderImportId, startDate, endDate, loketCode: loketCode || undefined }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Gagal generate batch rekonsiliasi");
+      setSelectedBatch(null);
+      await fetchBatches(true);
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : "Gagal generate batch rekonsiliasi");
+    } finally {
+      setGeneratingBatch(false);
+    }
+  };
+
+  const updateExceptionItem = async (item: ReconciliationExceptionItem, status: "RESOLVED" | "IGNORED") => {
+    if (!selectedBatch || !isAdmin) return;
+    const note = window.prompt(status === "RESOLVED" ? "Catatan penyelesaian:" : "Alasan diabaikan:", item.note || "");
+    if (note === null) return;
+    try {
+      const response = await fetch(`/api/rekonsiliasi/batches/${selectedBatch.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: item.id, status, note }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || "Gagal update item");
+      setExceptionItems(json.items || []);
+      await fetchBatches();
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : "Gagal update item");
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    setSelectedBatch(null);
+    setExceptionItems([]);
+    void fetchBatches(true);
+  }, [fetchBatches]);
+
+  useEffect(() => {
+    setSelectedProviderImportId(null);
+    setProviderFile(null);
+    void fetchProviderImports(true);
+  }, [fetchProviderImports]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -208,7 +405,7 @@ export default function RekonsiliasiPage() {
         <div>
           <h2 className="text-2xl font-bold">Rekonsiliasi Data</h2>
           <p className="text-slate-500">
-            Rekonsiliasi transaksi sukses untuk PDAM Native dan Lunasin dengan ekspor Excel detail.
+            Rekonsiliasi transaksi sukses dengan file Excel provider sebagai data pembanding.
           </p>
         </div>
       </header>
@@ -364,6 +561,17 @@ export default function RekonsiliasiPage() {
             >
               {exporting ? "Mengunduh..." : "Excel"}
             </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleGenerateBatch}
+                disabled={generatingBatch || !selectedProviderImportId}
+                className="h-11 flex-1 rounded-lg border border-primary/20 bg-primary/10 px-4 text-sm font-bold text-primary transition hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+                title={!selectedProviderImportId ? "Pilih import Excel provider terlebih dahulu" : undefined}
+              >
+                {generatingBatch ? "Generate..." : "Batch"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -390,6 +598,213 @@ export default function RekonsiliasiPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Nominal</p>
           <p className="mt-2 text-lg font-bold leading-tight">{loading ? "..." : formatRupiah(summary?.totalNominal ?? 0)}</p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 xl:col-span-2">
+          <div className="mb-4">
+            <h3 className="font-bold text-slate-900 dark:text-white">Import Excel Provider</h3>
+            <p className="text-xs text-slate-400">Upload file settlement/laporan provider sebagai data pembanding batch.</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+            <div className="mb-2 font-black uppercase tracking-wide text-slate-500">Format kolom</div>
+            <div className="space-y-1">
+              <p><b>Wajib:</b> `TOTAL_PROVIDER` dan salah satu dari `KODE_TRANSAKSI` / `ID_PELANGGAN`.</p>
+              <p><b>Disarankan:</b> `PRODUK`, `PERIODE`, `KODE_LOKET`, `REF_PROVIDER`, `STATUS_PROVIDER`.</p>
+              <p><b>Nominal:</b> `NOMINAL_TAGIHAN`, `ADMIN`, `TOTAL_PROVIDER`.</p>
+            </div>
+          </div>
+
+          {isAdmin ? (
+            <div className="mt-4 space-y-3">
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => setProviderFile(e.target.files?.[0] || null)}
+                className="block w-full rounded-lg border border-slate-200 p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-primary dark:border-slate-700 dark:bg-slate-950"
+              />
+              <button
+                type="button"
+                onClick={handleImportProviderFile}
+                disabled={importing || !providerFile}
+                className="h-10 w-full rounded-lg bg-primary px-4 text-sm font-bold text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {importing ? "Mengimport..." : "Import File Provider"}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-400 dark:border-slate-700">Import hanya tersedia untuk admin.</div>
+          )}
+
+          {importError && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+              {importError}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 xl:col-span-3">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">Data Provider Terimport</h3>
+              <p className="text-xs text-slate-400">Pilih salah satu import sebagai pembanding saat generate batch.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void fetchProviderImports()}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {importLoading ? (
+              <div className="py-8 text-center text-sm text-slate-400">Memuat import provider...</div>
+            ) : providerImports.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-700">
+                Belum ada file provider yang diimport untuk provider aktif.
+              </div>
+            ) : providerImports.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSelectedProviderImportId(item.id)}
+                className={`w-full rounded-xl border p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800 ${selectedProviderImportId === item.id ? "border-primary bg-primary/5" : "border-slate-200 dark:border-slate-700"}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-bold text-slate-800 dark:text-slate-100">#{item.id} · {item.originalFilename || "file provider"}</div>
+                    <div className="mt-1 text-xs text-slate-500">{item.startDate} s/d {item.endDate} · {item.loketCode || "Semua Loket"}</div>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${item.invalidRows > 0 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
+                    {item.validRows}/{item.totalRows} valid
+                  </span>
+                </div>
+                <div className="mt-2 text-xs text-slate-400">Total provider {formatRupiah(item.totalProvider)} · import oleh {item.importedBy || "-"}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 xl:col-span-2">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">Batch Rekonsiliasi</h3>
+              <p className="text-xs text-slate-400">Histori hasil generate untuk provider aktif.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void fetchBatches()}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {batchError && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+              {batchError}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {batchLoading ? (
+              <div className="py-8 text-center text-sm text-slate-400">Memuat batch...</div>
+            ) : batches.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-700">
+                Belum ada batch. Import file provider, pilih import, lalu klik <b>Batch</b>.
+              </div>
+            ) : batches.map((batch) => (
+              <button
+                key={batch.id}
+                type="button"
+                onClick={() => void loadBatch(batch)}
+                className={`w-full rounded-xl border p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800 ${selectedBatch?.id === batch.id ? "border-primary bg-primary/5" : "border-slate-200 dark:border-slate-700"}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-bold text-sm">#{batch.id} · {batch.provider.toUpperCase()}</div>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${batch.exceptionCount > 0 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"}`}>
+                    {batch.exceptionCount} exception
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-slate-500">{batch.startDate} s/d {batch.endDate} · import #{batch.providerImportId || "-"} · {batch.totalItems} item · match {batch.matchCount}</div>
+                <div className="mt-1 text-xs text-slate-400">Internal {formatRupiah(batch.totalInternal)} · Provider {formatRupiah(batch.totalProvider)}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 xl:col-span-3">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">Exception Queue</h3>
+              <p className="text-xs text-slate-400">Item selisih atau tidak ditemukan antara internal dan file provider.</p>
+            </div>
+            {selectedBatch && (
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                Batch #{selectedBatch.id}
+              </span>
+            )}
+          </div>
+
+          {!selectedBatch ? (
+            <div className="rounded-xl border border-dashed border-slate-200 px-4 py-12 text-center text-sm text-slate-400 dark:border-slate-700">
+              Pilih batch untuk melihat exception.
+            </div>
+          ) : exceptionItems.length === 0 ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-8 text-center text-sm font-bold text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
+              Tidak ada exception aktif untuk batch ini.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
+                <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">Transaksi</th>
+                    <th className="px-4 py-3 font-semibold text-right">Internal</th>
+                    <th className="px-4 py-3 font-semibold text-right">Provider</th>
+                    <th className="px-4 py-3 font-semibold text-right">Selisih</th>
+                    <th className="px-4 py-3 font-semibold">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {exceptionItems.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2 py-1 text-[11px] font-black ${item.matchStatus === "SELISIH_NOMINAL" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300" : item.matchStatus === "TIDAK_ADA_DI_PROVIDER" || item.matchStatus === "TIDAK_ADA_DI_INTERNAL" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" : item.matchStatus === "NEED_REVIEW" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`}>
+                          {item.matchStatus}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-bold text-slate-800 dark:text-slate-100">{item.transactionCode || "-"}</div>
+                        <div className="text-slate-400">{item.customerName || item.customerId || "-"} · {item.loketCode || "-"}</div>
+                        {item.note && <div className="mt-1 text-[11px] text-primary">{item.note}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-right font-bold">{formatRupiah(item.internalTotal)}</td>
+                      <td className="px-4 py-3 text-right">{formatRupiah(item.providerTotal)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-red-600">{formatRupiah(item.differenceAmount)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {isAdmin ? (
+                          <div className="flex gap-2">
+                            <button onClick={() => void updateExceptionItem(item, "RESOLVED")} className="font-bold text-emerald-600 hover:underline">Resolve</button>
+                            <button onClick={() => void updateExceptionItem(item, "IGNORED")} className="font-bold text-slate-500 hover:underline">Ignore</button>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">Read only</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 

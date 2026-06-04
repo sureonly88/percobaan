@@ -1,9 +1,12 @@
 import pool from "@/lib/db";
-import { RowDataPacket } from "mysql2";
+import { ResultSetHeader, RowDataPacket } from "mysql2";
+import * as XLSX from "xlsx";
 import { normalizeRole } from "@/lib/rbac";
 import { parsePdamNumber } from "@/lib/pdam-api";
+import { auditLog } from "@/lib/audit-log";
 
 type ReconciliationProvider = "pdam" | "lunasin";
+export type ReconciliationItemStatus = "MATCH" | "SELISIH_NOMINAL" | "NEED_REVIEW" | "TIDAK_ADA_DI_PROVIDER" | "TIDAK_ADA_DI_INTERNAL" | "RESOLVED" | "IGNORED";
 type CellValue = string | number | null | undefined;
 type JsonRecord = Record<string, unknown>;
 
@@ -35,6 +38,40 @@ interface BaseTransactionRow extends RowDataPacket {
   loketCode: string | null;
   loketName: string | null;
   username: string | null;
+}
+
+interface ProviderImportDbRow extends RowDataPacket {
+  id: number;
+  import_id: number;
+  transaction_code: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  product_code: string | null;
+  period_label: string | null;
+  loket_code: string | null;
+  provider_reference: string | null;
+  provider_status: string | null;
+  provider_amount: number | string | null;
+  provider_admin: number | string | null;
+  provider_total: number | string | null;
+  error_message: string | null;
+}
+
+interface ParsedProviderImportRow {
+  rowNumber: number;
+  transactionCode: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  productCode: string | null;
+  periodLabel: string | null;
+  loketCode: string | null;
+  providerReference: string | null;
+  providerStatus: string | null;
+  providerAmount: number;
+  providerAdmin: number;
+  providerTotal: number;
+  raw: Record<string, unknown>;
+  errorMessage: string | null;
 }
 
 interface WorkbookColumn<Row> {
@@ -458,6 +495,136 @@ function getNumeric(value: number | string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeImportHeader(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeMatchValue(value: string | number | null | undefined): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizePeriodValue(value: string | number | null | undefined): string {
+  return normalizeMatchValue(value).replace(/[^a-z0-9]/g, "");
+}
+
+function cleanText(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+}
+
+function parseImportMoney(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? Math.round(value) : 0;
+  let text = String(value ?? "").trim();
+  if (!text) return 0;
+  text = text.replace(/\s/g, "").replace(/rp/gi, "").replace(/[^0-9,.-]/g, "");
+  if (text.includes(",") && text.includes(".")) {
+    text = text.replace(/\./g, "").replace(",", ".");
+  } else if (text.includes(",")) {
+    text = text.replace(/,/g, ".");
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(text)) {
+    text = text.replace(/\./g, "");
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+}
+
+const PROVIDER_IMPORT_HEADER_ALIASES: Record<keyof Omit<ParsedProviderImportRow, "rowNumber" | "raw" | "errorMessage">, string[]> = {
+  transactionCode: ["kode_transaksi", "kode transaksi", "transaction_code", "transaction code", "trx_id", "id_trx", "id trx", "ref_internal", "ref internal"],
+  customerId: ["id_pelanggan", "id pelanggan", "customer_id", "customer id", "idpel", "no_pelanggan", "no pelanggan", "nomor_pelanggan", "nomor pelanggan"],
+  customerName: ["nama_pelanggan", "nama pelanggan", "customer_name", "customer name", "nama"],
+  productCode: ["produk", "product", "product_code", "product code", "kode_produk", "kode produk"],
+  periodLabel: ["periode", "period", "period_label", "period label", "blth", "bulan"],
+  loketCode: ["kode_loket", "kode loket", "loket_code", "loket code", "loket"],
+  providerReference: ["ref_provider", "ref provider", "provider_reference", "provider reference", "refnum", "stan", "rrn"],
+  providerStatus: ["status_provider", "status provider", "provider_status", "provider status", "status"],
+  providerAmount: ["nominal_tagihan", "nominal tagihan", "amount", "tagihan", "provider_amount", "provider amount", "rp_amount"],
+  providerAdmin: ["admin", "admin_fee", "admin fee", "provider_admin", "provider admin", "rp_admin"],
+  providerTotal: ["total_provider", "total provider", "provider_total", "provider total", "total", "rp_total", "total_bayar", "total bayar"],
+};
+
+const PROVIDER_IMPORT_HEADER_LOOKUP = Object.entries(PROVIDER_IMPORT_HEADER_ALIASES).reduce<Record<string, string>>((acc, [canonical, aliases]) => {
+  for (const alias of aliases) acc[normalizeImportHeader(alias)] = canonical;
+  return acc;
+}, {});
+
+function parseProviderImportWorkbook(buffer: Buffer): ParsedProviderImportRow[] {
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error("File Excel tidak memiliki sheet");
+  const sheet = workbook.Sheets[sheetName];
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
+  if (rawRows.length === 0) throw new Error("File Excel kosong");
+
+  return rawRows.map((raw, index) => {
+    const normalized: Record<string, unknown> = {};
+    for (const [header, value] of Object.entries(raw)) {
+      const canonical = PROVIDER_IMPORT_HEADER_LOOKUP[normalizeImportHeader(header)];
+      if (canonical) normalized[canonical] = value;
+    }
+
+    const providerAmount = parseImportMoney(normalized.providerAmount);
+    const providerAdmin = parseImportMoney(normalized.providerAdmin);
+    const providerTotal = parseImportMoney(normalized.providerTotal) || providerAmount + providerAdmin;
+    const transactionCode = cleanText(normalized.transactionCode);
+    const customerId = cleanText(normalized.customerId);
+    const errorParts: string[] = [];
+    if (!transactionCode && !customerId) errorParts.push("KODE_TRANSAKSI atau ID_PELANGGAN wajib diisi");
+    if (providerTotal <= 0) errorParts.push("TOTAL_PROVIDER wajib lebih dari 0");
+
+    return {
+      rowNumber: index + 2,
+      transactionCode,
+      customerId,
+      customerName: cleanText(normalized.customerName),
+      productCode: cleanText(normalized.productCode),
+      periodLabel: cleanText(normalized.periodLabel),
+      loketCode: cleanText(normalized.loketCode),
+      providerReference: cleanText(normalized.providerReference),
+      providerStatus: cleanText(normalized.providerStatus),
+      providerAmount,
+      providerAdmin,
+      providerTotal,
+      raw,
+      errorMessage: errorParts.length ? errorParts.join("; ") : null,
+    };
+  });
+}
+
+function pushMapValue<T>(map: Map<string, T[]>, key: string, value: T) {
+  if (!key) return;
+  const existing = map.get(key) || [];
+  existing.push(value);
+  map.set(key, existing);
+}
+
+function buildTransactionMatchKeys(row: BaseTransactionRow) {
+  const customerId = normalizeMatchValue(row.customerId);
+  const productCode = normalizeMatchValue(row.productCode);
+  const periodLabel = normalizePeriodValue(row.periodLabel);
+  const loketCode = normalizeMatchValue(row.loketCode);
+  return [
+    row.transactionCode ? `trx:${normalizeMatchValue(row.transactionCode)}` : "",
+    customerId && productCode && periodLabel && loketCode ? `full:${customerId}|${productCode}|${periodLabel}|${loketCode}` : "",
+    customerId && productCode && periodLabel ? `custprodperiod:${customerId}|${productCode}|${periodLabel}` : "",
+    customerId && periodLabel ? `custperiod:${customerId}|${periodLabel}` : "",
+    customerId ? `customer:${customerId}` : "",
+  ].filter(Boolean);
+}
+
+function buildProviderMatchKeys(row: ProviderImportDbRow) {
+  const customerId = normalizeMatchValue(row.customer_id);
+  const productCode = normalizeMatchValue(row.product_code);
+  const periodLabel = normalizePeriodValue(row.period_label);
+  const loketCode = normalizeMatchValue(row.loket_code);
+  return [
+    row.transaction_code ? `trx:${normalizeMatchValue(row.transaction_code)}` : "",
+    customerId && productCode && periodLabel && loketCode ? `full:${customerId}|${productCode}|${periodLabel}|${loketCode}` : "",
+    customerId && productCode && periodLabel ? `custprodperiod:${customerId}|${productCode}|${periodLabel}` : "",
+    customerId && periodLabel ? `custperiod:${customerId}|${periodLabel}` : "",
+    customerId ? `customer:${customerId}` : "",
+  ].filter(Boolean);
+}
+
 function getProductLabel(productCode: string | null | undefined): string {
   if (!productCode) return "Lunasin";
   const base = productCode.replace(/-\d+$/, "");
@@ -871,4 +1038,367 @@ export async function buildReconciliationExport(options: ReconciliationQueryOpti
     contentType: "application/vnd.ms-excel; charset=utf-8",
     buffer,
   };
+}
+
+export async function importProviderReconciliationFile(params: {
+  provider: ReconciliationProvider;
+  startDate: string;
+  endDate: string;
+  loketCode?: string | null;
+  filename?: string | null;
+  buffer: Buffer;
+  importedBy?: string | null;
+}) {
+  const parsedRows = parseProviderImportWorkbook(params.buffer);
+  const validRows = parsedRows.filter((row) => !row.errorMessage);
+  const totalProvider = validRows.reduce((sum, row) => sum + row.providerTotal, 0);
+  const loketCode = params.loketCode && params.loketCode !== "semua" ? params.loketCode : null;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [importRes] = await connection.execute<ResultSetHeader>(
+      `INSERT INTO reconciliation_provider_imports
+       (provider, start_date, end_date, loket_code, original_filename, total_rows, valid_rows, invalid_rows,
+        total_provider, imported_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [params.provider, params.startDate, params.endDate, loketCode, params.filename || null, parsedRows.length, validRows.length, parsedRows.length - validRows.length, totalProvider, params.importedBy || null],
+    );
+    const importId = Number(importRes.insertId);
+
+    for (const row of parsedRows) {
+      await connection.execute(
+        `INSERT INTO reconciliation_provider_import_rows
+         (import_id, excel_row_number, transaction_code, customer_id, customer_name, product_code, period_label, loket_code,
+          provider_reference, provider_status, provider_amount, provider_admin, provider_total, raw_json, error_message, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          importId,
+          row.rowNumber,
+          row.transactionCode,
+          row.customerId,
+          row.customerName,
+          row.productCode,
+          row.periodLabel,
+          row.loketCode,
+          row.providerReference,
+          row.providerStatus,
+          row.providerAmount,
+          row.providerAdmin,
+          row.providerTotal,
+          JSON.stringify(row.raw),
+          row.errorMessage,
+        ],
+      );
+    }
+
+    await connection.commit();
+    return {
+      importId,
+      totalRows: parsedRows.length,
+      validRows: validRows.length,
+      invalidRows: parsedRows.length - validRows.length,
+      totalProvider,
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function listReconciliationProviderImports(params: { provider?: string; page?: number; pageSize?: number }) {
+  const page = Math.max(1, Number(params.page || 1));
+  const pageSize = Math.min(50, Math.max(1, Number(params.pageSize || 10)));
+  const where: string[] = [];
+  const values: Array<string | number> = [];
+  if (params.provider && params.provider !== "ALL") {
+    where.push("provider = ?");
+    values.push(params.provider);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const offset = (page - 1) * pageSize;
+  const [countRows] = await pool.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM reconciliation_provider_imports ${whereSql}`, values);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT * FROM reconciliation_provider_imports ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    [...values, pageSize, offset],
+  );
+  return {
+    items: rows.map((row) => ({
+      id: Number(row.id),
+      provider: String(row.provider),
+      startDate: String(row.start_date),
+      endDate: String(row.end_date),
+      loketCode: row.loket_code ? String(row.loket_code) : null,
+      originalFilename: row.original_filename ? String(row.original_filename) : null,
+      totalRows: Number(row.total_rows || 0),
+      validRows: Number(row.valid_rows || 0),
+      invalidRows: Number(row.invalid_rows || 0),
+      totalProvider: Number(row.total_provider || 0),
+      importedBy: row.imported_by ? String(row.imported_by) : null,
+      createdAt: String(row.created_at),
+    })),
+    totalItems: Number(countRows[0]?.total || 0),
+    page,
+    pageSize,
+  };
+}
+
+async function fetchProviderImportRows(providerImportId: number, provider: ReconciliationProvider) {
+  const [importRows] = await pool.query<RowDataPacket[]>(
+    `SELECT * FROM reconciliation_provider_imports WHERE id = ? AND provider = ? LIMIT 1`,
+    [providerImportId, provider],
+  );
+  if (!importRows[0]) throw new Error("Import provider tidak ditemukan untuk provider aktif");
+
+  const [rows] = await pool.query<ProviderImportDbRow[]>(
+    `SELECT * FROM reconciliation_provider_import_rows
+      WHERE import_id = ? AND error_message IS NULL AND provider_total > 0
+      ORDER BY excel_row_number ASC`,
+    [providerImportId],
+  );
+  return { importRow: importRows[0], rows };
+}
+
+function findProviderRowForTransaction(row: BaseTransactionRow, matchMap: Map<string, ProviderImportDbRow[]>, usedProviderRowIds: Set<number>) {
+  for (const key of buildTransactionMatchKeys(row)) {
+    const candidates = (matchMap.get(key) || []).filter((candidate) => !usedProviderRowIds.has(Number(candidate.id)));
+    if (candidates.length === 1) return candidates[0];
+  }
+  return null;
+}
+
+export async function generateReconciliationBatch(options: ReconciliationQueryOptions & { providerImportId?: number; createdBy?: string | null }) {
+  if (!options.startDate || !options.endDate) throw new Error("Tanggal mulai dan akhir wajib diisi");
+  if (!options.providerImportId) throw new Error("Import Excel provider wajib dipilih sebelum generate batch");
+  const rows = await fetchTransactionRows(options);
+  const { rows: providerRows } = await fetchProviderImportRows(options.providerImportId, options.provider);
+  const createdBy = options.createdBy || "SYSTEM";
+  const loketCode = options.loketCode && options.loketCode !== "semua" ? options.loketCode : null;
+
+  const providerMatchMap = new Map<string, ProviderImportDbRow[]>();
+  for (const providerRow of providerRows) {
+    for (const key of buildProviderMatchKeys(providerRow)) {
+      pushMapValue(providerMatchMap, key, providerRow);
+    }
+  }
+
+  const usedProviderRowIds = new Set<number>();
+  const prepared = rows.map((row) => {
+    const providerRow = findProviderRowForTransaction(row, providerMatchMap, usedProviderRowIds);
+    const internalTotal = getNumeric(row.total);
+    if (!providerRow) {
+      return { row, providerRow: null, providerTotal: 0, difference: internalTotal, status: "TIDAK_ADA_DI_PROVIDER" as ReconciliationItemStatus };
+    }
+    usedProviderRowIds.add(Number(providerRow.id));
+    const providerTotal = getNumeric(providerRow.provider_total);
+    const difference = internalTotal - providerTotal;
+    return {
+      row,
+      providerRow,
+      providerTotal,
+      difference,
+      status: difference === 0 ? "MATCH" as ReconciliationItemStatus : "SELISIH_NOMINAL" as ReconciliationItemStatus,
+    };
+  });
+
+  const unmatchedProviderRows = providerRows.filter((row) => !usedProviderRowIds.has(Number(row.id)));
+  const totalInternal = prepared.reduce((sum, item) => sum + getNumeric(item.row.total), 0);
+  const totalProvider = providerRows.reduce((sum, row) => sum + getNumeric(row.provider_total), 0);
+  const matchCount = prepared.filter((item) => item.status === "MATCH").length;
+  const exceptionCount = prepared.length - matchCount + unmatchedProviderRows.length;
+  const totalItems = prepared.length + unmatchedProviderRows.length;
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [batchRes] = await connection.execute<ResultSetHeader>(
+      `INSERT INTO reconciliation_batches
+       (provider, start_date, end_date, loket_code, provider_import_id, status, total_items, match_count, exception_count,
+        total_internal, total_provider, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [options.provider, options.startDate, options.endDate, loketCode, options.providerImportId, totalItems, matchCount, exceptionCount, totalInternal, totalProvider, createdBy]
+    );
+    const batchId = Number(batchRes.insertId);
+
+    for (const item of prepared) {
+      const row = item.row;
+      await connection.execute(
+        `INSERT INTO reconciliation_items
+         (batch_id, multi_payment_item_id, provider_import_row_id, transaction_code, customer_id, customer_name, product_code, period_label,
+          loket_code, loket_name, internal_amount, internal_admin, internal_total, provider_total,
+          difference_amount, match_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          batchId,
+          Number(row.id),
+          item.providerRow ? Number(item.providerRow.id) : null,
+          row.transactionCode || null,
+          row.customerId || null,
+          row.customerName || null,
+          row.productCode || null,
+          row.periodLabel || null,
+          row.loketCode || null,
+          row.loketName || null,
+          getNumeric(row.amount),
+          getNumeric(row.adminFee),
+          getNumeric(row.total),
+          item.providerTotal,
+          item.difference,
+          item.status,
+        ]
+      );
+    }
+
+    for (const providerRow of unmatchedProviderRows) {
+      const providerTotal = getNumeric(providerRow.provider_total);
+      await connection.execute(
+        `INSERT INTO reconciliation_items
+         (batch_id, multi_payment_item_id, provider_import_row_id, transaction_code, customer_id, customer_name, product_code, period_label,
+          loket_code, loket_name, internal_amount, internal_admin, internal_total, provider_total,
+          difference_amount, match_status, created_at, updated_at)
+         VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, 0, ?, ?, 'TIDAK_ADA_DI_INTERNAL', NOW(), NOW())`,
+        [
+          batchId,
+          Number(providerRow.id),
+          providerRow.transaction_code || null,
+          providerRow.customer_id || null,
+          providerRow.customer_name || null,
+          providerRow.product_code || null,
+          providerRow.period_label || null,
+          providerRow.loket_code || null,
+          providerTotal,
+          0 - providerTotal,
+        ]
+      );
+    }
+
+    await connection.commit();
+    return { batchId, totalItems, matchCount, exceptionCount, totalInternal, totalProvider };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export async function listReconciliationBatches(params: { provider?: string; page?: number; pageSize?: number }) {
+  const page = Math.max(1, Number(params.page || 1));
+  const pageSize = Math.min(50, Math.max(1, Number(params.pageSize || 10)));
+  const where: string[] = [];
+  const values: Array<string | number> = [];
+  if (params.provider && params.provider !== "ALL") {
+    where.push("provider = ?");
+    values.push(params.provider);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const offset = (page - 1) * pageSize;
+  const [countRows] = await pool.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM reconciliation_batches ${whereSql}`, values);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT * FROM reconciliation_batches ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    [...values, pageSize, offset]
+  );
+  return {
+    items: rows.map((row) => ({
+      id: Number(row.id),
+      provider: String(row.provider),
+      startDate: String(row.start_date),
+      endDate: String(row.end_date),
+      loketCode: row.loket_code ? String(row.loket_code) : null,
+      providerImportId: row.provider_import_id ? Number(row.provider_import_id) : null,
+      status: String(row.status),
+      totalItems: Number(row.total_items || 0),
+      matchCount: Number(row.match_count || 0),
+      exceptionCount: Number(row.exception_count || 0),
+      totalInternal: Number(row.total_internal || 0),
+      totalProvider: Number(row.total_provider || 0),
+      createdBy: row.created_by ? String(row.created_by) : null,
+      createdAt: String(row.created_at),
+    })),
+    totalItems: Number(countRows[0]?.total || 0),
+    page,
+    pageSize,
+  };
+}
+
+export async function getReconciliationBatch(batchId: number, status = "EXCEPTION") {
+  const [batchRows] = await pool.query<RowDataPacket[]>(`SELECT * FROM reconciliation_batches WHERE id = ? LIMIT 1`, [batchId]);
+  if (!batchRows[0]) return null;
+  const whereStatus = status === "ALL" ? "" : status === "EXCEPTION" ? "AND match_status IN ('SELISIH_NOMINAL','NEED_REVIEW','TIDAK_ADA_DI_PROVIDER','TIDAK_ADA_DI_INTERNAL')" : "AND match_status = ?";
+  const params: Array<string | number> = status === "ALL" || status === "EXCEPTION" ? [batchId] : [batchId, status];
+  const [itemRows] = await pool.query<RowDataPacket[]>(
+    `SELECT * FROM reconciliation_items WHERE batch_id = ? ${whereStatus} ORDER BY FIELD(match_status, 'SELISIH_NOMINAL','TIDAK_ADA_DI_PROVIDER','TIDAK_ADA_DI_INTERNAL','NEED_REVIEW','RESOLVED','IGNORED','MATCH'), id ASC LIMIT 500`,
+    params
+  );
+  const row = batchRows[0];
+  return {
+    batch: {
+      id: Number(row.id),
+      provider: String(row.provider),
+      startDate: String(row.start_date),
+      endDate: String(row.end_date),
+      loketCode: row.loket_code ? String(row.loket_code) : null,
+      providerImportId: row.provider_import_id ? Number(row.provider_import_id) : null,
+      status: String(row.status),
+      totalItems: Number(row.total_items || 0),
+      matchCount: Number(row.match_count || 0),
+      exceptionCount: Number(row.exception_count || 0),
+      totalInternal: Number(row.total_internal || 0),
+      totalProvider: Number(row.total_provider || 0),
+      createdBy: row.created_by ? String(row.created_by) : null,
+      createdAt: String(row.created_at),
+    },
+    items: itemRows.map((item) => ({
+      id: Number(item.id),
+      transactionCode: item.transaction_code ? String(item.transaction_code) : null,
+      customerId: item.customer_id ? String(item.customer_id) : null,
+      customerName: item.customer_name ? String(item.customer_name) : null,
+      productCode: item.product_code ? String(item.product_code) : null,
+      periodLabel: item.period_label ? String(item.period_label) : null,
+      loketCode: item.loket_code ? String(item.loket_code) : null,
+      loketName: item.loket_name ? String(item.loket_name) : null,
+      internalTotal: Number(item.internal_total || 0),
+      providerTotal: Number(item.provider_total || 0),
+      differenceAmount: Number(item.difference_amount || 0),
+      matchStatus: String(item.match_status),
+      note: item.note ? String(item.note) : null,
+      resolvedBy: item.resolved_by ? String(item.resolved_by) : null,
+      resolvedAt: item.resolved_at ? String(item.resolved_at) : null,
+    })),
+  };
+}
+
+export async function updateReconciliationItem(params: {
+  batchId: number;
+  itemId: number;
+  status: ReconciliationItemStatus;
+  note?: string | null;
+  actorUsername: string;
+  actorRole?: string | null;
+  actorIp?: string | null;
+}) {
+  const resolved = params.status === "RESOLVED" || params.status === "IGNORED";
+  const [result] = await pool.execute<ResultSetHeader>(
+    `UPDATE reconciliation_items
+        SET match_status = ?,
+            note = COALESCE(?, note),
+            resolved_by = CASE WHEN ? THEN ? ELSE resolved_by END,
+            resolved_at = CASE WHEN ? THEN NOW() ELSE resolved_at END,
+            updated_at = NOW()
+      WHERE id = ? AND batch_id = ?`,
+    [params.status, params.note || null, resolved ? 1 : 0, params.actorUsername, resolved ? 1 : 0, params.itemId, params.batchId]
+  );
+  if (result.affectedRows === 0) throw new Error("Item rekonsiliasi tidak ditemukan pada batch ini");
+
+  await auditLog({
+    actorType: "user",
+    actorUsername: params.actorUsername,
+    actorRole: params.actorRole || null,
+    actorIp: params.actorIp || null,
+    action: "RECONCILIATION_ITEM_UPDATE",
+    entityType: "reconciliation_item",
+    entityId: params.itemId,
+    after: { status: params.status, note: params.note || null },
+  });
 }
