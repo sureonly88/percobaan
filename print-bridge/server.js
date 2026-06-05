@@ -85,17 +85,19 @@ if (fs.existsSync(TEMPLATE_PATH)) {
  * Most reliable on Windows 10/11. Supports any USB printer by name.
  */
 function printViaPowershell(escpData, printerName, cb) {
-  const tmpFile = path.join(os.tmpdir(), `pedami_${Date.now()}.prn`);
-  fs.writeFile(tmpFile, escpData, 'binary', (err) => {
-    if (err) return cb(err);
+  const now     = Date.now();
+  const tmpPrn  = path.join(os.tmpdir(), `pedami_${now}.prn`);
+  const tmpPs   = path.join(os.tmpdir(), `pedami_${now}.ps1`);
 
-    const safePath    = tmpFile.replace(/\\/g, '\\\\');
-    const safePrinter = printerName.replace(/'/g, "''");
+  fs.writeFile(tmpPrn, escpData, 'binary', (errPrn) => {
+    if (errPrn) return cb(errPrn);
 
-    // Inline C# via Add-Type to call Win32 winspool.drv directly
-    const ps = `
-$ErrorActionPreference = 'Stop'
-$bytes = [System.IO.File]::ReadAllBytes('${safePath}')
+    // In a .ps1 file, single-quoted PS strings are literal — only escape ' as ''
+    const psPrnPath     = tmpPrn.replace(/'/g, "''");
+    const psPrinterName = printerName.replace(/'/g, "''");
+
+    const psScript = `$ErrorActionPreference = 'Stop'
+$bytes = [System.IO.File]::ReadAllBytes('${psPrnPath}')
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -116,8 +118,8 @@ public class RawPrint {
 }
 '@
 $h=[IntPtr]::Zero
-if (-not [RawPrint]::OpenPrinter('${safePrinter}',[ref]$h,[IntPtr]::Zero)) {
-  throw "OpenPrinter gagal untuk '${safePrinter}'. Win32Error=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+if (-not [RawPrint]::OpenPrinter('${psPrinterName}',[ref]$h,[IntPtr]::Zero)) {
+  throw "OpenPrinter gagal untuk '${psPrinterName}'. Win32Error=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
 }
 $di=New-Object RawPrint+DOC; $di.Name='Receipt'; $di.Type='RAW'
 $docId=[RawPrint]::StartDocPrinter($h,1,$di)
@@ -154,15 +156,25 @@ if ($w -ne $bytes.Length) {
 [RawPrint]::ClosePrinter($h)|Out-Null
 Write-Output "RAW bytes written: $w"
 `;
-    exec(`powershell -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`,
-      { shell: 'cmd.exe', timeout: 15000 },
-      (err2, stdout, stderr) => {
-        setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch {} }, 3000);
-        if (err2) return cb(new Error(stderr || err2.message));
-        if (stdout && stdout.trim()) console.log('[Bridge]', stdout.trim());
-        cb(null);
+
+    fs.writeFile(tmpPs, psScript, 'utf8', (errPs) => {
+      if (errPs) {
+        setTimeout(() => { try { fs.unlinkSync(tmpPrn); } catch {} }, 3000);
+        return cb(errPs);
       }
-    );
+      exec(`powershell -NonInteractive -ExecutionPolicy Bypass -File "${tmpPs}"`,
+        { shell: 'cmd.exe', timeout: 15000 },
+        (err2, stdout, stderr) => {
+          setTimeout(() => {
+            try { fs.unlinkSync(tmpPrn); } catch {}
+            try { fs.unlinkSync(tmpPs);  } catch {}
+          }, 3000);
+          if (err2) return cb(new Error(stderr || err2.message));
+          if (stdout && stdout.trim()) console.log('[Bridge]', stdout.trim());
+          cb(null);
+        }
+      );
+    });
   });
 }
 
@@ -226,25 +238,42 @@ function detectPrinters(cb) {
   const platform = os.platform();
 
   if (platform === 'win32') {
-    const ps =
-      "Get-Printer | Select-Object Name,PortName,DriverName,@{N='IsDefault';E={(Get-CimInstance Win32_Printer -Filter \\\"Name='\" + ($_.Name -replace \"'\",\"''\") + \"'\\\").Default}} | ConvertTo-Json -Compress";
-    exec(`powershell -NonInteractive -Command "${ps.replace(/"/g, '\\"')}"`,
-      { shell: 'cmd.exe', timeout: 10000, maxBuffer: 1024 * 1024 },
-      (err, stdout) => {
-        if (err) return cb(null, []);
-        try {
-          const raw = JSON.parse(stdout || '[]');
-          const list = (Array.isArray(raw) ? raw : [raw]).map((p) => ({
-            name:    p.Name || '',
-            port:    p.PortName || '',
-            driver:  p.DriverName || '',
-            default: !!p.IsDefault,
-          })).filter((p) => p.name);
-          cb(null, list);
-        } catch {
-          cb(null, []);
-        }
-      });
+    const tmpPs = path.join(os.tmpdir(), `pedami_printers_${Date.now()}.ps1`);
+    const psScript = `$ErrorActionPreference = 'Stop'
+$printers = Get-Printer
+$defaultName = ''
+try { $defaultName = (Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true } | Select-Object -First 1).Name } catch {}
+$result = $printers | ForEach-Object {
+  [PSCustomObject]@{
+    Name      = $_.Name
+    PortName  = $_.PortName
+    DriverName= $_.DriverName
+    IsDefault = ($_.Name -eq $defaultName)
+  }
+}
+$result | ConvertTo-Json -Compress
+`;
+    fs.writeFile(tmpPs, psScript, 'utf8', (errPs) => {
+      if (errPs) return cb(null, []);
+      exec(`powershell -NonInteractive -ExecutionPolicy Bypass -File "${tmpPs}"`,
+        { shell: 'cmd.exe', timeout: 10000, maxBuffer: 1024 * 1024 },
+        (err, stdout) => {
+          setTimeout(() => { try { fs.unlinkSync(tmpPs); } catch {} }, 3000);
+          if (err) return cb(null, []);
+          try {
+            const raw = JSON.parse(stdout || '[]');
+            const list = (Array.isArray(raw) ? raw : [raw]).map((p) => ({
+              name:    p.Name || '',
+              port:    p.PortName || '',
+              driver:  p.DriverName || '',
+              default: !!p.IsDefault,
+            })).filter((p) => p.name);
+            cb(null, list);
+          } catch {
+            cb(null, []);
+          }
+        });
+    });
     return;
   }
 
