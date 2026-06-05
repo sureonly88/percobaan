@@ -36,13 +36,13 @@ if exist "C:\Windows\System32\openssl.exe"               set OPENSSL=C:\Windows\
 REM Coba dari PATH
 if "%OPENSSL%"=="" (
   where openssl >nul 2>&1
-  if %ERRORLEVEL%==0 set OPENSSL=openssl
+  if not errorlevel 1 set OPENSSL=openssl
 )
 
 if "%OPENSSL%"=="" (
   echo.
   echo [ERROR] openssl tidak ditemukan.
-  echo         Install Git for Windows (sudah termasuk openssl):
+  echo         Install Git for Windows ^(sudah termasuk openssl^):
   echo         https://git-scm.com/download/win
   echo.
   del "%DIR%cert.conf" 2>nul

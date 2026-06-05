@@ -1,6 +1,6 @@
 {
   "port": 6789,
-  "printerName": "EPSON_L5190_Series",
+  "printerName": "EPSON LX-310",
   "printMode": "ps",
   "portMapping": "LPT3:",
   "columns": 80,

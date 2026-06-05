@@ -403,7 +403,7 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
 async function tryPrintBridge(data: ReceiptPrintData): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
     const res = await fetch(`${getPrintBridgeUrl()}/print`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

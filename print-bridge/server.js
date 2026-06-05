@@ -458,7 +458,7 @@ const server = tlsOptions
   ? https.createServer(tlsOptions, requestHandler)
   : http.createServer(requestHandler);
 
-server.listen(config.port, '127.0.0.1', () => {
+server.listen(config.port, () => {
   const scheme = tlsOptions ? 'https' : 'http';
   console.log('='.repeat(60));
   console.log('  Pedami Print Bridge');
