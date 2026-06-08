@@ -17,7 +17,7 @@ interface BridgePrinter {
 interface BridgeConfig {
   port: number;
   printerName: string;
-  printMode: "ps" | "copy";
+  printMode: "ps" | "copy" | "direct";
   portMapping: string;
   columns: number;
   feedLines: number;

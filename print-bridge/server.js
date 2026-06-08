@@ -107,14 +107,16 @@ public class RawPrint {
     [DllImport("winspool.drv",SetLastError=true)]
     public static extern bool ClosePrinter(IntPtr h);
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Ansi)]
-    public struct DOC{public string Name;public string Out;public string Type;}
+    public class DOC{public string Name;public string Out;public string Type;}
     [DllImport("winspool.drv",CharSet=CharSet.Ansi,SetLastError=true)]
-    public static extern int StartDocPrinter(IntPtr h,int lv,[In,MarshalAs(UnmanagedType.LPStruct)] DOC di);
+    public static extern int StartDocPrinter(IntPtr h,int lv,[In] DOC di);
     [DllImport("winspool.drv",SetLastError=true)] public static extern bool EndDocPrinter(IntPtr h);
     [DllImport("winspool.drv",SetLastError=true)] public static extern bool StartPagePrinter(IntPtr h);
     [DllImport("winspool.drv",SetLastError=true)] public static extern bool EndPagePrinter(IntPtr h);
     [DllImport("winspool.drv",SetLastError=true)]
     public static extern bool WritePrinter(IntPtr h,IntPtr p,int n,ref int w);
+    [DllImport("winspool.drv",SetLastError=true)]
+    public static extern bool SetJob(IntPtr h,int jobId,int level,IntPtr pJob,int command);
 }
 '@
 $h=[IntPtr]::Zero
@@ -153,6 +155,8 @@ if ($w -ne $bytes.Length) {
 }
 [RawPrint]::EndPagePrinter($h)|Out-Null
 [RawPrint]::EndDocPrinter($h)|Out-Null
+# JOB_CONTROL_RESUME=6 — pastikan job tidak tertahan di queue (job creator selalu punya izin)
+[RawPrint]::SetJob($h,$docId,0,[IntPtr]::Zero,6)|Out-Null
 [RawPrint]::ClosePrinter($h)|Out-Null
 Write-Output "RAW bytes written: $w"
 `;
@@ -197,6 +201,74 @@ function printViaCopy(escpData, portMapping, cb) {
   });
 }
 
+/**
+ * Mode: 'direct' — bypass spooler sepenuhnya, tulis langsung ke USB hardware port.
+ * Digunakan bila mode 'ps' (winspool) tidak bereaksi karena custom EPSON USB monitor.
+ * Memerlukan: printer port name valid (misal USB001) dan run as Admin.
+ */
+function printViaDirect(escpData, printerName, cb) {
+  const now    = Date.now();
+  const tmpPrn = path.join(os.tmpdir(), `pedami_${now}.prn`);
+  const tmpPs  = path.join(os.tmpdir(), `pedami_${now}.ps1`);
+
+  fs.writeFile(tmpPrn, escpData, 'binary', (errPrn) => {
+    if (errPrn) return cb(errPrn);
+
+    const psPrnPath     = tmpPrn.replace(/'/g, "''");
+    const psPrinterName = printerName.replace(/'/g, "''");
+
+    const psScript = `$ErrorActionPreference = 'Stop'
+$bytes = [System.IO.File]::ReadAllBytes('${psPrnPath}')
+$portName = ''
+try {
+  $portName = (Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq '${psPrinterName}' } | Select-Object -First 1).PortName
+} catch {}
+if (-not $portName) { throw "Printer '${psPrinterName}' tidak ditemukan atau tidak punya port" }
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class DirectPrint {
+    [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Auto)]
+    public static extern IntPtr CreateFile(string n,uint a,uint sh,IntPtr sa,uint cd,uint fl,IntPtr tp);
+    [DllImport("kernel32.dll",SetLastError=true)]
+    public static extern bool WriteFile(IntPtr h,byte[] b,int c,ref int w,IntPtr ov);
+    [DllImport("kernel32.dll",SetLastError=true)]
+    public static extern bool CloseHandle(IntPtr h);
+}
+'@
+$portPath = "\\\\.\\$portName"
+$h = [DirectPrint]::CreateFile($portPath,0x40000000,0x1,[IntPtr]::Zero,3,0,[IntPtr]::Zero)
+if ($h.ToInt64() -le 0) {
+  $e = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  throw "Tidak bisa buka $portPath. Win32Error=$e (coba jalankan node server.js sebagai Administrator)"
+}
+[int]$w = 0
+[DirectPrint]::WriteFile($h,$bytes,$bytes.Length,[ref]$w,[IntPtr]::Zero)|Out-Null
+[DirectPrint]::CloseHandle($h)|Out-Null
+Write-Output "Direct bytes written: $w to $portPath"
+`;
+
+    fs.writeFile(tmpPs, psScript, 'utf8', (errPs) => {
+      if (errPs) {
+        setTimeout(() => { try { fs.unlinkSync(tmpPrn); } catch {} }, 3000);
+        return cb(errPs);
+      }
+      exec(`powershell -NonInteractive -ExecutionPolicy Bypass -File "${tmpPs}"`,
+        { shell: 'cmd.exe', timeout: 15000 },
+        (err2, stdout, stderr) => {
+          setTimeout(() => {
+            try { fs.unlinkSync(tmpPrn); } catch {}
+            try { fs.unlinkSync(tmpPs);  } catch {}
+          }, 3000);
+          if (err2) return cb(new Error(stderr || err2.message));
+          if (stdout && stdout.trim()) console.log('[Bridge]', stdout.trim());
+          cb(null);
+        }
+      );
+    });
+  });
+}
+
 function printRaw(escpData, cb) {
   const platform = os.platform();
 
@@ -221,6 +293,8 @@ function printRaw(escpData, cb) {
   // Windows
   if (config.printMode === 'copy') {
     printViaCopy(escpData, config.portMapping, cb);
+  } else if (config.printMode === 'direct') {
+    printViaDirect(escpData, config.printerName, cb);
   } else {
     printViaPowershell(escpData, config.printerName, cb);
   }
@@ -239,19 +313,21 @@ function detectPrinters(cb) {
 
   if (platform === 'win32') {
     const tmpPs = path.join(os.tmpdir(), `pedami_printers_${Date.now()}.ps1`);
-    const psScript = `$ErrorActionPreference = 'Stop'
-$printers = Get-Printer
-$defaultName = ''
-try { $defaultName = (Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true } | Select-Object -First 1).Name } catch {}
-$result = $printers | ForEach-Object {
-  [PSCustomObject]@{
-    Name      = $_.Name
-    PortName  = $_.PortName
-    DriverName= $_.DriverName
-    IsDefault = ($_.Name -eq $defaultName)
+    const psScript = `$ErrorActionPreference = 'SilentlyContinue'
+try {
+  $printers = Get-CimInstance Win32_Printer
+  $result = $printers | ForEach-Object {
+    [PSCustomObject]@{
+      Name      = $_.Name
+      PortName  = $_.PortName
+      DriverName= $_.DriverName
+      IsDefault = $_.Default
+    }
   }
+  $result | ConvertTo-Json -Compress
+} catch {
+  '[]'
 }
-$result | ConvertTo-Json -Compress
 `;
     fs.writeFile(tmpPs, psScript, 'utf8', (errPs) => {
       if (errPs) return cb(null, []);
@@ -410,8 +486,8 @@ function requestHandler(req, res) {
       for (const k of allowed) {
         if (body[k] !== undefined) config[k] = body[k];
       }
-      if (config.printMode !== 'ps' && config.printMode !== 'copy') {
-        return sendJson(res, 400, { ok: false, error: "printMode harus 'ps' atau 'copy'" });
+      if (!['ps', 'copy', 'direct'].includes(config.printMode)) {
+        return sendJson(res, 400, { ok: false, error: "printMode harus 'ps', 'copy', atau 'direct'" });
       }
       const ok = saveConfig();
       sendJson(res, ok ? 200 : 500, { ok, config, error: ok ? undefined : 'Gagal menyimpan config.json' });
