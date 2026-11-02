@@ -477,8 +477,8 @@ window.onload = function() {
  * Tries the local ESC/P print bridge at localhost:6789 first.
  * Falls back to browser window.print() with a plain-text <pre> template.
  */
-export function printReceipt(data: ReceiptPrintData): void {
-  void tryPrintBridge(data).then((ok) => {
+export function printReceipt(data: ReceiptPrintData): Promise<void> {
+  return tryPrintBridge(data).then((ok) => {
     if (!ok) {
       // Notify user that bridge failed and we're falling back to HTML print
       try {

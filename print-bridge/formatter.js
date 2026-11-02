@@ -5,7 +5,8 @@ const ESC       = '\x1B';
 const INIT      = ESC + '@';   // Initialize printer
 const BOLD_ON   = ESC + 'E';   // Bold on
 const BOLD_OFF  = ESC + 'F';   // Bold off
-const LF        = '\n';
+const LF        = '\r\n';      // Dot matrix lebih aman pakai CRLF agar carriage kembali ke kiri
+const FF        = '\x0C';      // Form feed: flush/eject halaman agar job tidak tertahan di buffer
 
 function fmtRp(n) {
   return 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
@@ -56,6 +57,12 @@ function getProdukLabel(kode) {
   return '';
 }
 
+function clampInt(v, def, min, max) {
+  const n = Math.round(Number(v));
+  if (v === undefined || v === null || v === '' || !Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, n));
+}
+
 function r2c(left, right, width) {
   const gap = width - left.length - right.length;
   if (gap < 1) return left.substring(0, width - right.length - 1) + ' ' + right;
@@ -84,7 +91,7 @@ function detailCell(label, value) {
   return ' '.repeat(INDENT) +
     label.substring(0, LABEL_W).padEnd(LABEL_W) +
     SEP +
-    value.substring(0, VAL_W).padEnd(VAL_W);
+    String(value).substring(0, VAL_W).padEnd(VAL_W);
 }
 
 /**
@@ -95,61 +102,100 @@ function detailCell(label, value) {
  */
 function formatEscp(data, cfg = {}) {
   const W    = cfg.columns  || 80;
-  const FEED = cfg.feedLines || 4;
+  const FORM_FEED = cfg.formFeed === true;
+  const PLAIN = cfg.plain === true;
   const tpl  = cfg.template || {};
   const HEAVY = '='.repeat(W);
   const LIGHT = '-'.repeat(W);
+  // Tinggi 1 lembar continuous form dalam baris @ 6 LPI (1/6 inch per baris).
+  // 9.5" x 11" = 66 baris, 9.5" x 5.5" = 33 baris, 9.5" x 11/3" = 22 baris.
+  const PAGE_LINES = clampInt(cfg.pageLines, 66, 6, 127);
+  // Baris kosong di awal setiap lembar (jarak dari perforasi ke baris pertama).
+  const TOP_MARGIN = clampInt(cfg.topMargin, 0, 0, PAGE_LINES - 1);
 
   const chunks = [];
+  let pageLineCount = 0;
 
-  // Helper: append a line (with LF)
-  function line(s)        { chunks.push(s + LF); }
-  function bold(s)        { return BOLD_ON + s + BOLD_OFF; }
+  // Semua teks dipotong ke W kolom. Baris yang lebih panjang dari lebar
+  // kertas akan di-wrap otomatis oleh printer menjadi 2 baris fisik,
+  // sehingga hitungan baris meleset dan struk berikutnya bergeser.
+  function clean(s)       { return String(s).replace(/[^\x20-\x7E]/g, '?').substring(0, W); }
+  function line(s)        { chunks.push(clean(s) + LF); pageLineCount++; }
+  // Untuk EPSON LX-310 di komputer ini, job dengan ESC bold (ESC E/F)
+  // tertahan di queue. Pakai teks plain ASCII agar cocok dengan `copy /b`
+  // yang sudah terbukti mencetak langsung ke share printer.
+  function bold(s)        { return s; }
   function ctr(text, b)   {
-    const pad = Math.max(0, Math.floor((W - text.length) / 2));
-    const content = b ? bold(text) : text;
-    chunks.push(' '.repeat(pad) + content + LF);
+    const t = clean(text);
+    const pad = Math.max(0, Math.floor((W - t.length) / 2));
+    line(' '.repeat(pad) + (b ? bold(t) : t));
   }
   function c2(left, right, b) {
-    const content = r2c(left, right, W);
-    chunks.push((b ? bold(content) : content) + LF);
+    const content = r2c(String(left), String(right), W);
+    line(b ? bold(content) : content);
+  }
+  function startPage() {
+    for (let i = 0; i < TOP_MARGIN; i++) line('');
+  }
+  function endPage() {
+    if (FORM_FEED && !PLAIN) {
+      // FF: printer maju ke top-of-form berikutnya berdasarkan ESC C.
+      chunks.push(FF);
+    } else {
+      // Pad ke kelipatan PAGE_LINES; kalau isi > 1 lembar, lanjut ke batas
+      // lembar berikutnya agar struk selanjutnya tetap mulai di perforasi.
+      const remaining = (PAGE_LINES - (pageLineCount % PAGE_LINES)) % PAGE_LINES;
+      for (let i = 0; i < remaining; i++) chunks.push(LF);
+    }
+    pageLineCount = 0;
   }
 
   // ── Init ──
-  chunks.push(INIT);
-
-  // ── COPY watermark banner (cetak ulang) ──
-  if (data.isCopy) {
-    line(HEAVY);
-    const tag = data.copyNumber && data.copyNumber > 1
-      ? `*** COPY #${data.copyNumber} - BUKAN STRUK ASLI ***`
-      : `*** COPY - BUKAN STRUK ASLI ***`;
-    ctr(tag, true);
-    if (data.copyBy || data.copyAt) {
-      const meta = [
-        data.copyBy ? `Dicetak ulang oleh: ${data.copyBy}` : '',
-        data.copyAt ? fmtTanggal(data.copyAt) : '',
-      ].filter(Boolean).join('  -  ');
-      if (meta) ctr(meta, false);
-    }
-    line(HEAVY);
+  // ESC @      : reset printer
+  // ESC 2      : spasi baris 1/6 inch (6 LPI) — basis hitungan PAGE_LINES
+  // ESC C n    : panjang halaman = n baris, posisi sekarang = top-of-form
+  // ESC O      : matikan skip-over-perforation (kalau aktif di default
+  //              printer, printer melompati ~1 inch tiap halaman → geser)
+  if (!PLAIN) {
+    chunks.push(INIT + ESC + '2' + ESC + 'C' + String.fromCharCode(PAGE_LINES) + ESC + 'O');
   }
 
-  // ── Header ──
-  line(HEAVY);
-  ctr(tpl.headerLine1 || 'PEDAMI PAYMENT', true);
-  ctr(tpl.headerLine2 || 'Layanan Pembayaran Multi-Produk', false);
-  line(HEAVY);
-  c2('Loket   : ' + data.loketCode + ' ' + (data.loketName || ''), 'Kasir : ' + data.kasir);
-  line('Tanggal : ' + fmtTanggal(data.tanggal));
-  line(LIGHT);
+  // Header dicetak di setiap lembar agar setiap potongan struk berdiri
+  // sendiri dan posisi isinya sama persis di setiap lembar.
+  function header() {
+    if (data.isCopy) {
+      line(HEAVY);
+      const tag = data.copyNumber && data.copyNumber > 1
+        ? `*** COPY #${data.copyNumber} - BUKAN STRUK ASLI ***`
+        : `*** COPY - BUKAN STRUK ASLI ***`;
+      ctr(tag, true);
+      if (data.copyBy || data.copyAt) {
+        const meta = [
+          data.copyBy ? `Dicetak ulang oleh: ${data.copyBy}` : '',
+          data.copyAt ? fmtTanggal(data.copyAt) : '',
+        ].filter(Boolean).join('  -  ');
+        if (meta) ctr(meta, false);
+      }
+      line(HEAVY);
+    }
+    line(HEAVY);
+    ctr(tpl.headerLine1 || 'PEDAMI PAYMENT', true);
+    ctr(tpl.headerLine2 || 'Layanan Pembayaran Multi-Produk', false);
+    line(HEAVY);
+    c2('Loket   : ' + data.loketCode + ' ' + (data.loketName || ''), 'Kasir : ' + data.kasir);
+    line('Tanggal : ' + fmtTanggal(data.tanggal));
+    line(LIGHT);
+  }
 
   // ── Bills ──
   (data.bills || []).forEach((b, idx) => {
+    startPage();
+    header();
+
     const isPln = b.type === 'pln';
     const isPdamLunasin = isPln && b.kodeProduk && b.kodeProduk.startsWith('pdam');
 
-    chunks.push(bold(`[${idx + 1}] ${b.nama}`) + LF);
+    line(`[${idx + 1}] ${b.nama}`);
     let idLine = `    ID   : ${b.idpel}`;
     if (isPdamLunasin && b.periode) idLine += '  Periode : ' + fmtPeriode(b.periode);
     else if (!isPln && b.periode) idLine += '  Periode : ' + fmtPeriode(b.periode);
@@ -159,6 +205,7 @@ function formatEscp(data, cfg = {}) {
     if (b.transactionCode) line('    Kode  : ' + b.transactionCode);
 
     const pairs = [];
+    let useTwoCol = !isPln || isPdamLunasin;
     if (isPln) {
       const prod = getProdukLabel(b.kodeProduk || '');
       const isNonrek = b.kodeProduk && b.kodeProduk.startsWith('pln-nonrek');
@@ -216,6 +263,7 @@ function formatEscp(data, cfg = {}) {
         if (b.tglLunas)      pairs.push(['Tgl Lunas',    fmtTanggal(b.tglLunas)]);
         if (b.refnumLunasin) pairs.push(['Ref Lunasin',  b.refnumLunasin]);
       } else {
+        useTwoCol = true;
         if (b.tarif || b.daya) pairs.push(['Tarif/Daya', (b.tarif || '') + (b.daya ? '/' + b.daya + ' VA' : '')]);
         if (b.noMeter)    pairs.push(['No Meter',    b.noMeter]);
         if (b.standMeter) pairs.push(['Stand Meter', b.standMeter]);
@@ -257,8 +305,20 @@ function formatEscp(data, cfg = {}) {
       pairs.push(['Diskon',      '- ' + fmtRp(b.diskon || 0)]);
     }
 
-    for (const [lbl, val] of pairs) {
-      line(detailLine(lbl, val, W));
+    if (useTwoCol) {
+      for (let i = 0; i < pairs.length; i += 2) {
+        const [lbl1, val1] = pairs[i];
+        if (i + 1 < pairs.length) {
+          const [lbl2, val2] = pairs[i + 1];
+          line(detailCell(lbl1, String(val1)) + detailCell(lbl2, String(val2)));
+        } else {
+          line(detailLine(lbl1, val1, W));
+        }
+      }
+    } else {
+      for (const [lbl, val] of pairs) {
+        line(detailLine(lbl, val, W));
+      }
     }
 
     // Token PLN — centered, bold
@@ -278,22 +338,17 @@ function formatEscp(data, cfg = {}) {
     }
     c2('  SUBTOTAL', fmtRp(b.total), true);
 
-    if (idx < (data.bills || []).length - 1) {
-      line('');
-      line(HEAVY);
-      line('');
+    // Digital receipt URL — hanya di halaman tagihan terakhir
+    if (idx === (data.bills || []).length - 1 && data.digitalReceiptUrl) {
+      line(LIGHT);
+      ctr('VALIDASI STRUK DIGITAL', true);
+      ctr('Scan QR atau buka URL berikut:', false);
+      for (const part of wrapText(data.digitalReceiptUrl, W)) ctr(part, false);
     }
+
+    // Setiap tagihan = tepat 1 lembar (PAGE_LINES baris)
+    endPage();
   });
-
-  if (data.digitalReceiptUrl) {
-    line(LIGHT);
-    ctr('VALIDASI STRUK DIGITAL', true);
-    ctr('Scan QR atau buka URL berikut:', false);
-    for (const part of wrapText(data.digitalReceiptUrl, W)) ctr(part, false);
-  }
-
-  // Feed lines (paper advance for easy tear-off)
-  for (let i = 0; i < FEED; i++) chunks.push(LF);
 
   return chunks.join('');
 }
@@ -302,11 +357,7 @@ function formatEscp(data, cfg = {}) {
  * Plain-text version (no ESC/P control bytes) — for live preview di UI.
  */
 function formatPlainText(data, cfg = {}) {
-  // Strip ESC/P bold sequences from formatEscp output
-  return formatEscp(data, cfg)
-    .replace(new RegExp(ESC + '@', 'g'), '')
-    .replace(new RegExp(ESC + 'E', 'g'), '')
-    .replace(new RegExp(ESC + 'F', 'g'), '');
+  return formatEscp(data, { ...cfg, plain: true });
 }
 
 module.exports = { formatEscp, formatPlainText };

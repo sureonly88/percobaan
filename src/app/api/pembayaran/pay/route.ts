@@ -15,6 +15,7 @@ import { logTransactionEventSafe, logTransactionEventFireAndForget } from "@/lib
 import { notifyTransactionFailed, notifyTransactionSuccess, notifyTransactionPartial, notifyLowBalance } from "@/lib/notifications";
 import { cached } from "@/lib/cache";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
+import { debitLoketBalance } from "@/lib/saldo-mutations";
 
 interface PaymentBill {
   idpel: string;
@@ -616,10 +617,21 @@ export async function POST(req: NextRequest) {
           const groupAmount = pelBills.reduce((sum, b) => sum + b.subTotal, 0);
           const groupAdmin = pelBills.reduce((sum, _b) => sum + biayaAdminLoket, 0);
           try {
-            await pool.execute(
-              "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?",
-              [groupTotal, loketCode]
-            );
+            const debit = await debitLoketBalance({ loketCode, amount: groupTotal, allowNegative: true });
+            if (!debit.ok || debit.forced) {
+              await logTransactionEventSafe({
+                idempotencyKey: idempotencyKeyTrimmed,
+                transactionCode,
+                provider: "PDAM",
+                eventType: debit.forced ? "LOKET_BALANCE_NEGATIVE" : "LOKET_BALANCE_DEBIT_FAILED",
+                severity: "ERROR",
+                username,
+                loketCode,
+                custId: idpel,
+                message: `Mutasi saldo loket bermasalah setelah payment success (potong Rp ${groupTotal.toLocaleString("id-ID")})`,
+                payload: { groupTotal, balance: debit.balance, forced: Boolean(debit.forced) },
+              });
+            }
             // Check low balance and notify
             try {
               const [balRows] = await pool.query<RowDataPacket[]>(

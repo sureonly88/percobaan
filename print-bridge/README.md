@@ -94,12 +94,41 @@ Dua file konfigurasi runtime (auto-generated, jangan diedit manual selagi bridge
 
 | File | Isi |
 |------|-----|
-| `config.json` | `printerName`, `printMode` (`ps` \| `copy`), `portMapping`, `columns`, `feedLines` |
+| `config.json` | `printerName`, `printMode` (`ps` \| `copy` \| `direct`), `portMapping`, `columns`, `pageLines`, `topMargin`, `formFeed` |
 | `template.json` | Header/footer struk: `headerLine1`, `headerLine2`, `lunasText`, `footerLine1`, `footerLine2` |
 
 **Mode cetak (Windows):**
 - `ps` — PowerShell + WinSpooler API (rekomendasi untuk printer USB modern).
 - `copy` — `copy /b file LPT3:` (untuk printer yang sudah di-share ke virtual LPT port via `net use LPT3 \\PC\Printer /persistent:yes`).
+
+### Catatan EPSON LX-310 di mesin kasir ini
+
+Konfigurasi yang sudah dites berhasil untuk printer **EPSON LX-310** di komputer ini:
+
+```json
+{
+  "printerName": "EPSON LX-310",
+  "printMode": "copy",
+  "portMapping": "\\\\localhost\\EPSONLX"
+}
+```
+
+Printer harus tetap di-share di Windows dengan share name `EPSONLX`.
+Formatter struk memakai output RAW ASCII + `CRLF` + `Form Feed` tanpa ESC/P bold, karena driver `Epson ESC/P 9pin V4 Class Driver` pada port `USB001` menahan job tertentu bila dikirim lewat WinSpooler RAW atau memakai karakter/control yang tidak aman.
+
+### Posisi struk di continuous form
+
+Setiap tagihan dicetak tepat 1 lembar. Bridge mengirim `ESC 2` (6 baris/inch), `ESC C n` (panjang halaman = `pageLines`) dan `ESC O` (matikan skip-over-perforation) di awal setiap job.
+
+| Ukuran kertas | `pageLines` |
+|---------------|-------------|
+| 9.5" x 11" | 66 |
+| 9.5" x 5.5" (1/2) | 33 |
+| 9.5" x 11/3" (1/3) | 22 |
+
+- `topMargin`: baris kosong di awal tiap lembar bila baris pertama terlalu dekat perforasi.
+- Sebelum job pertama, posisikan perforasi kertas tepat di top-of-form printer (tombol **Load/Eject** / micro-adjust).
+- Windows: Printer properties → Advanced → Print Processor → `WinPrint` + `RAW` (bukan `RAW [FF auto]`/`RAW [FF appended]`), agar Windows tidak menambah form feed sendiri.
 
 ---
 
@@ -124,6 +153,7 @@ Dua file konfigurasi runtime (auto-generated, jangan diedit manual selagi bridge
 | `Pengaturan → Printer` menampilkan "Bridge offline" | Bridge belum jalan. Buka terminal di folder `print-bridge` dan `node server.js`. Cek port 6789 tidak dipakai aplikasi lain (`netstat -ano | findstr :6789` di Windows). |
 | Printer tidak muncul di daftar | Pastikan terinstall di OS, lalu klik tombol **Refresh** di tab Printer. Di Windows pastikan PowerShell `Get-Printer` bisa jalan. |
 | Cetak tidak keluar di mode `ps` | Coba ganti ke mode `copy` + map printer ke LPT3 (`net use LPT3: \\\\localhost\\NamaPrinter /persistent:yes`). |
+| EPSON LX-310 menerima data tapi tidak bereaksi | Gunakan mode `copy` ke share printer `\\localhost\EPSONLX`, pastikan printer di-share sebagai `EPSONLX`, dan gunakan formatter RAW ASCII tanpa ESC bold/non-ASCII. |
 | Karakter aneh / tidak rapi | Sesuaikan `columns` (default 40 untuk LX-310 kertas 9.5"). |
 | CORS error di browser | Bridge sudah whitelist `localhost` & `127.0.0.1`. Pastikan aplikasi Next.js diakses lewat `http://localhost:3000`, bukan IP LAN. |
 

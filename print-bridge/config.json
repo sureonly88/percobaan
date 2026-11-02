@@ -1,8 +1,11 @@
 {
   "port": 6789,
   "printerName": "EPSON LX-310",
-  "printMode": "ps",
-  "portMapping": "LPT3:",
+  "printMode": "copy",
+  "portMapping": "\\\\localhost\\EPSONLX",
   "columns": 80,
-  "feedLines": 4
+  "feedLines": 0,
+  "formFeed": false,
+  "pageLines": 66,
+  "topMargin": 0
 }

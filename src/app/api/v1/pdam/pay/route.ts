@@ -13,6 +13,7 @@ import { checkProviderRateLimit } from "@/lib/provider-rate-limit";
 import { pdamInquiry, pdamPaymentWithRetry, generateTransactionCode, parsePdamNumber, PdamApiError } from "@/lib/pdam-api";
 import { logTransactionEventFireAndForget } from "@/lib/transaction-events";
 import { fireWebhook } from "@/lib/provider-webhook";
+import { creditLoketBalance, debitLoketBalance } from "@/lib/saldo-mutations";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export async function POST(request: Request) {
@@ -108,11 +109,7 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const [balRows] = await pool.execute(
-      `SELECT pulsa FROM lokets WHERE id = ? FOR UPDATE`,
-      [provider.loket_id]
-    );
-    const currentBalance = Number((balRows as RowDataPacket[])[0]?.pulsa ?? 0);
+    const providerLoketId = Number(provider.loket_id);
 
     // Inquiry to get actual amount
     const inquiryResult = await pdamInquiry(custId);
@@ -132,40 +129,71 @@ export async function POST(request: Request) {
       );
     }
 
-    if (currentBalance < grandTotal) {
-      return NextResponse.json(
-        {
-          success: false,
-          error_code: "INSUFFICIENT_BALANCE",
-          message: `Saldo provider tidak mencukupi. Sisa: ${currentBalance}, dibutuhkan: ${grandTotal}`,
-        },
-        { status: 402 }
-      );
-    }
-
-    // 6. Insert PENDING transaction
+    // 6. Insert PENDING transaction and reserve loket balance atomically.
     const transactionCode = generateTransactionCode();
-    const [insertResult] = await pool.execute(
-      `INSERT INTO provider_transactions 
-        (provider_id, provider_code, provider_ref, idempotency_key, transaction_type, cust_id,
-         status, request_payload, amount, admin_fee, total, transaction_code, ip_address, webhook_status)
-       VALUES (?, ?, ?, ?, 'payment', ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        provider.id,
-        provider.code,
-        parsed.provider_ref || null,
-        idempotencyKey,
-        custId,
-        body,
-        totalAmount,
-        adminFee,
-        grandTotal,
-        transactionCode,
-        clientIp,
-        provider.webhook_url ? "pending" : "not_required",
-      ]
-    );
-    const transactionId = (insertResult as ResultSetHeader).insertId;
+    let transactionId: number | bigint = 0;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [balRows] = await connection.query<RowDataPacket[]>(
+        `SELECT pulsa FROM lokets WHERE id = ? LIMIT 1 FOR UPDATE`,
+        [providerLoketId]
+      );
+      const currentBalance = Number(balRows[0]?.pulsa ?? 0);
+      if (currentBalance < grandTotal) {
+        await connection.rollback();
+        return NextResponse.json(
+          {
+            success: false,
+            error_code: "INSUFFICIENT_BALANCE",
+            message: `Saldo provider tidak mencukupi. Sisa: ${currentBalance}, dibutuhkan: ${grandTotal}`,
+          },
+          { status: 402 }
+        );
+      }
+
+      const [insertResult] = await connection.execute<ResultSetHeader>(
+        `INSERT INTO provider_transactions 
+          (provider_id, provider_code, provider_ref, idempotency_key, transaction_type, cust_id,
+           status, request_payload, amount, admin_fee, total, transaction_code, ip_address, webhook_status)
+         VALUES (?, ?, ?, ?, 'payment', ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          provider.id,
+          provider.code,
+          parsed.provider_ref || null,
+          idempotencyKey,
+          custId,
+          body,
+          totalAmount,
+          adminFee,
+          grandTotal,
+          transactionCode,
+          clientIp,
+          provider.webhook_url ? "pending" : "not_required",
+        ]
+      );
+      transactionId = insertResult.insertId;
+
+      const debit = await debitLoketBalance({ connection, loketId: providerLoketId, amount: grandTotal });
+      if (!debit.ok) {
+        await connection.rollback();
+        return NextResponse.json(
+          {
+            success: false,
+            error_code: "INSUFFICIENT_BALANCE",
+            message: `Saldo provider tidak mencukupi. Sisa: ${debit.balance ?? 0}, dibutuhkan: ${grandTotal}`,
+          },
+          { status: 402 }
+        );
+      }
+
+      await connection.commit();
+    } catch (error) {
+      try { await connection.rollback(); } catch { /* ignore */ }
+      throw error;
+    } finally {
+      connection.release();
+    }
 
     // 7. Process payment via PDAM
     try {
@@ -198,17 +226,12 @@ export async function POST(request: Request) {
         })),
       };
 
-      // 8. Update transaction to SUCCESS + deduct balance
+      // 8. Update transaction to SUCCESS. Balance was reserved before provider call.
       await pool.execute(
         `UPDATE provider_transactions 
          SET status = 'SUCCESS', response_payload = ?, duration_ms = ?, updated_at = NOW()
          WHERE id = ?`,
         [JSON.stringify(responseData), durationMs, transactionId]
-      );
-
-      await pool.execute(
-        `UPDATE lokets SET pulsa = pulsa - ? WHERE id = ?`,
-        [grandTotal, provider.loket_id]
       );
 
       // 9. Record in multi_payment_items for internal tracking
@@ -244,32 +267,53 @@ export async function POST(request: Request) {
       });
     } catch (payError) {
       const durationMs = Date.now() - startTime;
-      const errorCode = payError instanceof PdamApiError ? payError.code : "PAYMENT_FAILED";
+      const errorCode = payError instanceof PdamApiError ? payError.code : "LOCAL_POST_PROVIDER_ERROR";
       const errorMessage = payError instanceof Error ? payError.message : "Pembayaran gagal";
 
-      // Update transaction to FAILED
-      await pool.execute(
-        `UPDATE provider_transactions
-         SET status = 'FAILED', error_code = ?, error_message = ?, duration_ms = ?, updated_at = NOW()
-         WHERE id = ?`,
-        [errorCode, errorMessage, durationMs, transactionId]
-      );
+      const isAmbiguousProviderState = errorCode === "NETWORK_TIMEOUT" || errorCode === "NETWORK_ERROR" || errorCode === "LOCAL_POST_PROVIDER_ERROR";
+      if (isAmbiguousProviderState) {
+        await pool.execute(
+          `UPDATE provider_transactions
+           SET error_code = ?, error_message = ?, duration_ms = ?, updated_at = NOW()
+           WHERE id = ? AND status = 'PENDING'`,
+          [errorCode, errorMessage, durationMs, transactionId]
+        );
+      } else {
+        const failConn = await pool.getConnection();
+        try {
+          await failConn.beginTransaction();
+          await failConn.execute(
+            `UPDATE provider_transactions
+             SET status = 'FAILED', error_code = ?, error_message = ?, duration_ms = ?, updated_at = NOW()
+             WHERE id = ? AND status = 'PENDING'`,
+            [errorCode, errorMessage, durationMs, transactionId]
+          );
+          await creditLoketBalance({ connection: failConn, loketId: providerLoketId, amount: grandTotal });
+          await failConn.commit();
+        } catch (error) {
+          try { await failConn.rollback(); } catch { /* ignore */ }
+          throw error;
+        } finally {
+          failConn.release();
+        }
+      }
 
-      // Fire failure webhook
-      sendWebhookIfConfigured(provider, transactionId, {
-        event: "payment.failed",
-        idempotency_key: idempotencyKey,
-        provider_ref: parsed.provider_ref || null,
-        transaction_code: transactionCode,
-        cust_id: custId,
-        amount: totalAmount,
-        admin_fee: adminFee,
-        total: grandTotal,
-        status: "FAILED",
-        error_code: errorCode,
-        error_message: errorMessage,
-        timestamp: new Date().toISOString(),
-      });
+      if (!isAmbiguousProviderState) {
+        sendWebhookIfConfigured(provider, transactionId, {
+          event: "payment.failed",
+          idempotency_key: idempotencyKey,
+          provider_ref: parsed.provider_ref || null,
+          transaction_code: transactionCode,
+          cust_id: custId,
+          amount: totalAmount,
+          admin_fee: adminFee,
+          total: grandTotal,
+          status: "FAILED",
+          error_code: errorCode,
+          error_message: errorMessage,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       logTransactionEventFireAndForget({
         idempotencyKey,
@@ -282,13 +326,14 @@ export async function POST(request: Request) {
         severity: "ERROR",
       });
 
-      const status = payError instanceof PdamApiError && payError.code === "NETWORK_TIMEOUT" ? 504 : 422;
+      const status = isAmbiguousProviderState ? 202 : 422;
       return NextResponse.json(
         {
           success: false,
           error_code: errorCode,
           message: errorMessage,
           transaction_code: transactionCode,
+          status: isAmbiguousProviderState ? "PENDING" : "FAILED",
           duration_ms: durationMs,
         },
         { status }

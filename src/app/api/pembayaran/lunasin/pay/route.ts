@@ -8,6 +8,7 @@ import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { notifyTransactionFailed, notifyTransactionSuccess, notifyTransactionPartial, notifyLowBalance } from "@/lib/notifications";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
+import { debitLoketBalance } from "@/lib/saldo-mutations";
 
 interface LunasinBill {
   idpel: string;
@@ -373,14 +374,10 @@ export async function POST(req: NextRequest) {
           const providerRpAdmin = Number(providerData.rp_admin ?? 0);
           const billTotal = providerRpTotal > 0 ? providerRpTotal : bill.total;
           try {
-            const [deductRes] = await pool.execute<ResultSetHeader>(
-              "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ? AND pulsa >= ?",
-              [billTotal, loketCode, billTotal]
-            );
-            if (deductRes.affectedRows === 0) {
+            const debit = await debitLoketBalance({ loketCode, amount: billTotal, allowNegative: true });
+            if (!debit.ok || debit.forced) {
               // Saldo tak mencukupi (kemungkinan race) — provider sudah memotong,
               // paksa potong & catat anomali agar bisa direkonsiliasi keuangan.
-              await pool.execute("UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?", [billTotal, loketCode]);
               await logTransactionEventSafe({
                 idempotencyKey: idempotencyKeyTrimmed,
                 transactionCode,
@@ -391,7 +388,7 @@ export async function POST(req: NextRequest) {
                 loketCode,
                 custId: bill.idpel,
                 message: `Saldo loket ${loketCode} menjadi negatif setelah payment success (potong Rp ${billTotal.toLocaleString("id-ID")})`,
-                payload: { billTotal },
+                payload: { billTotal, balance: debit.balance, forced: Boolean(debit.forced) },
               });
             }
             try {

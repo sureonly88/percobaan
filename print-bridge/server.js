@@ -46,8 +46,11 @@ const config = {
   printerName:   'EPSON LX-310',   // → Windows Settings > Printers & Scanners: exact name
   printMode:     'ps',             // 'ps' (PowerShell WinSpooler) | 'copy' (copy /b to port)
   portMapping:   'LPT3:',          // Used only when printMode = 'copy'
-  columns:       80,
-  feedLines:     4,
+  columns:       40,
+  feedLines:     1,
+  formFeed:      false,          // true = akhiri tiap lembar dengan FF, false = pad LF
+  pageLines:     66,             // tinggi 1 lembar continuous form @ 6 LPI (11" = 66, 5.5" = 33)
+  topMargin:     0,              // baris kosong di awal tiap lembar
 };
 
 // Receipt template (user-editable via UI). Default = nilai legacy formatter.
@@ -190,7 +193,8 @@ function printViaCopy(escpData, portMapping, cb) {
   const tmpFile = path.join(os.tmpdir(), `pedami_${Date.now()}.prn`);
   fs.writeFile(tmpFile, escpData, 'binary', (err) => {
     if (err) return cb(err);
-    exec(`copy /b "${tmpFile}" ${portMapping}`,
+    const destination = String(portMapping || '').replace(/"/g, '');
+    exec(`copy /b "${tmpFile}" "${destination}"`,
       { shell: 'cmd.exe', timeout: 10000 },
       (err2, stdout, stderr) => {
         setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch {} }, 3000);
@@ -298,6 +302,27 @@ function printRaw(escpData, cb) {
   } else {
     printViaPowershell(escpData, config.printerName, cb);
   }
+}
+
+function buildEscp(data) {
+  return formatEscp(data, {
+    columns:   config.columns,
+    formFeed:  config.formFeed,
+    pageLines: config.pageLines,
+    topMargin: config.topMargin,
+    template,
+  });
+}
+
+/**
+ * Job cetak dijalankan satu per satu. Tanpa antrian, request /print yang
+ * datang beruntun (cetak ulang massal) bisa sampai ke spooler tidak urut.
+ */
+let printChain = Promise.resolve();
+function printRawQueued(escpData, cb) {
+  printChain = printChain.then(() => new Promise((resolve) => {
+    printRaw(escpData, (err) => { resolve(); cb(err); });
+  }));
 }
 
 // ── Printer discovery ─────────────────────────────────────────────────────────
@@ -445,13 +470,9 @@ function requestHandler(req, res) {
     readBody(req, (err, data) => {
       if (err) return sendJson(res, 400, { ok: false, error: err.message });
 
-      const escpData = formatEscp(data, {
-        columns:  config.columns,
-        feedLines: config.feedLines,
-        template,
-      });
+      const escpData = buildEscp(data);
 
-      printRaw(escpData, (perr) => {
+      printRawQueued(escpData, (perr) => {
         if (perr) {
           console.error('[Bridge] Print error:', perr.message);
           return sendJson(res, 500, { ok: false, error: perr.message });
@@ -482,7 +503,7 @@ function requestHandler(req, res) {
   if (req.method === 'POST' && req.url === '/config') {
     readBody(req, (err, body) => {
       if (err) return sendJson(res, 400, { ok: false, error: err.message });
-      const allowed = ['printerName', 'printMode', 'portMapping', 'columns', 'feedLines'];
+      const allowed = ['printerName', 'printMode', 'portMapping', 'columns', 'feedLines', 'formFeed', 'pageLines', 'topMargin'];
       for (const k of allowed) {
         if (body[k] !== undefined) config[k] = body[k];
       }
@@ -520,9 +541,10 @@ function requestHandler(req, res) {
       if (err) return sendJson(res, 400, { ok: false, error: err.message });
       const previewTemplate = body.template ? { ...template, ...body.template } : template;
       const text = formatPlainText(body.data || body, {
-        columns:  config.columns,
-        feedLines: 0,
-        template: previewTemplate,
+        columns:   config.columns,
+        pageLines: config.pageLines,
+        topMargin: config.topMargin,
+        template:  previewTemplate,
       });
       sendJson(res, 200, { ok: true, text });
     });
@@ -543,12 +565,8 @@ function requestHandler(req, res) {
       totalTagihan: 50000, totalAdmin: 2500, totalBayar: 52500,
       tunai: 60000, kembalian: 7500,
     };
-    const escpData = formatEscp(sample, {
-      columns:  config.columns,
-      feedLines: config.feedLines,
-      template,
-    });
-    printRaw(escpData, (perr) => {
+    const escpData = buildEscp(sample);
+    printRawQueued(escpData, (perr) => {
       if (perr) return sendJson(res, 500, { ok: false, error: perr.message });
       sendJson(res, 200, { ok: true, printer: config.printerName, mode: config.printMode });
     });

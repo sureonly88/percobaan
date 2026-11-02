@@ -1,0 +1,17 @@
+[Bridge] TLS cert ditemukan — mode HTTPS aktif
+[Bridge] Config loaded from config.json
+============================================================
+  Pedami Print Bridge
+============================================================
+  URL     : https://127.0.0.1:6789
+  Mode TLS: HTTPS ✔ (aman dari app HTTPS)
+  Printer : EPSON LX-310
+  Mode    : copy → \\localhost\EPSONLX
+============================================================
+  Buka https://localhost:6789 di browser → klik "Lanjutkan" untuk trust cert.
+
+  Tekan Ctrl+C untuk berhenti.
+
+[Bridge] 14.34.36 — Printed OK: DEMO TEST (2 bill)
+[Bridge] 14.36.17 — Printed OK: LKT-001 admin (1 bill)
+[Bridge] 14.36.42 — Printed OK: LKT-001 admin (1 bill)

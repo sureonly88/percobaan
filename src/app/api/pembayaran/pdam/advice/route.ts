@@ -6,6 +6,7 @@ import { CircuitOpenError } from "@/lib/circuit-breaker";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { logTransactionEventSafe, logTransactionEventFireAndForget } from "@/lib/transaction-events";
+import { debitLoketBalance } from "@/lib/saldo-mutations";
 
 // ── shared types ─────────────────────────────────────────────────────────────
 interface ItemRow extends RowDataPacket {
@@ -148,10 +149,21 @@ async function processAdviceTransaction(
   }
 
   if (totalDeduct > 0) {
-    await pool.execute(
-      "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?",
-      [totalDeduct, loketCode]
-    );
+    const debit = await debitLoketBalance({ loketCode, amount: totalDeduct, allowNegative: true });
+    if (!debit.ok || debit.forced) {
+      logTransactionEventFireAndForget({
+        idempotencyKey,
+        transactionCode,
+        provider: "PDAM",
+        eventType: debit.forced ? "LOKET_BALANCE_NEGATIVE" : "LOKET_BALANCE_DEBIT_FAILED",
+        severity: "ERROR",
+        username,
+        loketCode,
+        custId: idpel,
+        message: `Mutasi saldo loket bermasalah setelah advice success (potong Rp ${totalDeduct.toLocaleString("id-ID")})`,
+        payload: { totalDeduct, balance: debit.balance, forced: Boolean(debit.forced) },
+      });
+    }
   }
 
   // Update parent request if all items done

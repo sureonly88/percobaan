@@ -6,6 +6,7 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { notifyLowBalance } from "@/lib/notifications";
+import { debitLoketBalance } from "@/lib/saldo-mutations";
 
 const MAX_ADVICE_ATTEMPTS = 3;
 
@@ -572,17 +573,10 @@ export async function POST(req: NextRequest) {
             const providerRpTotal = Number((result.data as Record<string, unknown>)?.rp_total ?? 0);
             const txTotal = providerRpTotal > 0 ? providerRpTotal : Number(txRow.item_total || 0);
 
-            const [deductRes] = await pool.execute<ResultSetHeader>(
-              "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ? AND pulsa >= ?",
-              [txTotal, txLoketCode, txTotal]
-            );
-            if (deductRes.affectedRows === 0) {
+            const debit = await debitLoketBalance({ loketCode: txLoketCode, amount: txTotal, allowNegative: true });
+            if (!debit.ok || debit.forced) {
               // Saldo tak mencukupi — provider sudah memotong, paksa potong &
               // catat anomali agar bisa direkonsiliasi keuangan.
-              await pool.execute(
-                "UPDATE lokets SET pulsa = pulsa - ? WHERE loket_code = ?",
-                [txTotal, txLoketCode]
-              );
               await logTransactionEventSafe({
                 idempotencyKey: relatedIdempotencyKey,
                 transactionCode,
@@ -593,7 +587,7 @@ export async function POST(req: NextRequest) {
                 loketCode: txLoketCode,
                 custId: idpel.trim(),
                 message: `Saldo loket ${txLoketCode} menjadi negatif setelah advice success (potong Rp ${txTotal.toLocaleString("id-ID")})`,
-                payload: { txTotal },
+                payload: { txTotal, balance: debit.balance, forced: Boolean(debit.forced) },
               });
             }
 

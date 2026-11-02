@@ -3,6 +3,7 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import pool from "@/lib/db";
 import { verifySignature, mapMidtransStatus } from "@/lib/midtrans";
 import { createNotificationSafe } from "@/lib/notifications";
+import { creditLoketBalance } from "@/lib/saldo-mutations";
 
 /**
  * POST /api/topup/webhook
@@ -39,62 +40,60 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
     }
 
-    // 2. Find the topup request
-    const [rows] = await pool.query<RowDataPacket[]>(
-      "SELECT id, loket_code, username, nominal, status FROM topup_requests WHERE gateway_order_id = ? LIMIT 1",
-      [order_id]
-    );
-
-    if (rows.length === 0) {
-      // Not a topup order — ignore (may be other payment)
-      return NextResponse.json({ message: "Order not found, ignored" });
-    }
-
-    const topup = rows[0];
     const newStatus = mapMidtransStatus(transaction_status, fraud_status);
 
-    // 3. Idempotency: skip if already settled
-    if (topup.status === "SUCCESS" || topup.status === "FAILED") {
-      return NextResponse.json({ message: "Already processed" });
-    }
+    let creditedTopup: { username: string; loket_code: string; nominal: number } | null = null;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
 
-    // 4. Update topup record
-    const updateFields: string[] = [
-      "status = ?",
-      "payment_method = ?",
-      "gateway_tx_id = ?",
-      "webhook_payload = ?",
-      "updated_at = NOW()",
-    ];
-    const updateParams: unknown[] = [
-      newStatus,
-      payment_type || null,
-      transaction_id || null,
-      JSON.stringify(body),
-    ];
-
-    if (newStatus === "SUCCESS") {
-      updateFields.push("paid_at = NOW()");
-    }
-
-    await pool.execute<ResultSetHeader>(
-      `UPDATE topup_requests SET ${updateFields.join(", ")} WHERE id = ?`,
-      [...updateParams, topup.id]
-    );
-
-    // 5. If SUCCESS, credit the loket saldo
-    if (newStatus === "SUCCESS") {
-      await pool.execute(
-        "UPDATE lokets SET pulsa = pulsa + ? WHERE loket_code = ?",
-        [topup.nominal, topup.loket_code]
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT id, loket_code, username, nominal, status FROM topup_requests WHERE gateway_order_id = ? LIMIT 1 FOR UPDATE",
+        [order_id]
       );
 
-      // Insert into request_saldo for audit trail
-      const now = new Date();
-      const saldoRequestCode = `TOPUP-AUTO-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      if (rows.length === 0) {
+        await connection.rollback();
+        return NextResponse.json({ message: "Order not found, ignored" });
+      }
 
-      try {
-        await pool.execute<ResultSetHeader>(
+      const topup = rows[0];
+      const nominal = Number(topup.nominal || 0);
+      const webhookAmount = Math.round(Number(gross_amount || 0));
+      if (newStatus === "SUCCESS" && webhookAmount !== nominal) {
+        await connection.rollback();
+        return NextResponse.json({ error: "Nominal webhook tidak sesuai topup" }, { status: 400 });
+      }
+
+      if (topup.status === "SUCCESS" || topup.status === "FAILED") {
+        await connection.rollback();
+        return NextResponse.json({ message: "Already processed" });
+      }
+
+      const updateFields: string[] = [
+        "status = ?",
+        "payment_method = ?",
+        "gateway_tx_id = ?",
+        "webhook_payload = ?",
+        "updated_at = NOW()",
+      ];
+      const updateParams: unknown[] = [newStatus, payment_type || null, transaction_id || null, JSON.stringify(body)];
+
+      if (newStatus === "SUCCESS") updateFields.push("paid_at = NOW()");
+
+      await connection.execute<ResultSetHeader>(
+        `UPDATE topup_requests SET ${updateFields.join(", ")} WHERE id = ? AND status NOT IN ('SUCCESS','FAILED')`,
+        [...updateParams, topup.id]
+      );
+
+      if (newStatus === "SUCCESS") {
+        const credit = await creditLoketBalance({ connection, loketCode: String(topup.loket_code), amount: nominal });
+        if (!credit.ok) throw new Error("Gagal kredit saldo loket topup");
+
+        const now = new Date();
+        const saldoRequestCode = `TOPUP-AUTO-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+        await connection.execute<ResultSetHeader>(
           `INSERT INTO request_saldo 
            (request_code, username, kode_loket, request_saldo, tgl_request, ket_request,
             is_verifikasi, verifikasi_saldo, username_verifikasi, tgl_verifikasi,
@@ -104,33 +103,41 @@ export async function POST(request: NextRequest) {
             saldoRequestCode,
             topup.username,
             topup.loket_code,
-            topup.nominal,
+            nominal,
             `Top-up otomatis via Midtrans (${payment_type || "online"}) - Order: ${order_id}`,
-            topup.nominal,
+            nominal,
             `Diverifikasi otomatis oleh payment gateway`,
           ]
         );
-      } catch (e) {
-        console.error("[topup/webhook] Failed to insert request_saldo audit:", e);
-        // Non-critical — saldo already updated
+
+        creditedTopup = { username: String(topup.username), loket_code: String(topup.loket_code), nominal };
       }
 
-      // Notify the user
+      await connection.commit();
+    } catch (error) {
+      try { await connection.rollback(); } catch { /* ignore */ }
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    // 5. If SUCCESS, notify after DB commit
+    if (creditedTopup) {
       try {
         await createNotificationSafe({
           recipientRole: "kasir",
-          recipientUsername: topup.username,
+          recipientUsername: creditedTopup.username,
           category: "saldo",
           severity: "info",
           title: "Top-up Saldo Berhasil",
-          message: `Top-up saldo Rp ${Number(topup.nominal).toLocaleString("id-ID")} berhasil via ${payment_type || "pembayaran online"}.`,
+          message: `Top-up saldo Rp ${creditedTopup.nominal.toLocaleString("id-ID")} berhasil via ${payment_type || "pembayaran online"}.`,
           link: "/saldo",
         });
       } catch {
         // Non-critical
       }
 
-      console.log(`[topup/webhook] SUCCESS: ${order_id} → +${topup.nominal} for ${topup.loket_code}`);
+      console.log(`[topup/webhook] SUCCESS: ${order_id} → +${creditedTopup.nominal} for ${creditedTopup.loket_code}`);
     }
 
     return NextResponse.json({ message: "OK", status: newStatus });
