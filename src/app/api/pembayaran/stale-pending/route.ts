@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
 import pool from "@/lib/db";
+import { assessProviderContact, reconcileTransactionHold } from "@/lib/transaction-balance";
+import { getTrustedClientIp } from "@/lib/request-client";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { auditLog } from "@/lib/audit-log";
@@ -44,7 +46,8 @@ export async function GET(req: NextRequest) {
     return forbidden("Hanya admin dan supervisor yang dapat mengakses halaman ini");
   }
 
-  const staleMinutes = Math.max(1, Math.min(120, Number(req.nextUrl.searchParams.get("staleMinutes") || "10")));
+  const staleParam = Number(req.nextUrl.searchParams.get("staleMinutes") || "10");
+  const staleMinutes = Number.isFinite(staleParam) ? Math.max(1, Math.min(120, Math.floor(staleParam))) : 10;
   const provider = (req.nextUrl.searchParams.get("provider") || "ALL").toUpperCase();
   const search = (req.nextUrl.searchParams.get("search") || "").trim();
 
@@ -111,7 +114,13 @@ export async function GET(req: NextRequest) {
       staleMinutes: Math.floor((Date.now() - new Date(row.created_at).getTime()) / 60_000),
     }));
 
-    return NextResponse.json({ items, total: items.length, staleMinutes });
+    // Info per transaksi: saldo ditahan & apakah request mungkin sudah sampai provider
+    const contact = await assessProviderContact(rows.map((r) => String(r.transaction_code || "")));
+    const transactions = Object.fromEntries(
+      Array.from(contact.entries()).map(([code, info]) => [code, info])
+    );
+
+    return NextResponse.json({ items, total: items.length, staleMinutes, transactions });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Gagal mengambil data stale pending";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -119,10 +128,39 @@ export async function GET(req: NextRequest) {
 }
 
 // ── PATCH /api/pembayaran/stale-pending ───────────────────────────────────────
-// Promote item ke PENDING_ADVICE (supaya muncul di menu Advice Manual) atau
-// batalkan ke FAILED. Beroperasi per-transactionCode (semua item dalam 1 trx).
+// Selesaikan transaksi yang terhenti di status PENDING (per transactionCode):
+//   - promote : → PENDING_ADVICE (saldo tetap ditahan, cek lewat advice)
+//   - review  : → PENDING_REVIEW (saldo tetap ditahan, keputusan admin + persetujuan 2 orang)
+//   - cancel  : → FAILED + saldo dikembalikan. HANYA bila request terbukti belum sampai
+//               ke provider. Jika mungkin sudah, wajib lewat review (tidak boleh 1 orang
+//               mengembalikan saldo untuk transaksi yang statusnya tidak pasti).
 //
-// Body: { transactionCode: string, action: "promote" | "cancel" }
+// Body: { transactionCode: string, action: "promote" | "review" | "cancel" }
+const ACTIONS = {
+  promote: {
+    status: "PENDING_ADVICE",
+    errorCode: "STALE_PENDING_PROMOTED",
+    errorMessage: "Dipromosikan ke PENDING_ADVICE oleh admin karena transaksi terhenti",
+    eventType: "STALE_PENDING_PROMOTED",
+    auditAction: "STALE_PENDING_PROMOTE",
+  },
+  review: {
+    status: "PENDING_REVIEW",
+    errorCode: "STALE_PENDING_REVIEW",
+    errorMessage: "Transaksi terhenti, mungkin sudah sampai ke provider — menunggu review admin",
+    eventType: "STALE_PENDING_SENT_TO_REVIEW",
+    auditAction: "STALE_PENDING_REVIEW",
+  },
+  cancel: {
+    status: "FAILED",
+    errorCode: "STALE_PENDING_CANCELLED",
+    errorMessage: "Dibatalkan oleh admin: transaksi terhenti sebelum dikirim ke provider",
+    eventType: "STALE_PENDING_CANCELLED",
+    auditAction: "STALE_PENDING_CANCEL",
+  },
+} as const;
+type StaleAction = keyof typeof ACTIONS;
+
 export async function PATCH(req: NextRequest) {
   const token = await getAuthToken(req);
   if (!token) return unauthorized();
@@ -131,108 +169,130 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = (await req.json()) as { transactionCode?: string; action?: string };
-  const { transactionCode, action } = body;
+  const transactionCode = String(body.transactionCode || "").trim();
+  const action = body.action as StaleAction;
 
   if (!transactionCode || !action) {
     return NextResponse.json({ error: "transactionCode dan action wajib diisi" }, { status: 400 });
   }
-  if (action !== "promote" && action !== "cancel") {
-    return NextResponse.json({ error: "action harus 'promote' atau 'cancel'" }, { status: 400 });
+  if (!(action in ACTIONS)) {
+    return NextResponse.json({ error: "action harus 'promote', 'review', atau 'cancel'" }, { status: 400 });
   }
-
+  const spec = ACTIONS[action];
   const username = String(token.username || token.name || "");
 
+  const contact = (await assessProviderContact([transactionCode])).get(transactionCode);
+  if (action === "cancel" && contact?.providerMayHaveBeenContacted !== false) {
+    return NextResponse.json(
+      {
+        error:
+          "Transaksi ini mungkin sudah sampai ke provider, jadi tidak bisa dibatalkan langsung. " +
+          "Gunakan Promote ke Advice atau Kirim ke Review (pengembalian saldo perlu persetujuan user lain).",
+        code: "PROVIDER_MAY_HAVE_PROCESSED",
+      },
+      { status: 409 }
+    );
+  }
+
+  const conn = await pool.getConnection();
+  let affectedRows = 0;
+  let released = 0;
+  let idempotencyKey = "";
+  let loketCode = "";
+  let provider = "";
   try {
-    // Ambil data item yang akan diubah (hanya yang masih PENDING)
-    const [rows] = await pool.query<StaleItemRow[]>(
-      `SELECT mpi.id, mpi.item_code, mpi.customer_id, mpi.provider,
-              mpi.multi_payment_id, mpr.idempotency_key, mpr.loket_code
+    await conn.beginTransaction();
+    const [rows] = await conn.query<StaleItemRow[]>(
+      `SELECT mpi.id, mpi.provider, mpr.idempotency_key, mpr.loket_code
          FROM multi_payment_items mpi
          JOIN multi_payment_requests mpr ON mpr.id = mpi.multi_payment_id
-        WHERE mpi.transaction_code = ? AND mpi.status = 'PENDING'`,
+        WHERE mpi.transaction_code = ? AND mpi.status = 'PENDING'
+        FOR UPDATE`,
       [transactionCode]
     );
-
     if (rows.length === 0) {
+      await conn.rollback();
       return NextResponse.json(
         { error: "Tidak ada item PENDING untuk transaction code ini (mungkin sudah diperbarui)" },
         { status: 404 }
       );
     }
+    idempotencyKey = rows[0].idempotency_key;
+    loketCode = rows[0].loket_code;
+    provider = rows[0].provider;
 
-    const idempotencyKey = rows[0].idempotency_key;
-    const loketCode = rows[0].loket_code;
-    const provider = rows[0].provider;
+    const [result] = await conn.execute<ResultSetHeader>(
+      `UPDATE multi_payment_items
+          SET status = ?,
+              provider_error_code = ?,
+              provider_error_message = ?,
+              metadata_json = JSON_SET(IFNULL(metadata_json, '{}'), '$.advice_tanggal', ?),
+              failed_at = IF(? = 'FAILED', NOW(), failed_at)
+        WHERE transaction_code = ? AND status = 'PENDING'`,
+      [spec.status, spec.errorCode, spec.errorMessage, new Date().toISOString().slice(0, 10), spec.status, transactionCode]
+    );
+    affectedRows = result.affectedRows;
 
-    let result: ResultSetHeader;
-    if (action === "promote") {
-      const tglTransaksi = new Date().toISOString().slice(0, 10);
-      [result] = await pool.execute<ResultSetHeader>(
-        `UPDATE multi_payment_items
-            SET status = 'PENDING_ADVICE',
-                provider_error_code = 'STALE_PENDING_PROMOTED',
-                provider_error_message = 'Dipromosikan ke PENDING_ADVICE oleh admin karena transaksi terhenti',
-                metadata_json = JSON_SET(IFNULL(metadata_json, '{}'), '$.advice_tanggal', ?)
-          WHERE transaction_code = ? AND status = 'PENDING'`,
-        [tglTransaksi, transactionCode]
-      );
-    } else {
-      [result] = await pool.execute<ResultSetHeader>(
-        `UPDATE multi_payment_items
-            SET status = 'FAILED',
-                provider_error_code = 'STALE_PENDING_CANCELLED',
-                provider_error_message = 'Dibatalkan oleh admin karena transaksi terhenti (zombie row)',
-                failed_at = NOW()
-          WHERE transaction_code = ? AND status = 'PENDING'`,
-        [transactionCode]
-      );
+    // promote/review: hold tetap ditahan. cancel: lepas hold (biasanya 0 karena provider
+    // belum dihubungi berarti hold belum dibuat) — dalam DB transaction yang sama.
+    if (action === "cancel") {
+      const settle = await reconcileTransactionHold(transactionCode, {
+        connection: conn,
+        actor: username,
+        note: "Transaksi terhenti dibatalkan admin (belum dikirim ke provider)",
+      });
+      released = Math.max(0, -(settle?.adjusted ?? 0));
     }
-
-    if (result.affectedRows === 0) {
-      return NextResponse.json({ error: "Tidak ada baris yang berhasil diperbarui" }, { status: 409 });
-    }
-
-    await logTransactionEventSafe({
-      idempotencyKey,
-      transactionCode,
-      provider: provider as "PDAM" | "LUNASIN",
-      eventType: action === "promote" ? "STALE_PENDING_PROMOTED" : "STALE_PENDING_CANCELLED",
-      severity: "WARN",
-      username,
-      loketCode,
-      message:
-        action === "promote"
-          ? `Admin mempromosikan ${result.affectedRows} item PENDING → PENDING_ADVICE (transaksi terhenti)`
-          : `Admin membatalkan ${result.affectedRows} item PENDING → FAILED (transaksi terhenti)`,
-      payload: { transactionCode, action, affectedRows: result.affectedRows },
-    });
-
-    await auditLog({
-      actorType: "user",
-      actorUsername: username || null,
-      actorRole: token.role ? String(token.role) : null,
-      actorIp: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || null,
-      action: action === "promote" ? "STALE_PENDING_PROMOTE" : "STALE_PENDING_CANCEL",
-      entityType: "multi_payment_item",
-      entityId: transactionCode,
-      before: { status: "PENDING" },
-      after: action === "promote"
-        ? { status: "PENDING_ADVICE", errorCode: "STALE_PENDING_PROMOTED" }
-        : { status: "FAILED", errorCode: "STALE_PENDING_CANCELLED" },
-      context: { idempotencyKey, loketCode, provider, affectedRows: result.affectedRows },
-    });
-
-    return NextResponse.json({
-      success: true,
-      affectedRows: result.affectedRows,
-      action,
-      message:
-        action === "promote"
-          ? `${result.affectedRows} item dipromosikan ke PENDING_ADVICE — sekarang bisa diproses via menu Advice PDAM`
-          : `${result.affectedRows} item dibatalkan (FAILED)`,
-    });
+    await conn.commit();
   } catch (error: unknown) {
+    try {
+      await conn.rollback();
+    } catch {
+      /* ignore */
+    }
     const message = error instanceof Error ? error.message : "Gagal memperbarui status";
     return NextResponse.json({ error: message }, { status: 500 });
+  } finally {
+    conn.release();
   }
+
+  const label = { promote: "dipromosikan ke PENDING_ADVICE", review: "dikirim ke Review Transaksi", cancel: "dibatalkan (FAILED)" }[action];
+
+  await logTransactionEventSafe({
+    idempotencyKey,
+    transactionCode,
+    provider: provider as "PDAM" | "LUNASIN",
+    eventType: spec.eventType,
+    severity: "WARN",
+    username,
+    loketCode,
+    message: `Admin: ${affectedRows} item PENDING ${label} (transaksi terhenti)`,
+    payload: { transactionCode, action, affectedRows, released, contact },
+  });
+
+  await auditLog({
+    actorType: "user",
+    actorUsername: username || null,
+    actorRole: token.role ? String(token.role) : null,
+    actorIp: getTrustedClientIp(req),
+    action: spec.auditAction,
+    entityType: "multi_payment_item",
+    entityId: transactionCode,
+    before: { status: "PENDING" },
+    after: { status: spec.status, errorCode: spec.errorCode, released },
+    context: { idempotencyKey, loketCode, provider, affectedRows, providerContact: contact?.reason ?? null },
+  });
+
+  return NextResponse.json({
+    success: true,
+    affectedRows,
+    action,
+    released,
+    message:
+      action === "promote"
+        ? `${affectedRows} item dipromosikan ke PENDING_ADVICE — proses lewat menu Advice PDAM/Lunasin`
+        : action === "review"
+          ? `${affectedRows} item dikirim ke Review Transaksi — saldo tetap ditahan sampai diputuskan`
+          : `${affectedRows} item dibatalkan (FAILED)${released > 0 ? `, saldo Rp ${released.toLocaleString("id-ID")} dikembalikan` : ""}`,
+  });
 }

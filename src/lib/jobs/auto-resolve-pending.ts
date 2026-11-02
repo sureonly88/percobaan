@@ -5,8 +5,10 @@
  *   - Stale PENDING > N menit (default 15) di-PROMOTE menjadi PENDING_ADVICE
  *   - Status PENDING_ADVICE memungkinkan flow advice manual / advice-lunasin
  *     untuk reconcile dengan provider tanpa risiko double-charge
- *   - Setelah `maxAdviceAttempts` (default 6) percobaan, item dipindah ke
- *     FAILED otomatis (auto-reverse) supaya tidak menggantung selamanya
+ *   - Setelah `maxAdviceAttempts` (default ADVICE_MAX_ATTEMPTS, 3) percobaan / batas umur, item dipindah
+ *     ke PENDING_REVIEW — BUKAN auto-FAILED. Status di provider tidak pasti, jadi
+ *     saldo tetap ditahan sampai admin memutuskan di menu Review Transaksi
+ *     (pengembalian saldo wajib disetujui user lain).
  *
  * Semua aksi auto dicatat di audit_logs (actorType=cron).
  */
@@ -14,6 +16,7 @@
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
 import pool from "@/lib/db";
 import { auditLog } from "@/lib/audit-log";
+import { MAX_ADVICE_ATTEMPTS } from "@/lib/advice-policy";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 
 export interface AutoResolveOptions {
@@ -21,7 +24,7 @@ export interface AutoResolveOptions {
   staleMinutes?: number;
   /** ambang umur PENDING_ADVICE sebelum dianggap gagal definitif (menit) */
   exhaustedMinutes?: number;
-  /** maksimum advice_attempts sebelum auto-fail */
+  /** maksimum advice_attempts sebelum dikirim ke antrean review */
   maxAdviceAttempts?: number;
   /** batas item per run (defensive cap) */
   maxItems?: number;
@@ -29,7 +32,8 @@ export interface AutoResolveOptions {
 
 export interface AutoResolveSummary {
   promoted: number;
-  autoFailed: number;
+  /** item PENDING_ADVICE yang dikirim ke antrean review (PENDING_REVIEW) */
+  sentToReview: number;
   scannedStale: number;
   scannedExhausted: number;
   durationMs: number;
@@ -57,7 +61,7 @@ export async function runAutoResolvePending(
 ): Promise<AutoResolveSummary> {
   const staleMinutes = Math.max(5, opts.staleMinutes ?? 15);
   const exhaustedMinutes = Math.max(staleMinutes * 2, opts.exhaustedMinutes ?? 60);
-  const maxAttempts = Math.max(3, opts.maxAdviceAttempts ?? 6);
+  const maxAttempts = Math.max(1, opts.maxAdviceAttempts ?? MAX_ADVICE_ATTEMPTS);
   const maxItems = Math.max(10, Math.min(1000, opts.maxItems ?? 200));
   const t0 = Date.now();
 
@@ -122,7 +126,7 @@ export async function runAutoResolvePending(
     }
   }
 
-  // ─── 2. AUTO-FAIL exhausted PENDING_ADVICE ─────────────────────────────────
+  // ─── 2. Exhausted PENDING_ADVICE → antrean review admin ───────────────────
   const [exhausted] = await pool.query<ItemRow[]>(
     `SELECT mpi.id, mpi.transaction_code, mpi.item_code, mpi.provider,
             mpi.customer_id, mpi.amount, mpi.admin_fee, mpi.total,
@@ -138,29 +142,29 @@ export async function runAutoResolvePending(
     [maxAttempts, exhaustedMinutes, maxItems]
   );
 
-  let autoFailed = 0;
-  const trxCodesFailed = new Set<string>();
+  let sentToReview = 0;
+  const trxCodesReviewed = new Set<string>();
 
   for (const item of exhausted) {
     if (!item.transaction_code) continue;
-    if (trxCodesFailed.has(item.transaction_code)) continue;
-    trxCodesFailed.add(item.transaction_code);
+    if (trxCodesReviewed.has(item.transaction_code)) continue;
+    trxCodesReviewed.add(item.transaction_code);
 
+    // Saldo TIDAK dilepas di sini — hold tetap ditahan sampai keputusan review.
     const [updRes] = await pool.execute<ResultSetHeader>(
       `UPDATE multi_payment_items
-          SET status = 'FAILED',
-              provider_error_code = 'AUTO_REVERSED',
-              provider_error_message = 'Auto-reversed: advice habis (attempts atau timeout) tanpa konfirmasi sukses dari provider',
-              failed_at = NOW()
+          SET status = 'PENDING_REVIEW',
+              provider_error_code = 'ADVICE_EXHAUSTED',
+              provider_error_message = 'Advice habis tanpa konfirmasi dari provider — menunggu review admin'
         WHERE transaction_code = ? AND status = 'PENDING_ADVICE'`,
       [item.transaction_code]
     );
     if (updRes.affectedRows > 0) {
-      autoFailed += updRes.affectedRows;
+      sentToReview += updRes.affectedRows;
       await auditLog({
         actorType: "cron",
         actorUsername: "system:auto-resolve",
-        action: "ADVICE_AUTO_REVERSE",
+        action: "ADVICE_SENT_TO_REVIEW",
         entityType: "multi_payment_item",
         entityId: item.transaction_code,
         before: {
@@ -168,7 +172,7 @@ export async function runAutoResolvePending(
           adviceAttempts: item.advice_attempts,
           ageMinutes: ageMinutes(item.created_at),
         },
-        after: { status: "FAILED", reason: "AUTO_REVERSED" },
+        after: { status: "PENDING_REVIEW", reason: "ADVICE_EXHAUSTED" },
         context: {
           provider: item.provider,
           loketCode: item.loket_code,
@@ -180,11 +184,11 @@ export async function runAutoResolvePending(
         idempotencyKey: item.idempotency_key,
         transactionCode: item.transaction_code,
         provider: item.provider,
-        eventType: "ADVICE_AUTO_REVERSED",
-        severity: "ERROR",
+        eventType: "ADVICE_SENT_TO_REVIEW",
+        severity: "WARN",
         loketCode: item.loket_code,
         custId: item.customer_id,
-        message: `Auto-reversed setelah ${item.advice_attempts} attempts / ${ageMinutes(item.created_at)}m`,
+        message: `Dikirim ke review admin setelah ${item.advice_attempts} attempts / ${ageMinutes(item.created_at)}m`,
         payload: { adviceAttempts: item.advice_attempts },
       });
     }
@@ -192,7 +196,7 @@ export async function runAutoResolvePending(
 
   return {
     promoted,
-    autoFailed,
+    sentToReview,
     scannedStale: staleItems.length,
     scannedExhausted: exhausted.length,
     durationMs: Date.now() - t0,

@@ -6,7 +6,8 @@ import { CircuitOpenError } from "@/lib/circuit-breaker";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { logTransactionEventSafe, logTransactionEventFireAndForget } from "@/lib/transaction-events";
-import { debitLoketBalance } from "@/lib/saldo-mutations";
+import { reconcileTransactionHold } from "@/lib/transaction-balance";
+import { sendToReviewIfAdviceExhausted } from "@/lib/advice-policy";
 
 // ── shared types ─────────────────────────────────────────────────────────────
 interface ItemRow extends RowDataPacket {
@@ -48,7 +49,7 @@ async function processAdviceTransaction(
 
   // Increment attempt counter before calling
   await pool.execute(
-    "UPDATE multi_payment_items SET advice_attempts = advice_attempts + 1 WHERE transaction_code = ? AND status = 'PENDING_ADVICE'",
+    "UPDATE multi_payment_items SET advice_attempts = advice_attempts + 1 WHERE transaction_code = ? AND status IN ('PENDING_ADVICE', 'PENDING_REVIEW')",
     [transactionCode]
   );
 
@@ -79,6 +80,8 @@ async function processAdviceTransaction(
       message: msg,
       payload: { idpel, tanggal },
     });
+    // Advice gagal dihubungi juga dihitung; bila batas tercapai, teruskan ke review
+    await sendToReviewIfAdviceExhausted(transactionCode, { actor: username, provider: "PDAM" });
     throw error; // re-throw so caller can classify circuit-open vs normal error
   }
 
@@ -90,6 +93,8 @@ async function processAdviceTransaction(
       message: "Advice dipanggil namun belum ada data pembayaran di sistem PDAM",
       payload: { idpel, tanggal },
     });
+    // Batas advice tercapai tanpa data di PDAM → langsung ke antrean review (tidak menunggu cron)
+    await sendToReviewIfAdviceExhausted(transactionCode, { actor: username, provider: "PDAM" });
     return { finalizedCount: 0, totalDeduct: 0, notFound: true };
   }
 
@@ -110,7 +115,9 @@ async function processAdviceTransaction(
 
   for (const row of items) {
     const blth = String(row.period_label || "");
-    const resp = itemByBlth.get(blth) ?? (adviceData.length === 1 ? adviceData[0] : null);
+    // Wajib cocok periode — data advice untuk periode lain (dibayar di transaksi lain
+    // pada hari yang sama) tidak boleh dianggap konfirmasi transaksi ini.
+    const resp = itemByBlth.get(blth) ?? null;
     if (!resp) continue;
 
     const subTotal  = parsePdamNumber(resp.total);
@@ -148,20 +155,40 @@ async function processAdviceTransaction(
     finalizedCount += 1;
   }
 
-  if (totalDeduct > 0) {
-    const debit = await debitLoketBalance({ loketCode, amount: totalDeduct, allowNegative: true });
-    if (!debit.ok || debit.forced) {
+  if (finalizedCount > 0) {
+    // Saldo sudah ditahan saat payment; samakan hold dengan item SUCCESS/pending
+    // (tidak memotong dua kali, menyesuaikan bila nominal PDAM berbeda).
+    try {
+      const settle = await reconcileTransactionHold(transactionCode, {
+        actor: username,
+        note: `Advice PDAM sukses (${finalizedCount} tagihan)`,
+      });
+      if (settle?.forced) {
+        logTransactionEventFireAndForget({
+          idempotencyKey,
+          transactionCode,
+          provider: "PDAM",
+          eventType: "LOKET_BALANCE_NEGATIVE",
+          severity: "ERROR",
+          username,
+          loketCode,
+          custId: idpel,
+          message: `Saldo loket menjadi negatif setelah advice success (potong tambahan Rp ${settle.adjusted.toLocaleString("id-ID")})`,
+          payload: { totalDeduct, adjusted: settle.adjusted, balance: settle.balance },
+        });
+      }
+    } catch (settleError) {
       logTransactionEventFireAndForget({
         idempotencyKey,
         transactionCode,
         provider: "PDAM",
-        eventType: debit.forced ? "LOKET_BALANCE_NEGATIVE" : "LOKET_BALANCE_DEBIT_FAILED",
+        eventType: "LOKET_BALANCE_DEBIT_FAILED",
         severity: "ERROR",
         username,
         loketCode,
         custId: idpel,
-        message: `Mutasi saldo loket bermasalah setelah advice success (potong Rp ${totalDeduct.toLocaleString("id-ID")})`,
-        payload: { totalDeduct, balance: debit.balance, forced: Boolean(debit.forced) },
+        message: `Gagal menyesuaikan saldo setelah advice success: ${settleError instanceof Error ? settleError.message : "unknown"}`,
+        payload: { totalDeduct },
       });
     }
   }
@@ -307,7 +334,8 @@ export async function POST(req: NextRequest) {
 
   // Build query to find pending items
   const whereClauses = [
-    "mpi.status = 'PENDING_ADVICE'",
+    // PENDING_REVIEW ikut: admin boleh cek ulang advice dari menu Review Transaksi
+    "mpi.status IN ('PENDING_ADVICE', 'PENDING_REVIEW')",
     "mpi.provider = 'PDAM'",
     "mpi.customer_id = ?",
   ];

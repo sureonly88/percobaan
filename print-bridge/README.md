@@ -126,7 +126,9 @@ Setiap tagihan dicetak tepat 1 lembar. Bridge mengirim `ESC 2` (6 baris/inch), `
 | 9.5" x 5.5" (1/2) | 33 |
 | 9.5" x 11/3" (1/3) | 22 |
 
-- `topMargin`: baris kosong di awal tiap lembar bila baris pertama terlalu dekat perforasi.
+- Kertas "9 1/2" x 11" /3" (2000 lembar, ada perforasi tiap 1/3 tinggi) **wajib** `pageLines: 22`. Nilai 66 membuat tiap rekening memakan 3 potongan.
+- Bila isi 1 tagihan melebihi `pageLines - topMargin` baris (mis. struk COPY atau tagihan terakhir yang memuat URL validasi), formatter otomatis membuang baris hiasan (keterangan cetak ulang, sub-judul, garis pemisah, instruksi scan) agar struk tetap muat 1 potongan. Data tagihan, nominal, token, dan URL tidak pernah dibuang.
+- `topMargin`: baris kosong di awal tiap lembar bila baris pertama terlalu dekat perforasi (mengurangi kapasitas isi per lembar).
 - Sebelum job pertama, posisikan perforasi kertas tepat di top-of-form printer (tombol **Load/Eject** / micro-adjust).
 - Windows: Printer properties → Advanced → Print Processor → `WinPrint` + `RAW` (bukan `RAW [FF auto]`/`RAW [FF appended]`), agar Windows tidak menambah form feed sendiri.
 

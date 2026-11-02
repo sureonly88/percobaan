@@ -29,6 +29,21 @@ interface StaleItem {
   staleMinutes: number;
 }
 
+interface ProviderContactInfo {
+  heldAmount: number;
+  providerMayHaveBeenContacted: boolean;
+  reason: "HOLD_RECORDED" | "PROVIDER_REQUEST_LOGGED" | "BEFORE_LEDGER" | "NOT_CONTACTED";
+}
+
+type StaleAction = "promote" | "review" | "cancel";
+
+const CONTACT_LABEL: Record<ProviderContactInfo["reason"], string> = {
+  HOLD_RECORDED: "Saldo sudah ditahan — request mungkin sudah sampai ke provider",
+  PROVIDER_REQUEST_LOGGED: "Request tercatat dikirim ke provider",
+  BEFORE_LEDGER: "Transaksi lama (sebelum ledger) — tidak bisa dipastikan",
+  NOT_CONTACTED: "Belum dikirim ke provider — aman dibatalkan",
+};
+
 type ActionResult = {
   transactionCode: string;
   success: boolean;
@@ -89,6 +104,7 @@ export default function PendingTransaksiPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
 
+  const [contacts, setContacts] = useState<Record<string, ProviderContactInfo>>({});
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const [actionResults, setActionResults] = useState<ActionResult[]>([]);
 
@@ -111,7 +127,12 @@ export default function PendingTransaksiPage() {
 
     try {
       const res  = await fetch(`/api/pembayaran/stale-pending?${params}`);
-      const json = await res.json() as { items?: StaleItem[]; total?: number; error?: string };
+      const json = await res.json() as {
+        items?: StaleItem[];
+        total?: number;
+        error?: string;
+        transactions?: Record<string, ProviderContactInfo>;
+      };
       if (!res.ok) {
         setError(json.error || "Gagal mengambil data");
         setItems([]);
@@ -120,6 +141,7 @@ export default function PendingTransaksiPage() {
       }
       setItems(json.items ?? []);
       setTotal(json.total ?? 0);
+      setContacts(json.transactions ?? {});
     } catch {
       setError("Gagal menghubungi server");
     } finally {
@@ -127,9 +149,14 @@ export default function PendingTransaksiPage() {
     }
   }, [staleMinutes, providerFilter, search]);
 
-  async function handleAction(transactionCode: string, action: "promote" | "cancel") {
-    const label = action === "promote" ? "Promosikan ke PENDING_ADVICE" : "Batalkan transaksi";
-    if (!confirm(`${label} untuk transaksi ${transactionCode}?`)) return;
+  async function handleAction(transactionCode: string, action: StaleAction) {
+    const held = contacts[transactionCode]?.heldAmount ?? 0;
+    const prompt = {
+      promote: `Promosikan ${transactionCode} ke PENDING_ADVICE?\n\nSaldo tetap ditahan sampai advice memberi kepastian.`,
+      review: `Kirim ${transactionCode} ke Review Transaksi?\n\nSaldo ${formatRupiah(held)} tetap ditahan. Pengembalian saldo nanti perlu bukti dari provider dan persetujuan user lain.`,
+      cancel: `Batalkan ${transactionCode} (FAILED)?\n\nTransaksi belum pernah dikirim ke provider.${held > 0 ? ` Saldo ${formatRupiah(held)} dikembalikan ke loket.` : ""}`,
+    }[action];
+    if (!confirm(prompt)) return;
 
     setActionLoading((prev) => ({ ...prev, [transactionCode]: true }));
     try {
@@ -178,8 +205,10 @@ export default function PendingTransaksiPage() {
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-xl">
               Daftar item pembayaran yang tersimpan sebagai <code className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1 rounded text-xs font-mono">PENDING</code> lebih
               dari batas waktu yang ditentukan — kemungkinan proses server mati mendadak.
-              Admin dapat mempromosikannya ke <code className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded text-xs font-mono">PENDING_ADVICE</code> agar
-              bisa diproses via menu Advice, atau membatalkan (FAILED) jika dipastikan tidak terproses.
+              Jika request <strong>mungkin sudah sampai ke provider</strong>, saldo tetap ditahan dan transaksi
+              diselesaikan lewat <code className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1 rounded text-xs font-mono">PENDING_ADVICE</code> atau
+              Review Transaksi (pengembalian saldo perlu persetujuan user lain). Pembatalan langsung hanya untuk
+              transaksi yang terbukti belum dikirim ke provider.
             </p>
           </div>
         </div>
@@ -338,6 +367,8 @@ export default function PendingTransaksiPage() {
             const maxStale   = Math.max(...txItems.map((i) => i.staleMinutes));
             const stale      = staleBadge(maxStale);
             const isActing   = actionLoading[txCode] ?? false;
+            const contact    = contacts[txCode];
+            const mayBeProcessed = contact?.providerMayHaveBeenContacted !== false;
 
             return (
               <div
@@ -369,6 +400,24 @@ export default function PendingTransaksiPage() {
                   <div className="flex flex-col sm:items-end gap-1">
                     <p className="text-sm font-black text-slate-800 dark:text-white">{formatRupiah(txTotal)}</p>
                     <p className="text-xs text-slate-400">{formatTanggal(first.createdAt)}</p>
+                    {contact && contact.heldAmount > 0 && (
+                      <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                        Saldo ditahan {formatRupiah(contact.heldAmount)}
+                      </p>
+                    )}
+                    {contact && (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                          mayBeProcessed
+                            ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+                            : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                        }`}
+                        title={CONTACT_LABEL[contact.reason]}
+                      >
+                        <span className="material-symbols-outlined text-xs">{mayBeProcessed ? "cloud_sync" : "cloud_off"}</span>
+                        {mayBeProcessed ? "Mungkin sudah ke provider" : "Belum ke provider"}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -403,8 +452,17 @@ export default function PendingTransaksiPage() {
                   <div className="flex-1 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
                     <span className="material-symbols-outlined text-sm">info</span>
                     <span>
-                      <strong>Promote</strong> → masuk menu Advice Manual (disarankan jika PDAM sempat menerima request).
-                      <strong className="ml-1">Batalkan</strong> → tandai FAILED (jika yakin tidak terproses).
+                      {contact ? CONTACT_LABEL[contact.reason] : "Status pengiriman ke provider belum diketahui"}.{" "}
+                      {mayBeProcessed ? (
+                        <>
+                          <strong>Promote</strong> → cek lewat menu Advice PDAM/Lunasin.
+                          <strong className="ml-1">Kirim ke Review</strong> → admin memutuskan dengan bukti provider.
+                        </>
+                      ) : (
+                        <>
+                          <strong>Batalkan</strong> → tandai FAILED, tidak ada uang yang keluar ke provider.
+                        </>
+                      )}
                     </span>
                   </div>
                   <div className="flex gap-2 shrink-0">
@@ -421,15 +479,27 @@ export default function PendingTransaksiPage() {
                       )}
                       Promote ke Advice
                     </button>
-                    <button
-                      type="button"
-                      disabled={isActing}
-                      onClick={() => void handleAction(txCode, "cancel")}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold disabled:opacity-50 transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-sm">cancel</span>
-                      Batalkan
-                    </button>
+                    {mayBeProcessed ? (
+                      <button
+                        type="button"
+                        disabled={isActing}
+                        onClick={() => void handleAction(txCode, "review")}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold disabled:opacity-50 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-sm">fact_check</span>
+                        Kirim ke Review
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isActing}
+                        onClick={() => void handleAction(txCode, "cancel")}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold disabled:opacity-50 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-sm">cancel</span>
+                        Batalkan
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

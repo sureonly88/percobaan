@@ -49,7 +49,7 @@ const config = {
   columns:       40,
   feedLines:     1,
   formFeed:      false,          // true = akhiri tiap lembar dengan FF, false = pad LF
-  pageLines:     66,             // tinggi 1 lembar continuous form @ 6 LPI (11" = 66, 5.5" = 33)
+  pageLines:     22,             // tinggi 1 lembar continuous form @ 6 LPI (11" = 66, 5.5" = 33, 11/3" = 22)
   topMargin:     0,              // baris kosong di awal tiap lembar
 };
 

@@ -23,6 +23,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [loketSaldo, setLoketSaldo] = useState<number | null>(null);
+  const [saldoTertahan, setSaldoTertahan] = useState<{ amount: number; count: number }>({ amount: 0, count: 0 });
 
   const user = session?.user as { loketCode?: string; loketName?: string; role?: string; name?: string | null; username?: string; email?: string | null } | undefined;
   const userName = user?.name || user?.username || user?.email || "User";
@@ -41,7 +42,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         .then(r => r.json())
         .then(json => {
           const loket = (json.lokets ?? []).find((l: { loketCode: string }) => l.loketCode === user.loketCode);
-          if (loket) setLoketSaldo(Number(loket.pulsa));
+          if (loket) {
+            setLoketSaldo(Number(loket.pulsa));
+            setSaldoTertahan({ amount: Number(loket.saldoTertahan || 0), count: Number(loket.transaksiTertahan || 0) });
+          }
         })
         .catch(() => {});
     }
@@ -94,7 +98,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <AppTopNav />
       {/* Sub-header: search, notifications, loket info */}
-      <div className="sticky top-16 z-40 bg-white/80 backdrop-blur-md dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-2.5 flex items-center justify-between">
+      <div className="print:hidden sticky top-16 z-40 bg-white/80 backdrop-blur-md dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-2.5 flex items-center justify-between">
         <div className="relative max-w-md w-full">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl">
             search
@@ -121,9 +125,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {loketSaldo !== null && (
                 <>
                   <div className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
-                  <span className={`text-xs font-bold ${loketSaldo < 100000 ? 'text-red-500' : 'text-emerald-600'}`}>
+                  <span
+                    className={`whitespace-nowrap text-xs font-bold ${loketSaldo < 100000 ? 'text-red-500' : 'text-emerald-600'}`}
+                    title="Saldo tersedia untuk transaksi baru"
+                  >
                     {formatRupiah(loketSaldo)}
                   </span>
+                  {saldoTertahan.amount > 0 && (
+                    <span
+                      className="flex items-center gap-0.5 whitespace-nowrap text-[11px] font-semibold text-amber-600"
+                      title={`Rp ${saldoTertahan.amount.toLocaleString("id-ID")} ditahan untuk ${saldoTertahan.count} transaksi yang menunggu konfirmasi provider. Kembali otomatis jika provider memastikan pembayaran gagal.`}
+                    >
+                      <span className="material-symbols-outlined text-xs">hourglass_empty</span>
+                      Tertahan {formatRupiah(saldoTertahan.amount)}
+                    </span>
+                  )}
                 </>
               )}
             </div>

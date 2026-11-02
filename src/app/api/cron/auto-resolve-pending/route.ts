@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authorizeCron } from "@/lib/jobs/cron-auth";
 import { acquireJobLock, releaseJobLock } from "@/lib/jobs/system-job-lock";
 import { runAutoResolvePending } from "@/lib/jobs/auto-resolve-pending";
+import { MAX_ADVICE_ATTEMPTS } from "@/lib/advice-policy";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,7 +14,7 @@ async function handle(req: NextRequest) {
   const url = new URL(req.url);
   const staleMinutes = num(url.searchParams.get("staleMinutes"), 15);
   const exhaustedMinutes = num(url.searchParams.get("exhaustedMinutes"), 60);
-  const maxAdviceAttempts = num(url.searchParams.get("maxAdviceAttempts"), 6);
+  const maxAdviceAttempts = num(url.searchParams.get("maxAdviceAttempts"), MAX_ADVICE_ATTEMPTS);
 
   const lock = await acquireJobLock("auto_resolve_pending", 5 * 60 * 1000);
   if (!lock.acquired) {
@@ -33,7 +34,7 @@ async function handle(req: NextRequest) {
     await releaseJobLock(
       lock,
       "SUCCESS",
-      `promoted=${summary.promoted} autoFailed=${summary.autoFailed} scanned=${summary.scannedStale}+${summary.scannedExhausted}`,
+      `promoted=${summary.promoted} sentToReview=${summary.sentToReview} scanned=${summary.scannedStale}+${summary.scannedExhausted}`,
       Date.now() - t0
     );
     return NextResponse.json({ ok: true, summary });

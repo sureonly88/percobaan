@@ -6,6 +6,7 @@ import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { getAuthToken, unauthorized } from "@/lib/api-auth";
+import { saveInquirySnapshots } from "@/lib/inquiry-snapshots";
 
 export async function POST(req: NextRequest) {
   const token = await getAuthToken(req);
@@ -96,6 +97,28 @@ export async function POST(req: NextRequest) {
           maxAllowed: maxPdamTagihan,
         },
         { status: 422 }
+      );
+    }
+
+    // Simpan snapshot nominal per periode — endpoint pay hanya memakai nominal ini
+    try {
+      await saveInquirySnapshots(
+        "PDAM",
+        username,
+        normalized.map((item) => ({
+          customerId: idpel.trim(),
+          refKey: String(item.thbln || ""),
+          amount: Number(item.total || 0),
+          adminFee: 0,
+          total: Number(item.total || 0),
+          payload: item as unknown as Record<string, unknown>,
+        }))
+      );
+    } catch (snapshotErr) {
+      console.error("[pdam/inquiry] Gagal menyimpan inquiry snapshot:", snapshotErr);
+      return NextResponse.json(
+        { error: "Gagal menyimpan data tagihan, silakan ulangi cek tagihan" },
+        { status: 500 }
       );
     }
 

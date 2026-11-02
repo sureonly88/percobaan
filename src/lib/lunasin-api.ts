@@ -146,6 +146,21 @@ export const LUNASIN_RC: Record<string, { status: string; retryable: boolean }> 
   "1004": { status: "IDPEL diblok", retryable: false },
 };
 
+/**
+ * Apakah status payment di sisi Lunasin TIDAK PASTI (request mungkin sudah diproses)?
+ * true untuk timeout/jaringan, HTTP 5xx, dan respons tak terbaca. HTTP 429 dan RC
+ * error bisnis berarti ditolak (pasti gagal). Circuit open = request tidak pernah dikirim.
+ */
+export function isLunasinOutcomeUnknown(err: unknown): boolean {
+  if (!(err instanceof LunasinApiError)) return !(err instanceof Error && err.name === "CircuitOpenError");
+  return (
+    err.code === "NETWORK_TIMEOUT" ||
+    err.code === "NETWORK_ERROR" ||
+    err.code === "INVALID_RESPONSE" ||
+    /^HTTP_5\d\d$/.test(err.code)
+  );
+}
+
 function isRetryableRC(rc: string): boolean {
   return rc === "0001" || rc === "0003";
 }
@@ -196,7 +211,7 @@ async function callLunasin(payload: LunasinRequest): Promise<LunasinResponse> {
     });
   } catch (error: unknown) {
     recordFailure(LUNASIN_PROVIDER);
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
       const err = new LunasinApiError("Lunasin API timeout", "NETWORK_TIMEOUT", "Timeout", true);
       err.httpStatus = 408;
       throw err;
@@ -219,7 +234,15 @@ async function callLunasin(payload: LunasinRequest): Promise<LunasinResponse> {
     throw err;
   }
 
-  const data: LunasinResponse = await res.json();
+  let data: LunasinResponse;
+  try {
+    data = await res.json();
+  } catch {
+    // Respons tidak terbaca — status di Lunasin tidak pasti, harus dicek via advice
+    const err = new LunasinApiError("Respons Lunasin tidak dapat dibaca", "INVALID_RESPONSE", "Invalid response", true);
+    err.httpStatus = res.status;
+    throw err;
+  }
   recordSuccess(LUNASIN_PROVIDER);
   return data;
 }

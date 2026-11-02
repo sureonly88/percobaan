@@ -87,7 +87,12 @@ export async function POST(request: NextRequest) {
       );
 
       if (newStatus === "SUCCESS") {
-        const credit = await creditLoketBalance({ connection, loketCode: String(topup.loket_code), amount: nominal });
+        const credit = await creditLoketBalance({
+          connection,
+          loketCode: String(topup.loket_code),
+          amount: nominal,
+          ledger: { type: "TOPUP", referenceType: "TOPUP_ORDER", referenceId: String(order_id), note: "Top-up otomatis Midtrans" },
+        });
         if (!credit.ok) throw new Error("Gagal kredit saldo loket topup");
 
         const now = new Date();

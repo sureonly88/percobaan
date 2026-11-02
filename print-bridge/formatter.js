@@ -114,30 +114,52 @@ function formatEscp(data, cfg = {}) {
   const TOP_MARGIN = clampInt(cfg.topMargin, 0, 0, PAGE_LINES - 1);
 
   const chunks = [];
-  let pageLineCount = 0;
+  // Baris struk yang sedang dirakit: { text, drop }. drop = 0 → wajib dicetak;
+  // drop > 0 → boleh dibuang (angka terbesar dibuang duluan) bila struk tidak
+  // muat dalam 1 lembar. Struk yang melewati perforasi akan terpotong saat
+  // kertas disobek, jadi lebih baik membuang hiasan daripada tumpah.
+  let pageBuf = [];
 
   // Semua teks dipotong ke W kolom. Baris yang lebih panjang dari lebar
   // kertas akan di-wrap otomatis oleh printer menjadi 2 baris fisik,
   // sehingga hitungan baris meleset dan struk berikutnya bergeser.
   function clean(s)       { return String(s).replace(/[^\x20-\x7E]/g, '?').substring(0, W); }
-  function line(s)        { chunks.push(clean(s) + LF); pageLineCount++; }
+  function line(s, drop)  { pageBuf.push({ text: clean(s), drop: drop || 0 }); }
   // Untuk EPSON LX-310 di komputer ini, job dengan ESC bold (ESC E/F)
   // tertahan di queue. Pakai teks plain ASCII agar cocok dengan `copy /b`
   // yang sudah terbukti mencetak langsung ke share printer.
   function bold(s)        { return s; }
-  function ctr(text, b)   {
+  function ctr(text, b, drop) {
     const t = clean(text);
     const pad = Math.max(0, Math.floor((W - t.length) / 2));
-    line(' '.repeat(pad) + (b ? bold(t) : t));
+    line(' '.repeat(pad) + (b ? bold(t) : t), drop);
   }
   function c2(left, right, b) {
     const content = r2c(String(left), String(right), W);
     line(b ? bold(content) : content);
   }
   function startPage() {
-    for (let i = 0; i < TOP_MARGIN; i++) line('');
+    pageBuf = [];
   }
   function endPage() {
+    // Buang baris opsional (prioritas drop terbesar dulu, dari bawah) sampai muat.
+    const capacity = PAGE_LINES - TOP_MARGIN;
+    const levels = [...new Set(pageBuf.map((l) => l.drop).filter((d) => d > 0))].sort((a, b) => b - a);
+    for (const level of levels) {
+      for (let i = pageBuf.length - 1; i >= 0 && pageBuf.length > capacity; i--) {
+        if (pageBuf[i].drop === level) pageBuf.splice(i, 1);
+      }
+      if (pageBuf.length <= capacity) break;
+    }
+    if (pageBuf.length > capacity) {
+      console.warn(`[Formatter] Struk ${pageBuf.length} baris > kapasitas ${capacity} baris/lembar — akan tumpah ke lembar berikutnya`);
+    }
+
+    let pageLineCount = 0;
+    for (let i = 0; i < TOP_MARGIN; i++) { chunks.push(LF); pageLineCount++; }
+    for (const l of pageBuf) { chunks.push(l.text + LF); pageLineCount++; }
+    pageBuf = [];
+
     if (FORM_FEED && !PLAIN) {
       // FF: printer maju ke top-of-form berikutnya berdasarkan ESC C.
       chunks.push(FF);
@@ -147,7 +169,6 @@ function formatEscp(data, cfg = {}) {
       const remaining = (PAGE_LINES - (pageLineCount % PAGE_LINES)) % PAGE_LINES;
       for (let i = 0; i < remaining; i++) chunks.push(LF);
     }
-    pageLineCount = 0;
   }
 
   // ── Init ──
@@ -162,9 +183,14 @@ function formatEscp(data, cfg = {}) {
 
   // Header dicetak di setiap lembar agar setiap potongan struk berdiri
   // sendiri dan posisi isinya sama persis di setiap lembar.
+  // Prioritas buang (drop), terbesar dibuang duluan:
+  //   7 keterangan cetak ulang, 6 sub-judul, 5 garis tebal hiasan,
+  //   4 garis tipis header, 3 garis pemisah blok URL, 2 instruksi scan,
+  //   1 judul "VALIDASI STRUK DIGITAL" (agar URL tetap berlabel selama mungkin).
   function header() {
     if (data.isCopy) {
-      line(HEAVY);
+      // Tag COPY wajib tercetak; hiasan & keterangannya boleh dibuang.
+      line(HEAVY, 5);
       const tag = data.copyNumber && data.copyNumber > 1
         ? `*** COPY #${data.copyNumber} - BUKAN STRUK ASLI ***`
         : `*** COPY - BUKAN STRUK ASLI ***`;
@@ -174,17 +200,16 @@ function formatEscp(data, cfg = {}) {
           data.copyBy ? `Dicetak ulang oleh: ${data.copyBy}` : '',
           data.copyAt ? fmtTanggal(data.copyAt) : '',
         ].filter(Boolean).join('  -  ');
-        if (meta) ctr(meta, false);
+        if (meta) ctr(meta, false, 7);
       }
-      line(HEAVY);
     }
-    line(HEAVY);
+    line(HEAVY, data.isCopy ? 0 : 5);
     ctr(tpl.headerLine1 || 'PEDAMI PAYMENT', true);
-    ctr(tpl.headerLine2 || 'Layanan Pembayaran Multi-Produk', false);
-    line(HEAVY);
+    ctr(tpl.headerLine2 || 'Layanan Pembayaran Multi-Produk', false, 6);
+    line(HEAVY, 5);
     c2('Loket   : ' + data.loketCode + ' ' + (data.loketName || ''), 'Kasir : ' + data.kasir);
     line('Tanggal : ' + fmtTanggal(data.tanggal));
-    line(LIGHT);
+    line(LIGHT, 4);
   }
 
   // ── Bills ──
@@ -340,13 +365,13 @@ function formatEscp(data, cfg = {}) {
 
     // Digital receipt URL — hanya di halaman tagihan terakhir
     if (idx === (data.bills || []).length - 1 && data.digitalReceiptUrl) {
-      line(LIGHT);
-      ctr('VALIDASI STRUK DIGITAL', true);
-      ctr('Scan QR atau buka URL berikut:', false);
+      line(LIGHT, 3);
+      ctr('VALIDASI STRUK DIGITAL', true, 1);
+      ctr('Scan QR atau buka URL berikut:', false, 2);
       for (const part of wrapText(data.digitalReceiptUrl, W)) ctr(part, false);
     }
 
-    // Setiap tagihan = tepat 1 lembar (PAGE_LINES baris)
+    // Setiap tagihan = tepat 1 lembar (PAGE_LINES baris), dipangkas bila perlu
     endPage();
   });
 

@@ -174,7 +174,12 @@ export async function POST(request: Request) {
       );
       transactionId = insertResult.insertId;
 
-      const debit = await debitLoketBalance({ connection, loketId: providerLoketId, amount: grandTotal });
+      const debit = await debitLoketBalance({
+        connection,
+        loketId: providerLoketId,
+        amount: grandTotal,
+        ledger: { type: "PAYMENT_HOLD", referenceType: "TRANSACTION", referenceId: transactionCode, actor: `provider:${provider.code}` },
+      });
       if (!debit.ok) {
         await connection.rollback();
         return NextResponse.json(
@@ -288,7 +293,12 @@ export async function POST(request: Request) {
              WHERE id = ? AND status = 'PENDING'`,
             [errorCode, errorMessage, durationMs, transactionId]
           );
-          await creditLoketBalance({ connection: failConn, loketId: providerLoketId, amount: grandTotal });
+          await creditLoketBalance({
+            connection: failConn,
+            loketId: providerLoketId,
+            amount: grandTotal,
+            ledger: { type: "PAYMENT_REFUND", referenceType: "TRANSACTION", referenceId: transactionCode, note: "Provider API: payment gagal", actor: `provider:${provider.code}` },
+          });
           await failConn.commit();
         } catch (error) {
           try { await failConn.rollback(); } catch { /* ignore */ }

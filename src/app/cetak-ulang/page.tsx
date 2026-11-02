@@ -74,6 +74,7 @@ export default function CetakUlangPage() {
 
   const loadLokets = useCallback(async () => {
     if (!canSeeAll) return;
+    // rbac-check: admin, supervisor
     try {
       const res = await fetch("/api/loket");
       if (!res.ok) return;

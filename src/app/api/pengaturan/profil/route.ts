@@ -32,7 +32,8 @@ export async function GET(request: NextRequest) {
   try {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT u.id, u.username, u.name, u.email, u.role, u.loket_id, u.created_at,
-              l.loket_code, l.nama AS loket_nama, l.alamat AS loket_alamat, l.status AS loket_status
+              l.loket_code, l.nama AS loket_nama, l.alamat AS loket_alamat, l.status AS loket_status,
+              l.biaya_admin AS loket_biaya_admin, l.pulsa AS loket_pulsa, l.pln_admin_tier AS loket_pln_admin_tier
        FROM users u
        LEFT JOIN lokets l ON u.loket_id = l.id
        WHERE u.id = ? LIMIT 1`,
@@ -58,6 +59,10 @@ export async function GET(request: NextRequest) {
             nama: user.loket_nama,
             alamat: user.loket_alamat,
             status: user.loket_status,
+            // Dibutuhkan halaman pembayaran kasir (kasir tidak punya akses ke /api/loket)
+            biayaAdmin: Number(user.loket_biaya_admin ?? 0),
+            pulsa: Number(user.loket_pulsa ?? 0),
+            plnAdminTier: Number(user.loket_pln_admin_tier ?? 3000),
           }
         : null,
     });

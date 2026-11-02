@@ -4,6 +4,7 @@ import { canProcessPayment } from "@/lib/rbac";
 import { getAuthToken, unauthorized } from "@/lib/api-auth";
 import {
   PdamApiError,
+  isPdamOutcomeUnknown,
   generateTransactionCode,
   pdamPaymentWithRetry,
   parsePdamNumber,
@@ -15,7 +16,9 @@ import { logTransactionEventSafe, logTransactionEventFireAndForget } from "@/lib
 import { notifyTransactionFailed, notifyTransactionSuccess, notifyTransactionPartial, notifyLowBalance } from "@/lib/notifications";
 import { cached } from "@/lib/cache";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
-import { debitLoketBalance } from "@/lib/saldo-mutations";
+import { creditLoketBalance, debitLoketBalance } from "@/lib/saldo-mutations";
+import { consumeInquirySnapshots, loadInquirySnapshots, snapshotKey } from "@/lib/inquiry-snapshots";
+import { reconcileHoldsForTransactions, reconcileTransactionHold } from "@/lib/transaction-balance";
 
 interface PaymentBill {
   idpel: string;
@@ -52,6 +55,66 @@ function buildRequestHash(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+/**
+ * Ganti nominal & data tagihan dari client dengan snapshot inquiry server-side.
+ * Tagihan tanpa snapshot yang valid (belum inquiry / kedaluwarsa / milik user lain) ditolak.
+ */
+async function applyPdamInquirySnapshots(
+  username: string,
+  bills: PaymentBill[]
+): Promise<{ ok: true; bills: PaymentBill[] } | { ok: false; error: string; code: string }> {
+  const refs = bills.map((b) => ({ customerId: String(b.idpel || "").trim(), refKey: String(b.blth || "").trim() }));
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const key = snapshotKey(ref.customerId, ref.refKey);
+    if (!ref.customerId || !ref.refKey) {
+      return { ok: false, error: "Data tagihan tidak lengkap (idpel/periode)", code: "INVALID_BILL" };
+    }
+    if (seen.has(key)) {
+      return { ok: false, error: `Tagihan ${ref.customerId} periode ${ref.refKey} terduplikasi`, code: "DUPLICATE_BILL" };
+    }
+    seen.add(key);
+  }
+
+  const snapshots = await loadInquirySnapshots("PDAM", username, refs);
+  const verified: PaymentBill[] = [];
+  for (let i = 0; i < bills.length; i++) {
+    const ref = refs[i];
+    const snap = snapshots.get(snapshotKey(ref.customerId, ref.refKey));
+    if (!snap) {
+      return {
+        ok: false,
+        error: `Data cek tagihan ${ref.customerId} periode ${ref.refKey} tidak ditemukan atau sudah kedaluwarsa. Silakan cek tagihan ulang.`,
+        code: "INQUIRY_SNAPSHOT_NOT_FOUND",
+      };
+    }
+    const p = (snap.payload || {}) as Record<string, unknown>;
+    const num = (v: unknown) => Number(v || 0) || 0;
+    verified.push({
+      ...bills[i],
+      idpel: ref.customerId,
+      blth: ref.refKey,
+      nama: String(p.nama ?? bills[i].nama ?? ""),
+      alamat: String(p.alamat ?? bills[i].alamat ?? ""),
+      gol: String(p.gol ?? bills[i].gol ?? ""),
+      harga: num(p.harga),
+      denda: num(p.denda),
+      materai: num(p.materai),
+      limbah: num(p.limbah),
+      retribusi: num(p.retribusi),
+      standLalu: num(p.stand_l),
+      standKini: num(p.stand_i),
+      biayaMeter: num(p.biaya_meter),
+      bebanTetap: num(p.biaya_tetap),
+      abodemen: num(p.byadmin),
+      diskon: num(p.diskon),
+      subTotal: snap.total,
+      total: snap.total,
+    });
+  }
+  return { ok: true, bills: verified };
+}
+
 function safeJsonParse<T>(value: string | null): T | null {
   if (!value) return null;
   try {
@@ -69,7 +132,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { bills, loketCode, loketName, biayaAdmin, idempotencyKey, skipMultiPayment } = body as {
+  const { bills: clientBills, loketCode, loketName, biayaAdmin, idempotencyKey, skipMultiPayment } = body as {
     bills: PaymentBill[];
     loketCode: string;
     loketName: string;
@@ -78,9 +141,10 @@ export async function POST(req: NextRequest) {
     skipMultiPayment?: boolean;
   };
 
-  if (!bills || !Array.isArray(bills) || bills.length === 0) {
+  if (!clientBills || !Array.isArray(clientBills) || clientBills.length === 0) {
     return NextResponse.json({ error: "Daftar tagihan kosong" }, { status: 400 });
   }
+  let bills = clientBills;
   if (!loketCode) {
     return NextResponse.json({ error: "Loket belum dipilih" }, { status: 400 });
   }
@@ -99,6 +163,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     throw error;
+  }
+
+  // Nominal tagihan wajib berasal dari snapshot inquiry server, bukan dari client
+  const snapshotCheck = await applyPdamInquirySnapshots(username, clientBills);
+  if (snapshotCheck.ok) {
+    bills = snapshotCheck.bills;
+  } else {
+    // Retry dengan idempotencyKey yang sudah pernah diproses tetap boleh lewat
+    // agar mendapat replay respons lama (snapshot mungkin sudah dikonsumsi/kedaluwarsa).
+    const [priorRows] = await pool.query<RowDataPacket[]>(
+      "SELECT id FROM payment_requests WHERE idempotency_key = ? LIMIT 1",
+      [idempotencyKeyTrimmed]
+    );
+    if (priorRows.length === 0) {
+      return NextResponse.json({ error: snapshotCheck.error, errorCode: snapshotCheck.code }, { status: 422 });
+    }
   }
 
   // Fetch jenis loket from cache (rarely changes), saldo fresh from DB
@@ -145,7 +225,8 @@ export async function POST(req: NextRequest) {
     // fallback to default
   }
 
-  // Validate saldo loket
+  // Validasi awal saldo (cepat-tolak). Penjaga sebenarnya adalah hold saldo atomik
+  // per pelanggan sebelum memanggil provider.
   const totalPembayaran = bills.reduce((sum, b) => sum + b.subTotal + (biayaAdminLoket || 0), 0);
   if (saldoLoket < totalPembayaran) {
     return NextResponse.json(
@@ -156,7 +237,7 @@ export async function POST(req: NextRequest) {
 
   const normalizedRequestPayload = {
     provider: "PDAM",
-    bills,
+    bills: clientBills,
     loketCode,
     loketName,
     biayaAdmin,
@@ -201,6 +282,15 @@ export async function POST(req: NextRequest) {
     if (mysqlErr.code !== "ER_DUP_ENTRY") {
       throw error;
     }
+  }
+
+  if (lockOwner && !snapshotCheck.ok) {
+    // Seharusnya tidak terjadi (key sudah ada → lock gagal), tapi jangan pernah lanjut tanpa snapshot
+    await pool.execute(
+      "UPDATE payment_requests SET status = 'FAILED', error_code = ?, error_message = ?, updated_at = NOW() WHERE idempotency_key = ?",
+      [snapshotCheck.code, snapshotCheck.error, idempotencyKeyTrimmed]
+    );
+    return NextResponse.json({ error: snapshotCheck.error, errorCode: snapshotCheck.code }, { status: 422 });
   }
 
   if (!lockOwner) {
@@ -404,6 +494,84 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Hold saldo secara atomik SEBELUM memanggil provider — mencegah saldo minus
+      // akibat beberapa pembayaran paralel yang lolos validasi saldo bersamaan.
+      const groupTotal = pelBills.reduce((sum, b) => sum + b.subTotal + biayaAdminLoket, 0);
+      const groupAmount = pelBills.reduce((sum, b) => sum + b.subTotal, 0);
+      const groupAdmin = pelBills.reduce((sum, _b) => sum + biayaAdminLoket, 0);
+      let holdOutstanding = 0;
+      let providerPaid = false;
+      try {
+        const hold = await debitLoketBalance({
+          loketCode,
+          amount: groupTotal,
+          ledger: { type: "PAYMENT_HOLD", referenceType: "TRANSACTION", referenceId: transactionCode, actor: username },
+        });
+        if (!hold.ok) {
+          const holdMessage = `Saldo loket tidak mencukupi untuk pelanggan ${idpel} (butuh Rp ${groupTotal.toLocaleString("id-ID")}, saldo Rp ${Number(hold.balance || 0).toLocaleString("id-ID")})`;
+          if (!skipMultiPayment) {
+            await pool.execute(
+              `UPDATE multi_payment_items
+                  SET status = 'FAILED', provider_error_code = 'INSUFFICIENT_BALANCE',
+                      provider_error_message = ?, failed_at = NOW()
+                WHERE transaction_code = ? AND status = 'PENDING'`,
+              [holdMessage, transactionCode]
+            );
+          }
+          logTransactionEventFireAndForget({
+            idempotencyKey: idempotencyKeyTrimmed,
+            transactionCode,
+            provider: "PDAM",
+            eventType: "LOKET_BALANCE_HOLD_FAILED",
+            severity: "WARN",
+            username,
+            loketCode,
+            custId: idpel,
+            providerErrorCode: "INSUFFICIENT_BALANCE",
+            message: holdMessage,
+            payload: { groupTotal, balance: hold.balance },
+          });
+          for (const bill of pelBills) {
+            results.push({
+              idpel: bill.idpel,
+              transactionCode,
+              success: false,
+              error: holdMessage,
+              errorCode: "INSUFFICIENT_BALANCE",
+              total: bill.subTotal + biayaAdminLoket,
+              nama: bill.nama,
+              blth: bill.blth,
+            });
+          }
+          return;
+        }
+        holdOutstanding = groupTotal;
+      } catch (holdError: unknown) {
+        const holdMessage = holdError instanceof Error ? holdError.message : "Gagal menahan saldo loket";
+        if (!skipMultiPayment) {
+          await pool.execute(
+            `UPDATE multi_payment_items
+                SET status = 'FAILED', provider_error_code = 'BALANCE_HOLD_FAILED',
+                    provider_error_message = ?, failed_at = NOW()
+              WHERE transaction_code = ? AND status = 'PENDING'`,
+            [holdMessage, transactionCode]
+          ).catch(() => {});
+        }
+        for (const bill of pelBills) {
+          results.push({
+            idpel: bill.idpel,
+            transactionCode,
+            success: false,
+            error: holdMessage,
+            errorCode: "BALANCE_HOLD_FAILED",
+            total: bill.subTotal + biayaAdminLoket,
+            nama: bill.nama,
+            blth: bill.blth,
+          });
+        }
+        return;
+      }
+
       try {
         logTransactionEventFireAndForget({
           idempotencyKey: idempotencyKeyTrimmed,
@@ -430,7 +598,11 @@ export async function POST(req: NextRequest) {
           transactionCode,
           loketCode,
           username,
+          periods: pelBills.map((b) => b.blth),
         });
+        // Provider sudah memotong — hold saldo menjadi debit final, jangan dikembalikan
+        providerPaid = true;
+        holdOutstanding = 0;
 
         // Log payment success response
         try {
@@ -563,7 +735,15 @@ export async function POST(req: NextRequest) {
               }
             }
             // Tutup PENDING_ADVICE lama untuk customer + blth yang sudah berhasil dibayar
+            const supersededCodes: string[] = [];
             for (const bill of pelBills) {
+              const [supersededRows] = await pool.query<RowDataPacket[]>(
+                `SELECT DISTINCT transaction_code FROM multi_payment_items
+                  WHERE customer_id = ? AND period_label = ? AND provider = 'PDAM'
+                    AND status IN ('PENDING_ADVICE', 'PENDING_REVIEW') AND transaction_code != ?`,
+                [bill.idpel, bill.blth, transactionCode]
+              );
+              supersededRows.forEach((r) => supersededCodes.push(String(r.transaction_code)));
               await pool.execute(
                 `UPDATE multi_payment_items
                     SET status = 'FAILED',
@@ -574,11 +754,16 @@ export async function POST(req: NextRequest) {
                   WHERE customer_id = ?
                     AND period_label = ?
                     AND provider = 'PDAM'
-                    AND status = 'PENDING_ADVICE'
+                    AND status IN ('PENDING_ADVICE', 'PENDING_REVIEW')
                     AND transaction_code != ?`,
                 [bill.idpel, bill.blth, transactionCode]
               );
             }
+            // Transaksi lama yang tergantikan tidak jadi dibayar → lepas hold-nya
+            await reconcileHoldsForTransactions(supersededCodes, {
+              actor: username,
+              note: `Tergantikan oleh pembayaran ${transactionCode}`,
+            });
           }
 
           for (const bill of pelBills) {
@@ -612,26 +797,22 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          // Deduct saldo loket
-          const groupTotal = pelBills.reduce((sum, b) => sum + b.subTotal + biayaAdminLoket, 0);
-          const groupAmount = pelBills.reduce((sum, b) => sum + b.subTotal, 0);
-          const groupAdmin = pelBills.reduce((sum, _b) => sum + biayaAdminLoket, 0);
-          try {
-            const debit = await debitLoketBalance({ loketCode, amount: groupTotal, allowNegative: true });
-            if (!debit.ok || debit.forced) {
-              await logTransactionEventSafe({
-                idempotencyKey: idempotencyKeyTrimmed,
-                transactionCode,
-                provider: "PDAM",
-                eventType: debit.forced ? "LOKET_BALANCE_NEGATIVE" : "LOKET_BALANCE_DEBIT_FAILED",
-                severity: "ERROR",
-                username,
-                loketCode,
-                custId: idpel,
-                message: `Mutasi saldo loket bermasalah setelah payment success (potong Rp ${groupTotal.toLocaleString("id-ID")})`,
-                payload: { groupTotal, balance: debit.balance, forced: Boolean(debit.forced) },
-              });
+          // Saldo sudah dipotong lewat hold sebelum provider dipanggil. Samakan hold dengan
+          // nominal final dari respons PDAM (item sudah diperbarui di atas).
+          if (!skipMultiPayment) {
+            try {
+              await reconcileTransactionHold(transactionCode, { actor: username, note: "Nominal final dari respons PDAM" });
+            } catch (settleError) {
+              console.error("[pdam/pay] Gagal menyesuaikan hold dengan nominal PDAM:", settleError);
             }
+          }
+          // Snapshot dikonsumsi agar tagihan yang sama tidak bisa dibayar ulang dengan data lama.
+          await consumeInquirySnapshots(
+            "PDAM",
+            username,
+            pelBills.map((b) => ({ customerId: b.idpel, refKey: b.blth }))
+          );
+          try {
             // Check low balance and notify
             try {
               const [balRows] = await pool.query<RowDataPacket[]>(
@@ -731,6 +912,69 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err: unknown) {
+        if (providerPaid) {
+          // Error terjadi setelah provider sukses (mis. update DB gagal) — saldo tetap terpotong,
+          // biarkan item PENDING untuk rekonsiliasi manual.
+          await logTransactionEventSafe({
+            idempotencyKey: idempotencyKeyTrimmed,
+            transactionCode,
+            provider: "PDAM",
+            eventType: "PAYMENT_DB_FINALIZE_FAILED",
+            severity: "ERROR",
+            username,
+            loketCode,
+            custId: idpel,
+            providerErrorCode: "DB_FINALIZE_FAILED",
+            message: err instanceof Error ? err.message : "Sinkronisasi lokal gagal setelah payment sukses",
+            payload: { idpel, billsCount: pelBills.length },
+          });
+          for (const bill of pelBills) {
+            results.push({
+              idpel: bill.idpel,
+              transactionCode,
+              success: false,
+              error: "Pembayaran ke provider berhasil, tetapi pencatatan lokal gagal. Mohon hubungi admin.",
+              errorCode: "DB_FINALIZE_FAILED",
+              total: bill.subTotal + biayaAdminLoket,
+              nama: bill.nama,
+              blth: bill.blth,
+            });
+          }
+          return;
+        }
+
+        // Status di PDAM tidak pasti (timeout / 5xx / respons tak terbaca) → PENDING_ADVICE
+        // dan hold saldo TETAP ditahan sampai advice memberi status final. Hanya
+        // penolakan pasti (error bisnis, circuit open) yang langsung mengembalikan hold.
+        const isAdviceable = isPdamOutcomeUnknown(err);
+        const releaseHold = async (amount: number, reason: string) => {
+          if (amount <= 0) return;
+          try {
+            await creditLoketBalance({
+              loketCode,
+              amount,
+              ledger: { type: "PAYMENT_RELEASE", referenceType: "TRANSACTION", referenceId: transactionCode, note: reason, actor: username },
+            });
+            holdOutstanding = Math.max(0, holdOutstanding - amount);
+          } catch (refundError: unknown) {
+            await logTransactionEventSafe({
+              idempotencyKey: idempotencyKeyTrimmed,
+              transactionCode,
+              provider: "PDAM",
+              eventType: "LOKET_BALANCE_HOLD_REFUND_FAILED",
+              severity: "ERROR",
+              username,
+              loketCode,
+              custId: idpel,
+              message: `Gagal mengembalikan hold saldo Rp ${amount.toLocaleString("id-ID")}: ${refundError instanceof Error ? refundError.message : "unknown"}`,
+              payload: { amount, holdOutstanding },
+            });
+          }
+        };
+        if (!isAdviceable) {
+          await releaseHold(holdOutstanding, "Hold dikembalikan: pembayaran ditolak provider");
+        }
+
         const message = err instanceof Error ? err.message : "Pembayaran gagal";
         const errorCode = err instanceof PdamApiError ? err.code : "UNKNOWN_ERROR";
         const attempts = err instanceof PdamApiError ? err.attemptCount : undefined;
@@ -770,9 +1014,8 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // Phase 2b: timeout/network errors → PENDING_ADVICE (payable via reqlpptanggal)
+        // Phase 2b: status tidak pasti → PENDING_ADVICE (payable via reqlpptanggal)
         //            hard errors (business logic) → FAILED
-        const isAdviceable = err instanceof PdamApiError && err.retryable;
         // blths yg sudah ada PENDING_ADVICE aktif (tidak boleh duplikat per nopelanggan+blth)
         const blockedFromAdvice = new Set<string>();
 
@@ -786,7 +1029,7 @@ export async function POST(req: NextRequest) {
               `SELECT period_label FROM multi_payment_items
                 WHERE customer_id = ?
                   AND period_label IN (${blthList.map(() => "?").join(",")})
-                  AND status = 'PENDING_ADVICE'
+                  AND status IN ('PENDING_ADVICE', 'PENDING_REVIEW')
                   AND provider = 'PDAM'
                   AND transaction_code != ?`,
               [idpel, ...blthList, transactionCode]
@@ -811,6 +1054,11 @@ export async function POST(req: NextRequest) {
             }
 
             if (blthsBlocked.length > 0) {
+              // Periode yang diblok langsung FAILED → lepas bagian hold-nya
+              await releaseHold(
+                pelBills.filter((b) => blockedFromAdvice.has(b.blth)).reduce((s, b) => s + b.subTotal + biayaAdminLoket, 0),
+                "Hold dikembalikan: periode sudah punya advice aktif"
+              );
               await pool.execute(
                 `UPDATE multi_payment_items
                     SET status = 'FAILED',

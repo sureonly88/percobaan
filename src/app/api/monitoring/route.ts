@@ -494,6 +494,36 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: `Transaksi berstatus ${row.status}, bukan PENDING` }, { status: 400 });
     }
 
+    // Resolve langsung hanya untuk permintaan yang terbukti BELUM sampai ke provider
+    // (tidak ada event pemanggilan provider, hold saldo, atau item yang masih berjalan).
+    // Selain itu status/saldo harus diselesaikan lewat Advice, Transaksi Tergantung, atau Review.
+    const [contactRows] = await pool.query<RowDataPacket[]>(
+      `SELECT
+         (SELECT COUNT(*) FROM transaction_events
+           WHERE idempotency_key = ? AND event_type = 'PAYMENT_PROVIDER_REQUEST') AS provider_requests,
+         (SELECT COUNT(*) FROM loket_balance_ledger l
+           WHERE l.reference_type = 'TRANSACTION'
+             AND l.reference_id IN (SELECT transaction_code FROM transaction_events
+                                     WHERE idempotency_key = ? AND transaction_code IS NOT NULL)) AS holds,
+         (SELECT COUNT(*) FROM multi_payment_items i
+            JOIN multi_payment_requests r ON r.id = i.multi_payment_id
+           WHERE r.idempotency_key = ?
+             AND i.status IN ('SUCCESS','PENDING','PENDING_ADVICE','PENDING_PROVIDER','PENDING_REVIEW')) AS live_items`,
+      [row.idempotency_key, row.idempotency_key, row.idempotency_key]
+    );
+    const contact = contactRows[0] || {};
+    if (Number(contact.provider_requests) > 0 || Number(contact.holds) > 0 || Number(contact.live_items) > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Transaksi ini sudah dikirim ke provider atau masih memiliki item berjalan, jadi tidak bisa di-resolve langsung. " +
+            "Selesaikan lewat menu Transaksi Tergantung, Advice, atau Review Transaksi agar status dan saldo ikut disesuaikan.",
+          code: "USE_TRANSACTION_RESOLUTION",
+        },
+        { status: 409 }
+      );
+    }
+
     await pool.execute(
       `UPDATE payment_requests
           SET status = 'FAILED',

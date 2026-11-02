@@ -77,6 +77,9 @@ function detectScenario(idpel: string): string {
   if (digits === "02103000000") return "PAYMENT_PENDING";
 
   // Error scenarios — official PLN Postpaid + PDAM + custom prefix patterns
+  // Payment timeout (status tidak pasti) → advice sukses / advice gagal
+  if (p4 === "9191") return "PAYMENT_TIMEOUT";
+  if (p4 === "9292") return "PAYMENT_TIMEOUT_ADVICE_FAILED";
   if (p4 === "6666" || digits === "540100000000" || digits === "1022010") return "INQUIRY_ERROR";
   if (p4 === "7777" || digits === "540200000000" || digits === "1022020") return "PAYMENT_ERROR";
   if (p4 === "8888" || digits === "540300000000" || digits === "1022030") return "PAYMENT_PENDING";
@@ -438,6 +441,12 @@ export async function mockLunasinPayment(opts: {
     throw err;
   }
 
+  if (scenario === "PAYMENT_TIMEOUT" || scenario === "PAYMENT_TIMEOUT_ADVICE_FAILED") {
+    const err = new LunasinApiError("Lunasin API timeout", "NETWORK_TIMEOUT", "Timeout", true);
+    err.httpStatus = 408;
+    throw err;
+  }
+
   if (scenario === "PAYMENT_PENDING") {
     // Simulate pending response — caller should follow up with advice
     const emptyData: LunasinResponseData = {
@@ -486,6 +495,14 @@ export async function mockLunasinAdvice(opts: {
   await sleep(600 + Math.floor(Math.random() * 300));
 
   const scenario = detectScenario(opts.idpel);
+
+  if (scenario === "PAYMENT_TIMEOUT_ADVICE_FAILED") {
+    const failedData: LunasinResponseData = {
+      idpel: opts.idpel, nama: "", jum_bill: "1", rp_amount: "0", rp_admin: "0", rp_total: "0", refnum_lunasin: opts.idTrx,
+    };
+    const rawResponse = makeMockRawResponse(opts.idTrx, opts.idpel, opts.kodeProduk, "advice", failedData, "0002", "Gagal");
+    return { data: failedData, rawResponse, isSuccess: false, isFailed: true, isPending: false };
+  }
 
   // PAYMENT_PENDING scenario: advice returns success (payment actually went through)
   const data = buildInquiryData(opts.idpel, opts.kodeProduk, scenario);

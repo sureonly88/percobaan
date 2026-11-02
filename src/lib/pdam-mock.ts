@@ -14,6 +14,9 @@
  *  6666xxxxxx  → inquiry error: pelanggan tidak ditemukan (PDAM_403)
  *  7777xxxxxx  → inquiry sukses 1 bulan, payment error bisnis (406)
  *  8888xxxxxx  → inquiry sukses 1 bulan, payment LAMBAT (3s, sukses)
+ *  9999xxxxxx  → payment HTTP 500 (status tidak pasti) → advice konfirmasi sukses
+ *  9898xxxxxx  → payment HTTP 500 (status tidak pasti) → advice kosong → PENDING_ADVICE
+ *  9797xxxxxx  → payment timeout → advice otomatis kosong (PENDING_ADVICE), advice manual berikutnya sukses
  *  default     → inquiry 1 bulan, payment sukses
  */
 
@@ -24,6 +27,8 @@ import {
   PdamAdviceExecutionResult,
   PdamApiError,
   PdamPaymentResponse,
+  isAdviceConfirmingPeriods,
+  isPdamOutcomeUnknown,
 } from "@/lib/pdam-api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -99,6 +104,9 @@ function detectScenario(idpel: string): string {
   if (prefix === "6666") return "INQUIRY_ERROR";
   if (prefix === "7777") return "PAYMENT_ERROR";
   if (prefix === "8888") return "SLOW_SUCCESS";
+  if (prefix === "9999") return "HTTP500_ADVICE_OK";
+  if (prefix === "9898") return "HTTP500_ADVICE_EMPTY";
+  if (prefix === "9797") return "TIMEOUT_LATE_CONFIRM";
   return "SUCCESS_1"; // default
 }
 
@@ -154,7 +162,7 @@ export async function mockPdamPayment(params: {
 
   if (scenario === "SLOW_SUCCESS") {
     await sleep(4_000 + Math.floor(Math.random() * 1_000)); // 4–5 detik (lambat)
-  } else if (scenario === "TIMEOUT_ADVICE_OK" || scenario === "TIMEOUT_ADVICE_EMPTY") {
+  } else if (scenario === "TIMEOUT_ADVICE_OK" || scenario === "TIMEOUT_ADVICE_EMPTY" || scenario === "TIMEOUT_LATE_CONFIRM") {
     await sleep(9_000); // 9 detik simulasi timeout sebelum lempar error
     const err = new PdamApiError("PDAM timeout", "NETWORK_TIMEOUT", true);
     err.httpStatus = 408;
@@ -166,6 +174,12 @@ export async function mockPdamPayment(params: {
   if (scenario === "PAYMENT_ERROR") {
     const err = new PdamApiError("Transaksi gagal diproses", "PDAM_406", false);
     err.httpStatus = 200;
+    throw err;
+  }
+
+  if (scenario === "HTTP500_ADVICE_OK" || scenario === "HTTP500_ADVICE_EMPTY") {
+    const err = new PdamApiError("PDAM Payment API error: HTTP 500", "HTTP_500", false);
+    err.httpStatus = 500;
     throw err;
   }
 
@@ -199,7 +213,7 @@ export async function mockPdamAdvice(params: {
 
   const scenario = detectScenario(params.idpel);
 
-  if (scenario === "TIMEOUT_ADVICE_OK") {
+  if (scenario === "TIMEOUT_ADVICE_OK" || scenario === "HTTP500_ADVICE_OK" || scenario === "TIMEOUT_LATE_CONFIRM") {
     // Advice berhasil menemukan konfirmasi pembayaran
     const billData = [makeBill(params.idpel, 1, { nama: `PELANGGAN DUMMY ${params.idpel.slice(-4)}` })];
     return {
@@ -226,6 +240,7 @@ export async function mockPdamPaymentWithRetry(
     transactionCode: string;
     loketCode: string;
     username: string;
+    periods?: string[];
   },
   options?: { maxAttempts?: number; baseDelayMs?: number }
 ): Promise<{
@@ -249,7 +264,8 @@ export async function mockPdamPaymentWithRetry(
       await sleep(100);
       try {
         const adviceResult = await mockPdamAdvice({ idpel: params.idpel, tanggal });
-        if (adviceResult.data.length > 0) {
+        // TIMEOUT_LATE_CONFIRM: konfirmasi PDAM baru muncul setelah advice otomatis selesai
+        if (scenario !== "TIMEOUT_LATE_CONFIRM" && isAdviceConfirmingPeriods(adviceResult.data, params.periods)) {
           return {
             result: "000000",
             attempts: attempt,
@@ -297,7 +313,7 @@ export async function mockPdamPaymentWithRetry(
       normalized.attemptCount = attempt;
       lastError = normalized;
 
-      if (normalized.retryable && attempt < maxAttempts) {
+      if (isPdamOutcomeUnknown(normalized) && attempt < maxAttempts) {
         paymentTimedOut = true;
         continue;
       }

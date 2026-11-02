@@ -6,9 +6,9 @@ import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { notifyLowBalance } from "@/lib/notifications";
-import { debitLoketBalance } from "@/lib/saldo-mutations";
+import { reconcileTransactionHold, settleTransactionBalance } from "@/lib/transaction-balance";
+import { MAX_ADVICE_ATTEMPTS, sendToReviewIfAdviceExhausted } from "@/lib/advice-policy";
 
-const MAX_ADVICE_ATTEMPTS = 3;
 
 function safeJsonParse<T>(value: string | null | undefined): T | null {
   if (!value) return null;
@@ -56,7 +56,7 @@ async function syncMultiPaymentParent(transactionCode: string) {
   const statuses = allItems.map((r) => r.status as string);
   const successCount = statuses.filter((s) => s === "SUCCESS").length;
   const pendingCount = statuses.filter((s) =>
-    ["PENDING", "PENDING_ADVICE", "PENDING_PROVIDER"].includes(s)
+    ["PENDING", "PENDING_ADVICE", "PENDING_PROVIDER", "PENDING_REVIEW"].includes(s)
   ).length;
 
   let parentStatus: string;
@@ -354,7 +354,7 @@ export async function GET(req: NextRequest) {
       FROM multi_payment_items i
       JOIN multi_payment_requests r ON r.id = i.multi_payment_id
       WHERE i.provider = 'LUNASIN'
-        AND i.status IN ('PENDING_ADVICE', 'PENDING_PROVIDER', 'PENDING')
+        AND i.status IN ('PENDING_ADVICE', 'PENDING_PROVIDER', 'PENDING', 'PENDING_REVIEW')
         AND COALESCE(i.advice_attempts, 0) < ${MAX_ADVICE_ATTEMPTS}
         ${mpiLoketFilter}
       ORDER BY i.created_at DESC
@@ -417,9 +417,12 @@ export async function POST(req: NextRequest) {
     const item = itemRows[0];
     if (item) {
       const adviceAttempts = Number(item.advice_attempts || 0);
-      const overLimit = adviceAttempts >= MAX_ADVICE_ATTEMPTS;
+      // Batas hanya untuk advice rutin (PENDING_ADVICE). Dari Review Transaksi (PENDING_REVIEW)
+      // admin tetap boleh cek ulang ke provider.
+      const overLimit = adviceAttempts >= MAX_ADVICE_ATTEMPTS && item.status !== "PENDING_REVIEW";
 
       if (overLimit) {
+        const movedToReview = await sendToReviewIfAdviceExhausted(transactionCode, { actor: username, provider: "LUNASIN" });
         await logTransactionEventSafe({
           idempotencyKey: relatedIdempotencyKey,
           transactionCode,
@@ -438,8 +441,9 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json(
           {
-            error: `Advice sudah mencapai batas ${MAX_ADVICE_ATTEMPTS} kali dan tidak bisa diproses lagi dari menu ini.`,
+            error: `Advice sudah mencapai batas ${MAX_ADVICE_ATTEMPTS} kali. Transaksi diteruskan ke menu Review Transaksi untuk diputuskan admin.`,
             errorCode: "ADVICE_LIMIT_REACHED",
+            movedToReview: movedToReview > 0,
             adviceAttempts,
             maxAdviceAttempts: MAX_ADVICE_ATTEMPTS,
           },
@@ -510,7 +514,7 @@ export async function POST(req: NextRequest) {
                   failed_at = NULL,
                   updated_at = NOW()
             WHERE transaction_code = ?
-              AND status IN ('PENDING', 'PENDING_ADVICE', 'PENDING_PROVIDER')`,
+              AND status IN ('PENDING', 'PENDING_ADVICE', 'PENDING_PROVIDER', 'PENDING_REVIEW')`,
           [
             JSON.stringify(result.rawResponse || null),
             transactionCode,
@@ -531,21 +535,29 @@ export async function POST(req: NextRequest) {
                   failed_at = NOW(),
                   updated_at = NOW()
             WHERE transaction_code = ?
-              AND status IN ('PENDING', 'PENDING_ADVICE', 'PENDING_PROVIDER')`,
+              AND status IN ('PENDING', 'PENDING_ADVICE', 'PENDING_PROVIDER', 'PENDING_REVIEW')`,
           [
             JSON.stringify(result.rawResponse || null),
             transactionCode,
           ]
         );
+        // Provider menyatakan gagal → lepas hold saldo yang ditahan sejak payment
+        try {
+          await reconcileTransactionHold(transactionCode, { actor: username, note: "Advice Lunasin: pembayaran gagal" });
+        } catch (releaseError) {
+          console.error("[lunasin/advice] Gagal melepas hold saldo:", releaseError);
+        }
       } else {
         await pool.execute(
           `UPDATE multi_payment_items
               SET advice_attempts = COALESCE(advice_attempts, 0) + 1,
                   updated_at = NOW()
             WHERE transaction_code = ?
-              AND status IN ('PENDING', 'PENDING_ADVICE', 'PENDING_PROVIDER')`,
+              AND status IN ('PENDING', 'PENDING_ADVICE', 'PENDING_PROVIDER', 'PENDING_REVIEW')`,
           [transactionCode]
         );
+        // Masih belum pasti dan batas tercapai → langsung ke antrean review (tidak menunggu cron)
+        await sendToReviewIfAdviceExhausted(transactionCode, { actor: username, provider: "LUNASIN" });
       }
 
       // ── Sync parent multi_payment_requests ──
@@ -573,8 +585,17 @@ export async function POST(req: NextRequest) {
             const providerRpTotal = Number((result.data as Record<string, unknown>)?.rp_total ?? 0);
             const txTotal = providerRpTotal > 0 ? providerRpTotal : Number(txRow.item_total || 0);
 
-            const debit = await debitLoketBalance({ loketCode: txLoketCode, amount: txTotal, allowNegative: true });
-            if (!debit.ok || debit.forced) {
+            // Saldo sudah ditahan saat payment — samakan potongan bersih ke nominal final
+            // (idempoten berbasis ledger, tidak memotong dua kali).
+            const debit = await settleTransactionBalance({
+              transactionCode,
+              loketCode: txLoketCode,
+              outcome: "SUCCESS",
+              targetAmount: txTotal,
+              actor: username,
+              note: "Advice Lunasin sukses",
+            });
+            if (debit.forced) {
               // Saldo tak mencukupi — provider sudah memotong, paksa potong &
               // catat anomali agar bisa direkonsiliasi keuangan.
               await logTransactionEventSafe({

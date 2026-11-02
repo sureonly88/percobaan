@@ -1,5 +1,6 @@
 import pool from "@/lib/db";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
+import { reconcileHoldsForTransactions } from "@/lib/transaction-balance";
 import {
   MultiPaymentRequestInput,
   MultiPaymentRequestStatus,
@@ -189,7 +190,7 @@ export async function updateMultiPaymentItems(multiPaymentId: number, results: P
             AND dup.period_label <=> cur.period_label
             AND dup.provider = cur.provider
           WHERE cur.multi_payment_id = ? AND cur.item_code = ?
-            AND dup.status = 'PENDING_ADVICE'
+            AND dup.status IN ('PENDING_ADVICE', 'PENDING_REVIEW')
             AND dup.multi_payment_id != ?`,
         [multiPaymentId, result.itemCode, multiPaymentId]
       );
@@ -235,6 +236,12 @@ export async function updateMultiPaymentItems(multiPaymentId: number, results: P
         [multiPaymentId, result.itemCode]
       );
       if (itemInfo[0]) {
+        const [supersededRows] = await pool.query<RowDataPacket[]>(
+          `SELECT DISTINCT transaction_code FROM multi_payment_items
+            WHERE customer_id = ? AND period_label <=> ? AND provider = ?
+              AND status IN ('PENDING_ADVICE', 'PENDING_REVIEW') AND multi_payment_id != ?`,
+          [itemInfo[0].customer_id, itemInfo[0].period_label, itemInfo[0].provider, multiPaymentId]
+        );
         await pool.execute(
           `UPDATE multi_payment_items
               SET status = 'FAILED',
@@ -245,9 +252,14 @@ export async function updateMultiPaymentItems(multiPaymentId: number, results: P
             WHERE customer_id = ?
               AND period_label <=> ?
               AND provider = ?
-              AND status = 'PENDING_ADVICE'
+              AND status IN ('PENDING_ADVICE', 'PENDING_REVIEW')
               AND multi_payment_id != ?`,
           [itemInfo[0].customer_id, itemInfo[0].period_label, itemInfo[0].provider, multiPaymentId]
+        );
+        // Transaksi lama yang tergantikan tidak jadi dibayar → lepas hold-nya
+        await reconcileHoldsForTransactions(
+          supersededRows.map((r) => String(r.transaction_code || "")),
+          { note: "Tergantikan oleh pembayaran lain yang berhasil" }
         );
       }
 

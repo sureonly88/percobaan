@@ -4,6 +4,7 @@ import { LunasinApiError, lunasinInquiry } from "@/lib/lunasin-api";
 import pool from "@/lib/db";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
+import { saveInquirySnapshots } from "@/lib/inquiry-snapshots";
 
 export async function POST(req: NextRequest) {
   const token = await getAuthToken(req);
@@ -78,6 +79,29 @@ export async function POST(req: NextRequest) {
       .map((item) => String(item.periode || ""))
       .filter(Boolean);
     const billCount = Number(result.data.jum_bill || periods.length || 1);
+
+    // Simpan snapshot nominal (key: idTrx) — endpoint pay hanya memakai nominal ini
+    try {
+      await saveInquirySnapshots("LUNASIN", username, [{
+        customerId: idpel.trim(),
+        refKey: result.idTrx,
+        amount: Number(result.data.rp_amount || 0),
+        adminFee: Number(result.data.rp_admin || 0),
+        total: Number(result.data.rp_total || 0),
+        payload: {
+          idpel: idpel.trim(),
+          providerIdpel: String(result.data.idpel || ""),
+          kodeProduk: resolvedKodeProduk,
+          nama: String(result.data.nama || ""),
+        },
+      }]);
+    } catch (snapshotErr) {
+      console.error("[lunasin/inquiry] Gagal menyimpan inquiry snapshot:", snapshotErr);
+      return NextResponse.json(
+        { error: "Gagal menyimpan data tagihan, silakan ulangi cek tagihan" },
+        { status: 500 }
+      );
+    }
 
     // Log inquiry
     try {

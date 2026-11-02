@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { loketCode, nama, alamat, jenis, pulsa, biayaAdmin, isBlok, blokMessage, byadmin } = body;
+    const { loketCode, nama, alamat, jenis, biayaAdmin, isBlok, blokMessage, byadmin } = body;
 
     if (!loketCode || !nama) {
       return NextResponse.json({ error: "Kode loket dan nama wajib diisi" }, { status: 400 });
@@ -125,7 +125,8 @@ export async function POST(request: NextRequest) {
 
     const [result] = await pool.query<ResultSetHeader>(
       "INSERT INTO lokets (loket_code, nama, alamat, jenis, pulsa, biaya_admin, is_blok, blok_message, byadmin, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktif')",
-      [loketCode, nama, alamat || "", jenis || "", Number(pulsa || 0), Number(biayaAdmin ?? 0), isBlok ? 1 : 0, blokMessage || "", byadmin || ""]
+      // Loket baru selalu mulai dari saldo 0; saldo awal diisi lewat menu Saldo agar tercatat.
+      [loketCode, nama, alamat || "", jenis || "", 0, Number(biayaAdmin ?? 0), isBlok ? 1 : 0, blokMessage || "", byadmin || ""]
     );
 
     await auditLog({
@@ -136,7 +137,7 @@ export async function POST(request: NextRequest) {
       action: "LOKET_CREATE",
       entityType: "loket",
       entityId: result.insertId || loketCode,
-      after: { loketCode, nama, jenis: jenis || "", pulsa: Number(pulsa || 0), biayaAdmin: Number(biayaAdmin ?? 0), isBlok: Boolean(isBlok) },
+      after: { loketCode, nama, jenis: jenis || "", pulsa: 0, biayaAdmin: Number(biayaAdmin ?? 0), isBlok: Boolean(isBlok) },
     });
 
     return NextResponse.json({ message: "Loket berhasil ditambahkan" });
@@ -156,7 +157,7 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { loketCode, nama, alamat, status, jenis, pulsa, biayaAdmin, isBlok, blokMessage, byadmin } = body;
+    const { loketCode, nama, alamat, status, jenis, biayaAdmin, isBlok, blokMessage, byadmin } = body;
 
     if (!loketCode) {
       return NextResponse.json({ error: "Kode loket wajib diisi" }, { status: 400 });
@@ -169,7 +170,9 @@ export async function PUT(request: NextRequest) {
     if (alamat !== undefined) { fields.push("alamat = ?"); values.push(alamat); }
     if (status !== undefined) { fields.push("status = ?"); values.push(status); }
     if (jenis !== undefined) { fields.push("jenis = ?"); values.push(jenis); }
-    if (pulsa !== undefined) { fields.push("pulsa = ?"); values.push(Number(pulsa)); }
+    // Saldo (pulsa) sengaja TIDAK bisa diubah lewat edit loket: form mengirim nilai
+    // lama sehingga bisa menimpa mutasi yang terjadi selama form terbuka. Gunakan
+    // /api/saldo (tercatat di loket_balance_ledger + jurnal GL).
     if (biayaAdmin !== undefined) { fields.push("biaya_admin = ?"); values.push(Number(biayaAdmin)); }
     if (isBlok !== undefined) { fields.push("is_blok = ?"); values.push(isBlok ? 1 : 0); }
     if (blokMessage !== undefined) { fields.push("blok_message = ?"); values.push(blokMessage); }

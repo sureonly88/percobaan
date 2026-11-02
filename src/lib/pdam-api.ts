@@ -108,6 +108,17 @@ export interface PdamPaymentExecutionResult {
   httpStatus: number;
 }
 
+/**
+ * Apakah status pembayaran di sisi PDAM TIDAK PASTI (request mungkin sudah diproses)?
+ * true untuk timeout/jaringan, HTTP 5xx, dan respons yang tidak bisa dibaca. Transaksi
+ * seperti ini wajib dicek lewat advice — jangan dianggap gagal & jangan bayar ulang.
+ */
+export function isPdamOutcomeUnknown(err: unknown): boolean {
+  if (!(err instanceof PdamApiError)) return !(err instanceof Error && err.name === "CircuitOpenError");
+  if (err.retryable) return true;
+  return /^HTTP_5\d\d$/.test(err.code) || err.code === "INVALID_PAYMENT_RESPONSE";
+}
+
 export class PdamApiError extends Error {
   code: string;
   retryable: boolean;
@@ -157,7 +168,7 @@ export async function pdamInquiry(idpel: string): Promise<PdamInquiryExecutionRe
     });
   } catch (error: unknown) {
     recordFailure(PDAM_PROVIDER);
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
       const timeoutError = new PdamApiError("PDAM inquiry timeout", "NETWORK_TIMEOUT", true);
       timeoutError.httpStatus = 408;
       throw timeoutError;
@@ -268,7 +279,7 @@ export async function pdamPayment(params: {
     });
   } catch (error: unknown) {
     recordFailure(PDAM_PROVIDER);
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
       const timeoutError = new PdamApiError("PDAM timeout", "NETWORK_TIMEOUT", true);
       timeoutError.httpStatus = 408;
       throw timeoutError;
@@ -292,7 +303,15 @@ export async function pdamPayment(params: {
     throw httpError;
   }
 
-  const data: PdamPaymentResponse = await res.json();
+  let data: PdamPaymentResponse;
+  try {
+    data = await res.json();
+  } catch {
+    // Respons tidak terbaca (mis. halaman error gateway) — status di PDAM tidak pasti
+    const parseError = new PdamApiError("Respons payment PDAM tidak dapat dibaca", "INVALID_PAYMENT_RESPONSE", false);
+    parseError.httpStatus = res.status;
+    throw parseError;
+  }
   const result = data.RequestPaymentBulk_Rev2Result;
 
   if (typeof result === "object" && result !== null) {
@@ -349,6 +368,19 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Advice dianggap mengonfirmasi pembayaran hanya bila data advice memuat SEMUA periode
+ * yang dibayar. Tanpa daftar periode (pemanggil lama) cukup ada data advice.
+ * Mencegah salah konfirmasi ketika pelanggan membayar periode lain di hari yang sama.
+ */
+export function isAdviceConfirmingPeriods(adviceData: PdamInquiryItem[], periods?: string[]): boolean {
+  if (adviceData.length === 0) return false;
+  const wanted = (periods || []).map((p) => String(p).trim()).filter(Boolean);
+  if (wanted.length === 0) return true;
+  const found = new Set(adviceData.map((d) => String(d.thbln || "").trim()));
+  return wanted.every((p) => found.has(p));
+}
+
+/**
  * Controlled retry for PDAM payment API.
  *
  * Strategy setelah payment timeout:
@@ -368,6 +400,8 @@ export async function pdamPaymentWithRetry(
     transactionCode: string;
     loketCode: string;
     username: string;
+    /** Periode (thbln) yang dibayar — advice hanya dianggap konfirmasi bila semua periode ini ada. */
+    periods?: string[];
     // mock param is forwarded transparently
   },
   options?: {
@@ -400,7 +434,7 @@ export async function pdamPaymentWithRetry(
 
       try {
         const adviceResult = await pdamAdvice({ idpel: params.idpel, tanggal });
-        if (adviceResult.data.length > 0) {
+        if (isAdviceConfirmingPeriods(adviceResult.data, params.periods)) {
           // PDAM sudah memproses pembayaran — kembalikan sebagai sukses
           recordSuccess(PDAM_PROVIDER);
           return {
@@ -458,8 +492,9 @@ export async function pdamPaymentWithRetry(
       normalized.attemptCount = attempt;
       lastError = normalized;
 
-      if (normalized.retryable && attempt < maxAttempts) {
-        // Tandai timeout — percobaan berikutnya akan pakai advice
+      if (isPdamOutcomeUnknown(normalized) && attempt < maxAttempts) {
+        // Status tidak pasti (timeout / 5xx / respons tak terbaca) — percobaan
+        // berikutnya pakai advice, BUKAN payment ulang (cegah double-charge)
         paymentTimedOut = true;
         continue;
       }
@@ -514,7 +549,7 @@ export async function pdamAdvice(params: {
     });
   } catch (error: unknown) {
     recordFailure(PDAM_PROVIDER);
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
       const timeoutError = new PdamApiError("PDAM advice timeout", "NETWORK_TIMEOUT", true);
       timeoutError.httpStatus = 408;
       throw timeoutError;

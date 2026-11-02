@@ -5,76 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { getAccessiblePages, normalizeRole, ROLE_LABELS } from "@/lib/rbac";
+import { NAV_GROUPS, filterNavGroups, type NavGroup } from "./nav-config";
 
-type NavItem = { label: string; href: string; icon: string };
-type NavGroup = { category: string; items: NavItem[] };
 type BadgeMap = Record<string, number>;
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    category: "Operasional",
-    items: [
-      { label: "Dashboard", href: "/", icon: "dashboard" },
-      { label: "Multi-Payment", href: "/pembayaran", icon: "receipt_long" },
-      { label: "Payment Link", href: "/payment-links", icon: "link" },
-      { label: "Advice Lunasin", href: "/advice-lunasin", icon: "fact_check" },
-      { label: "Advice PDAM", href: "/advice-pdam", icon: "water_drop" },
-      { label: "Transaksi Tergantung", href: "/pending-transaksi", icon: "pending_actions" },
-      { label: "Tutup Kasir", href: "/tutup-kasir", icon: "point_of_sale" },
-      { label: "Notifikasi", href: "/notifikasi", icon: "notifications" },
-    ],
-  },
-  {
-    category: "Laporan & Monitoring",
-    items: [
-      { label: "Verifikasi Kasir", href: "/verifikasi-kasir", icon: "verified" },
-      { label: "Laporan Transaksi", href: "/laporan", icon: "analytics" },
-      { label: "Riwayat", href: "/riwayat", icon: "history" },
-      { label: "Cetak Ulang Struk", href: "/cetak-ulang", icon: "print" },
-      { label: "Monitoring Transaksi", href: "/monitoring", icon: "monitor_heart" },
-      { label: "Risiko Transaksi", href: "/monitoring/risiko", icon: "crisis_alert" },
-      { label: "Rekonsiliasi Data", href: "/rekonsiliasi", icon: "table_view" },
-      { label: "Health Provider", href: "/monitoring/provider-health", icon: "health_metrics" },
-    ],
-  },
-  {
-    category: "Keuangan & Akuntansi",
-    items: [
-      { label: "Ringkasan Keuangan", href: "/keuangan", icon: "account_balance" },
-      { label: "Margin & Profit", href: "/keuangan/margin", icon: "trending_up" },
-      { label: "Pengaturan Komisi", href: "/keuangan/komisi", icon: "redeem" },
-      { label: "Laporan Komisi", href: "/keuangan/komisi/laporan", icon: "payments" },
-      { label: "Settlement Loket", href: "/settlement", icon: "handshake" },
-      { label: "Jurnal Umum", href: "/keuangan/jurnal", icon: "menu_book" },
-      { label: "Buku Besar", href: "/keuangan/buku-besar", icon: "import_contacts" },
-      { label: "Neraca Saldo", href: "/keuangan/neraca-saldo", icon: "balance" },
-      { label: "Chart of Accounts", href: "/keuangan/akun", icon: "format_list_numbered" },
-    ],
-  },
-  {
-    category: "Loket & Saldo",
-    items: [
-      { label: "Manajemen Loket", href: "/loket", icon: "store" },
-      { label: "Anggota Loket", href: "/loket/members", icon: "manage_accounts" },
-      { label: "Update Saldo Loket", href: "/saldo", icon: "account_balance_wallet" },
-      { label: "Top-up Saldo", href: "/topup", icon: "add_card" },
-    ],
-  },
-  {
-    category: "Administrasi",
-    items: [
-      { label: "Manajemen Pelanggan", href: "/pelanggan", icon: "group" },
-      { label: "Biaya Admin", href: "/biaya-admin", icon: "payments" },
-      { label: "Manajemen User", href: "/users", icon: "admin_panel_settings" },
-      { label: "Pendaftaran Agen", href: "/users/registrations", icon: "how_to_reg" },
-      { label: "API Provider", href: "/provider", icon: "api" },
-      { label: "Dokumentasi API", href: "/provider/docs", icon: "menu_book" },
-      { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
-      { label: "DB Manager", href: "/db-manage", icon: "database" },
-      { label: "Import Transaksi", href: "/import-transaksi", icon: "move_to_inbox" },
-    ],
-  },
-];
 
 function NavDropdown({ group, isActive, badgeMap = {} }: { group: NavGroup; isActive: boolean; badgeMap?: BadgeMap }) {
   const [open, setOpen] = useState(false);
@@ -93,19 +26,21 @@ function NavDropdown({ group, isActive, badgeMap = {} }: { group: NavGroup; isAc
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+        title={group.category}
+        className={`flex items-center gap-1 whitespace-nowrap px-2.5 py-2 rounded-lg text-sm font-medium transition-colors ${
           isActive
             ? "text-primary bg-primary/10"
             : "text-slate-600 dark:text-slate-300 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-800"
         }`}
       >
-        {group.category}
+        {group.shortLabel}
         <span className={`material-symbols-outlined text-base transition-transform ${open ? "rotate-180" : ""}`}>
           expand_more
         </span>
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl py-2 z-50">
+        <div className="absolute top-full left-0 mt-1 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl py-2 z-50">
+          <p className="px-4 pb-1.5 pt-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">{group.category}</p>
           {group.items.map((item) => {
             const itemActive = pathname === item.href;
             return (
@@ -160,14 +95,7 @@ export function AppTopNav() {
 
   const accessiblePages = useMemo(() => getAccessiblePages(userRole), [userRole]);
   const filteredNavGroups = useMemo(() => {
-    return NAV_GROUPS.map((group) => ({
-      ...group,
-      items: group.items.filter((item) =>
-        accessiblePages.some(
-          (p) => item.href === p || (p !== "/" && item.href.startsWith(p + "/"))
-        )
-      ),
-    })).filter((group) => group.items.length > 0);
+    return filterNavGroups(NAV_GROUPS, accessiblePages);
   }, [accessiblePages]);
 
   // Fetch pending registrations count for admin badge
@@ -192,12 +120,36 @@ export function AppTopNav() {
     setMobileOpen(false);
   }, [pathname]);
 
+  // Drawer: tutup dengan Escape & kunci scroll halaman selama terbuka
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileOpen(false);
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [mobileOpen]);
+
   return (
-    <nav className="sticky top-0 z-50 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+    <nav className="print:hidden sticky top-0 z-50 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
       {/* Main bar */}
       <div className="px-4 lg:px-6 flex items-center justify-between h-16">
         {/* Left: Logo + Desktop Nav */}
         <div className="flex items-center gap-1 lg:gap-2 min-w-0">
+          {/* Tombol drawer menu (layar < 1280px) */}
+          <button
+            onClick={() => setMobileOpen(true)}
+            title="Buka menu"
+            aria-expanded={mobileOpen}
+            className="xl:hidden -ml-2 mr-1 p-2 rounded-lg text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <span className="material-symbols-outlined text-2xl">menu</span>
+          </button>
           <Link href="/" className="flex items-center gap-2.5 mr-4 shrink-0">
             <div className="bg-primary rounded-lg p-1.5 flex items-center justify-center text-white">
               <span className="material-symbols-outlined text-xl">bolt</span>
@@ -206,7 +158,8 @@ export function AppTopNav() {
           </Link>
 
           {/* Desktop nav */}
-          <div className="hidden lg:flex items-center gap-0.5">
+          {/* 8 grup menu baru muat mulai 1280px; di bawahnya pakai menu hamburger */}
+          <div className="hidden xl:flex items-center gap-0.5">
             {filteredNavGroups.map((group) => {
               const groupActive = group.items.some((item) => pathname === item.href);
               const badgeMap: BadgeMap = pendingCount > 0 ? { "/users/registrations": pendingCount } : {};
@@ -221,7 +174,7 @@ export function AppTopNav() {
             <div className="h-7 w-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
               {initials}
             </div>
-            <div className="hidden md:flex items-center gap-2 text-sm min-w-0">
+            <div className="hidden md:flex xl:hidden 2xl:flex items-center gap-2 text-sm min-w-0">
               <span className="font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[120px]">
                 {userName}
               </span>
@@ -237,27 +190,47 @@ export function AppTopNav() {
             title="Keluar"
           >
             <span className="material-symbols-outlined text-lg">logout</span>
-            <span className="hidden lg:inline">Keluar</span>
+            <span className="hidden 2xl:inline">Keluar</span>
           </button>
 
-          {/* Mobile hamburger */}
-          <button
-            onClick={() => setMobileOpen((v) => !v)}
-            className="lg:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            <span className="material-symbols-outlined text-2xl">
-              {mobileOpen ? "close" : "menu"}
-            </span>
-          </button>
         </div>
       </div>
 
-      {/* Mobile menu */}
-      {mobileOpen && (
-        <div className="lg:hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 max-h-[calc(100vh-4rem)] overflow-y-auto">
+      {/* Drawer menu (layar < 1280px) — panel samping, bukan layar penuh */}
+      <div
+        className={`xl:hidden fixed inset-0 z-[60] bg-black/40 backdrop-blur-[1px] transition-opacity duration-200 ${
+          mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={() => setMobileOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        className={`xl:hidden fixed inset-y-0 left-0 z-[70] flex w-72 max-w-[85vw] flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 shadow-2xl transition-transform duration-200 ease-out ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+        aria-label="Menu navigasi"
+        aria-hidden={!mobileOpen}
+      >
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="bg-primary rounded-lg p-1.5 flex items-center justify-center text-white">
+              <span className="material-symbols-outlined text-xl">bolt</span>
+            </div>
+            <span className="text-lg font-bold tracking-tight">Pedami</span>
+          </Link>
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            title="Tutup menu"
+          >
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto py-2">
           {filteredNavGroups.map((group) => (
-            <div key={group.category} className="py-2">
-              <p className="px-4 py-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+            <div key={group.category} className="py-1.5">
+              <p className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 {group.category}
               </p>
               {group.items.map((item) => {
@@ -266,7 +239,8 @@ export function AppTopNav() {
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`flex items-center gap-3 px-5 py-3 text-sm transition-colors ${
+                    tabIndex={mobileOpen ? 0 : -1}
+                    className={`mx-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                       itemActive
                         ? "text-primary bg-primary/10 font-medium"
                         : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
@@ -284,17 +258,28 @@ export function AppTopNav() {
               })}
             </div>
           ))}
-          <div className="border-t border-slate-200 dark:border-slate-800 p-3">
-            <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              className="flex items-center gap-3 px-4 py-3 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors w-full"
-            >
-              <span className="material-symbols-outlined">logout</span>
-              Keluar
-            </button>
-          </div>
         </div>
-      )}
+
+        <div className="shrink-0 border-t border-slate-200 dark:border-slate-800 p-3">
+          <div className="mb-2 flex items-center gap-2 px-2">
+            <div className="h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{userName}</p>
+              <p className="text-[10px] font-bold uppercase text-primary">{roleLabel}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            tabIndex={mobileOpen ? 0 : -1}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            <span className="material-symbols-outlined text-lg">logout</span>
+            Keluar
+          </button>
+        </div>
+      </aside>
     </nav>
   );
 }

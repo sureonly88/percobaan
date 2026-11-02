@@ -50,20 +50,21 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
     "/db-manage", "/import-transaksi",
     "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun", "/keuangan/komisi", "/keuangan/komisi/laporan",
-    "/settlement",
+    "/settlement", "/pembatalan", "/review-transaksi", "/panduan",
   ],
   supervisor: [
     // Operasional
     "/", "/payment-links", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/notifikasi",
     // Kasir & Laporan
-    "/tutup-kasir", "/verifikasi-kasir", "/laporan", "/rekonsiliasi", "/riwayat", "/cetak-ulang", "/monitoring",
+    "/tutup-kasir", "/verifikasi-kasir", "/pembatalan", "/review-transaksi", "/laporan", "/rekonsiliasi", "/riwayat", "/cetak-ulang", "/monitoring",
     // Pelanggan & Loket
     "/pelanggan", "/loket", "/loket/members", "/saldo", "/topup",
     // Keuangan
     "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/komisi", "/keuangan/komisi/laporan",
     "/settlement",
     // Administrasi (view-level)
-    "/biaya-admin", "/users/registrations", "/pengaturan",
+    // Biaya Admin & Pendaftaran Agen khusus admin (API-nya hanya melayani admin)
+    "/pengaturan", "/panduan",
   ],
   kasir: [
     // Operasional
@@ -73,7 +74,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     // Pelanggan & Loket
     "/pelanggan", "/loket/members", "/topup",
     // Akun pribadi
-    "/pengaturan",
+    "/pengaturan", "/panduan",
   ],
   switcher: [
     "/provider/docs",
@@ -99,7 +100,8 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
   },
   "/api/saldo": {
     GET: ["admin", "supervisor", "kasir"],
-    POST: ["admin", "kasir"],
+    // Mutasi saldo manual hanya admin. Kasir menambah saldo lewat /api/topup (gateway).
+    POST: ["admin"],
   },
   "/api/biaya-admin": {
     GET: ["admin"],
@@ -127,6 +129,16 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor", "kasir"],
     POST: ["admin", "supervisor", "kasir"],
     PATCH: ["admin", "supervisor", "kasir"],
+  },
+  "/api/transaksi/review": {
+    GET: ["admin", "supervisor"],
+    POST: ["admin", "supervisor"],
+    PATCH: ["admin", "supervisor"],
+  },
+  "/api/transaksi/pembatalan": {
+    GET: ["admin", "supervisor"],
+    POST: ["admin", "supervisor"],
+    PATCH: ["admin", "supervisor"],
   },
   "/api/verifikasi-kasir": {
     GET: ["admin", "supervisor"],

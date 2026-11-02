@@ -396,22 +396,18 @@ export default function PembayaranPage() {
   useEffect(() => {
     if (!userId) return;
     setLoketLoading(true);
-    Promise.all([
-      fetch(`/api/pengaturan/profil?userId=${userId}`).then((r) => r.json()),
-      fetch("/api/loket").then((r) => r.json()),
-    ])
-      .then(([profile, loketData]) => {
+    // Data loket (biaya admin, saldo, tier PLN) diambil dari profil sendiri — kasir tidak
+    // punya akses ke /api/loket, sehingga dulu biaya admin terbaca Rp 0 untuk kasir.
+    fetch(`/api/pengaturan/profil?userId=${userId}`)
+      .then((r) => r.json())
+      .then((profile) => {
         if (profile?.loket) {
-          const lokets = loketData.lokets ?? [];
-          const matched = lokets.find(
-            (l: { loketCode: string }) => l.loketCode === profile.loket.loketCode
-          );
           const info = {
             loketCode: profile.loket.loketCode,
             nama: profile.loket.nama,
-            biayaAdmin: matched?.biayaAdmin ?? 0,
-            pulsa: matched?.pulsa ?? 0,
-            plnAdminTier: matched?.plnAdminTier ?? 3000,
+            biayaAdmin: Number(profile.loket.biayaAdmin ?? 0),
+            pulsa: Number(profile.loket.pulsa ?? 0),
+            plnAdminTier: Number(profile.loket.plnAdminTier ?? 3000),
           };
           setLoketInfo(info);
           setBiayaAdminPerTagihan(info.biayaAdmin);
@@ -1640,7 +1636,7 @@ export default function PembayaranPage() {
           if (allOk) {
             setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "success", label: total === 1 ? "Berhasil" : `${okCount} rekening berhasil` } }));
           } else if (hasAdvice) {
-            setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "pending_advice", label: "Menunggu konfirmasi PDAM" } }));
+            setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "pending_advice", label: "Menunggu konfirmasi PDAM — saldo ditahan, jangan tagih ulang" } }));
           } else if (okCount > 0) {
             setCustomerPayStatus((prev) => ({ ...prev, [groupKey]: { state: "partial", label: `${okCount}/${total} rekening berhasil` } }));
           } else {
@@ -3465,12 +3461,21 @@ export default function PembayaranPage() {
                         </span>
                       )}
                       {adviceCount > 0 && (
-                        <span className="flex items-center gap-1 text-xs text-amber-500">
+                        <span className="flex items-center gap-1 text-xs text-amber-500" title="Saldo ditahan sampai provider memberi kepastian">
                           <span className="material-symbols-outlined text-sm">hourglass_empty</span>
                           {adviceCount} advice
                         </span>
                       )}
                     </div>
+                    {adviceCount > 0 && (
+                      <p className="flex items-start gap-1.5 rounded-md bg-amber-50 dark:bg-amber-900/20 px-2.5 py-2 text-[11px] leading-snug text-amber-700 dark:text-amber-300">
+                        <span className="material-symbols-outlined text-sm shrink-0">info</span>
+                        <span>
+                          Pembayaran belum terkonfirmasi provider. Saldo loket untuk transaksi ini <strong>ditahan sementara</strong> dan
+                          kembali otomatis bila provider memastikan pembayaran gagal. <strong>Jangan tagih ulang pelanggan</strong> sebelum status jelas.
+                        </span>
+                      </p>
+                    )}
                     {/* Detail label per pelanggan */}
                     {statuses.length > 1 && (
                       <div className="flex flex-col gap-1 pt-1 border-t border-slate-200 dark:border-slate-700">

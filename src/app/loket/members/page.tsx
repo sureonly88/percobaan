@@ -70,6 +70,7 @@ export default function LoketMembersPage() {
   // Fetch loket list for admin selector
   useEffect(() => {
     if (!isAdmin) return;
+    // rbac-check: admin, supervisor
     fetch("/api/loket")
       .then(r => r.json())
       .then(d => {

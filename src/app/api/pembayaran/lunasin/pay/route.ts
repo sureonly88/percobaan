@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { canProcessPayment } from "@/lib/rbac";
-import { LunasinApiError, lunasinPayment } from "@/lib/lunasin-api";
+import { LunasinApiError, isLunasinOutcomeUnknown, lunasinPayment } from "@/lib/lunasin-api";
 import { getAuthToken, unauthorized, forbidden } from "@/lib/api-auth";
 import pool from "@/lib/db";
 import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { notifyTransactionFailed, notifyTransactionSuccess, notifyTransactionPartial, notifyLowBalance } from "@/lib/notifications";
 import { assertCashierCanProcessPayment, CashierClosingError } from "@/lib/cashier-closing";
-import { debitLoketBalance } from "@/lib/saldo-mutations";
+import { creditLoketBalance, debitLoketBalance } from "@/lib/saldo-mutations";
+import { consumeInquirySnapshots, loadInquirySnapshots } from "@/lib/inquiry-snapshots";
 
 interface LunasinBill {
   idpel: string;
@@ -40,6 +41,61 @@ function buildRequestHash(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+/**
+ * Ganti nominal tagihan dari client dengan snapshot inquiry server-side (key: idTrx).
+ * idTrx tanpa snapshot yang valid (belum inquiry / kedaluwarsa / milik user lain) ditolak.
+ */
+async function applyLunasinInquirySnapshots(
+  username: string,
+  bills: LunasinBill[]
+): Promise<{ ok: true; bills: LunasinBill[] } | { ok: false; error: string; code: string }> {
+  const seen = new Set<string>();
+  for (const bill of bills) {
+    const idTrx = String(bill.idTrx || "").trim();
+    if (!idTrx || !String(bill.idpel || "").trim()) {
+      return { ok: false, error: "Data tagihan tidak lengkap (idpel/idTrx)", code: "INVALID_BILL" };
+    }
+    if (seen.has(idTrx)) {
+      return { ok: false, error: `Transaksi ${idTrx} terduplikasi dalam satu pembayaran`, code: "DUPLICATE_BILL" };
+    }
+    seen.add(idTrx);
+  }
+
+  const snapshots = await loadInquirySnapshots(
+    "LUNASIN",
+    username,
+    bills.map((b) => ({ refKey: String(b.idTrx).trim() }))
+  );
+  const verified: LunasinBill[] = [];
+  for (const bill of bills) {
+    const idTrx = String(bill.idTrx).trim();
+    const idpel = String(bill.idpel).trim();
+    const snap = snapshots.get(idTrx);
+    const p = (snap?.payload || {}) as Record<string, unknown>;
+    const allowedIdpel = [String(p.idpel || ""), String(p.providerIdpel || "")].filter(Boolean);
+    if (!snap || !allowedIdpel.includes(idpel)) {
+      return {
+        ok: false,
+        error: `Data cek tagihan ${idpel} tidak ditemukan atau sudah kedaluwarsa. Silakan cek tagihan ulang.`,
+        code: "INQUIRY_SNAPSHOT_NOT_FOUND",
+      };
+    }
+    verified.push({
+      ...bill,
+      idpel,
+      idTrx,
+      kodeProduk: String(p.kodeProduk || bill.kodeProduk),
+      nama: String(p.nama || bill.nama || ""),
+      // Beberapa produk tidak mengembalikan nominal saat inquiry (0) — fallback ke nilai client,
+      // lalu disesuaikan dengan rp_total dari respons payment provider.
+      total: snap.total > 0 ? snap.total : Number(bill.total || 0),
+      rpAmount: snap.amount > 0 ? snap.amount : Number(bill.rpAmount || 0),
+      admin: snap.total > 0 ? snap.adminFee : Number(bill.admin || 0),
+    });
+  }
+  return { ok: true, bills: verified };
+}
+
 function safeJsonParse<T>(value: string | null): T | null {
   if (!value) return null;
   try {
@@ -55,7 +111,7 @@ export async function POST(req: NextRequest) {
   if (!canProcessPayment(token.role)) return forbidden("Anda tidak memiliki akses untuk pembayaran");
 
   const body = await req.json();
-  const { bills, loketCode, loketName, biayaAdmin, idempotencyKey, skipMultiPayment } = body as {
+  const { bills: clientBills, loketCode, loketName, biayaAdmin, idempotencyKey, skipMultiPayment } = body as {
     bills: LunasinBill[];
     loketCode: string;
     loketName: string;
@@ -64,9 +120,10 @@ export async function POST(req: NextRequest) {
     skipMultiPayment?: boolean;
   };
 
-  if (!bills || !Array.isArray(bills) || bills.length === 0) {
+  if (!clientBills || !Array.isArray(clientBills) || clientBills.length === 0) {
     return NextResponse.json({ error: "Daftar tagihan kosong" }, { status: 400 });
   }
+  let bills = clientBills;
   if (!loketCode) {
     return NextResponse.json({ error: "Loket belum dipilih" }, { status: 400 });
   }
@@ -84,6 +141,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     throw error;
+  }
+
+  // Nominal tagihan wajib berasal dari snapshot inquiry server, bukan dari client
+  const snapshotCheck = await applyLunasinInquirySnapshots(username, clientBills);
+  if (snapshotCheck.ok) {
+    bills = snapshotCheck.bills;
+  } else {
+    // Retry dengan idempotencyKey yang sudah pernah diproses tetap boleh lewat
+    // agar mendapat replay respons lama (snapshot mungkin sudah dikonsumsi/kedaluwarsa).
+    const [priorRows] = await pool.query<RowDataPacket[]>(
+      "SELECT id FROM payment_requests WHERE idempotency_key = ? LIMIT 1",
+      [idempotencyKeyTrimmed]
+    );
+    if (priorRows.length === 0) {
+      return NextResponse.json({ error: snapshotCheck.error, errorCode: snapshotCheck.code }, { status: 422 });
+    }
   }
 
   // Fetch loket info
@@ -104,7 +177,8 @@ export async function POST(req: NextRequest) {
     // fallback
   }
 
-  // Validate saldo
+  // Validasi awal saldo (cepat-tolak). Penjaga sebenarnya adalah hold saldo atomik
+  // per tagihan sebelum memanggil provider.
   // bill.total sudah mencakup admin fee (total = rpAmount + admin), jadi biayaAdmin tidak perlu ditambahkan lagi
   const totalPembayaran = bills.reduce((sum, b) => sum + b.total, 0);
   if (saldoLoket < totalPembayaran) {
@@ -116,7 +190,7 @@ export async function POST(req: NextRequest) {
 
   const normalizedRequestPayload = {
     provider: "LUNASIN",
-    bills,
+    bills: clientBills,
     loketCode,
     loketName,
     biayaAdmin,
@@ -155,6 +229,15 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     const mysqlErr = error as { code?: string };
     if (mysqlErr.code !== "ER_DUP_ENTRY") throw error;
+  }
+
+  if (lockOwner && !snapshotCheck.ok) {
+    // Seharusnya tidak terjadi (key sudah ada → lock gagal), tapi jangan pernah lanjut tanpa snapshot
+    await pool.execute(
+      "UPDATE payment_requests SET status = 'FAILED', error_code = ?, error_message = ?, updated_at = NOW() WHERE idempotency_key = ?",
+      [snapshotCheck.code, snapshotCheck.error, idempotencyKeyTrimmed]
+    );
+    return NextResponse.json({ error: snapshotCheck.error, errorCode: snapshotCheck.code }, { status: 422 });
   }
 
   if (!lockOwner) {
@@ -290,6 +373,89 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Hold saldo secara atomik SEBELUM memanggil provider — mencegah saldo minus
+      // akibat beberapa pembayaran paralel yang lolos validasi saldo bersamaan.
+      let holdOutstanding = 0;
+      let providerResponded = false;
+      try {
+        const hold = await debitLoketBalance({
+          loketCode,
+          amount: bill.total,
+          ledger: { type: "PAYMENT_HOLD", referenceType: "TRANSACTION", referenceId: transactionCode, actor: username },
+        });
+        if (!hold.ok) {
+          const holdMessage = `Saldo loket tidak mencukupi untuk ${bill.kodeProduk} ${bill.idpel} (butuh Rp ${bill.total.toLocaleString("id-ID")}, saldo Rp ${Number(hold.balance || 0).toLocaleString("id-ID")})`;
+          if (!skipMultiPayment) {
+            await pool.execute(
+              `UPDATE multi_payment_items
+                  SET status = 'FAILED', provider_error_code = 'INSUFFICIENT_BALANCE',
+                      provider_error_message = ?, failed_at = NOW()
+                WHERE transaction_code = ? AND status = 'PENDING'`,
+              [holdMessage, transactionCode]
+            );
+          }
+          results.push({
+            idpel: bill.idpel,
+            transactionCode,
+            success: false,
+            error: holdMessage,
+            errorCode: "INSUFFICIENT_BALANCE",
+            total: bill.total,
+            nama: bill.nama,
+            kodeProduk: bill.kodeProduk,
+          });
+          continue;
+        }
+        holdOutstanding = bill.total;
+      } catch (holdError: unknown) {
+        const holdMessage = holdError instanceof Error ? holdError.message : "Gagal menahan saldo loket";
+        if (!skipMultiPayment) {
+          await pool.execute(
+            `UPDATE multi_payment_items
+                SET status = 'FAILED', provider_error_code = 'BALANCE_HOLD_FAILED',
+                    provider_error_message = ?, failed_at = NOW()
+              WHERE transaction_code = ? AND status = 'PENDING'`,
+            [holdMessage, transactionCode]
+          ).catch(() => {});
+        }
+        results.push({
+          idpel: bill.idpel,
+          transactionCode,
+          success: false,
+          error: holdMessage,
+          errorCode: "BALANCE_HOLD_FAILED",
+          total: bill.total,
+          nama: bill.nama,
+          kodeProduk: bill.kodeProduk,
+        });
+        continue;
+      }
+
+      const refundHold = async (reason: string) => {
+        if (holdOutstanding <= 0) return;
+        try {
+          await creditLoketBalance({
+            loketCode,
+            amount: holdOutstanding,
+            ledger: { type: "PAYMENT_REFUND", referenceType: "TRANSACTION", referenceId: transactionCode, note: `Hold dikembalikan: ${reason}`, actor: username },
+          });
+          holdOutstanding = 0;
+        } catch (refundError: unknown) {
+          await logTransactionEventSafe({
+            idempotencyKey: idempotencyKeyTrimmed,
+            transactionCode,
+            provider: "LUNASIN",
+            eventType: "LOKET_BALANCE_HOLD_REFUND_FAILED",
+            severity: "ERROR",
+            username,
+            loketCode,
+            custId: bill.idpel,
+            message: `Gagal mengembalikan hold saldo Rp ${holdOutstanding.toLocaleString("id-ID")} (${reason}): ${refundError instanceof Error ? refundError.message : "unknown"}`,
+            payload: { holdOutstanding, reason },
+          });
+        }
+      };
+
       // Phase 2: Call Lunasin payment (no auto-advice, advice dilakukan manual terpisah)
       try {
         await logTransactionEventSafe({
@@ -312,6 +478,10 @@ export async function POST(req: NextRequest) {
           input2: bill.input2 || "",
           input3: bill.input3 || "",
         });
+        providerResponded = true;
+
+        // PENDING → hold TETAP ditahan sampai advice memberi status final
+        // (sukses: hold jadi potongan final; gagal: hold dikembalikan).
 
         // Log
         try {
@@ -366,29 +536,43 @@ export async function POST(req: NextRequest) {
             providerData: payResult.data as unknown as Record<string, unknown>,
           });
 
-          // Deduct saldo — gunakan nominal otoritatif dari provider bila tersedia
-          // (anti-manipulasi nilai dari client). Fallback ke bill.total.
+          // Saldo sudah ditahan sebesar bill.total (nominal snapshot). Gunakan nominal
+          // otoritatif dari provider bila tersedia dan sesuaikan selisihnya terhadap hold.
           const providerData = (payResult.data ?? {}) as Record<string, unknown>;
           const providerRpTotal = Number(providerData.rp_total ?? 0);
           const providerRpAmount = Number(providerData.rp_amount ?? 0);
           const providerRpAdmin = Number(providerData.rp_admin ?? 0);
           const billTotal = providerRpTotal > 0 ? providerRpTotal : bill.total;
+          const heldAmount = holdOutstanding;
+          holdOutstanding = 0;
+          await consumeInquirySnapshots("LUNASIN", username, [{ refKey: bill.idTrx }]);
           try {
-            const debit = await debitLoketBalance({ loketCode, amount: billTotal, allowNegative: true });
-            if (!debit.ok || debit.forced) {
-              // Saldo tak mencukupi (kemungkinan race) — provider sudah memotong,
-              // paksa potong & catat anomali agar bisa direkonsiliasi keuangan.
+            const diff = billTotal - heldAmount;
+            if (diff < 0) {
+              await creditLoketBalance({
+                loketCode,
+                amount: -diff,
+                ledger: { type: "PAYMENT_ADJUST", referenceType: "TRANSACTION", referenceId: transactionCode, note: "Selisih hold vs nominal provider", actor: username },
+              });
+            } else if (diff > 0) {
+              // Provider sudah memotong lebih besar dari hold — paksa potong selisih & catat anomali
+              const debit = await debitLoketBalance({
+                loketCode,
+                amount: diff,
+                allowNegative: true,
+                ledger: { type: "PAYMENT_ADJUST", referenceType: "TRANSACTION", referenceId: transactionCode, note: "Selisih hold vs nominal provider", actor: username },
+              });
               await logTransactionEventSafe({
                 idempotencyKey: idempotencyKeyTrimmed,
                 transactionCode,
                 provider: "LUNASIN",
-                eventType: "LOKET_BALANCE_NEGATIVE",
-                severity: "ERROR",
+                eventType: debit.forced ? "LOKET_BALANCE_NEGATIVE" : "LOKET_BALANCE_ADJUSTED",
+                severity: debit.forced ? "ERROR" : "WARN",
                 username,
                 loketCode,
                 custId: bill.idpel,
-                message: `Saldo loket ${loketCode} menjadi negatif setelah payment success (potong Rp ${billTotal.toLocaleString("id-ID")})`,
-                payload: { billTotal, balance: debit.balance, forced: Boolean(debit.forced) },
+                message: `Nominal provider (Rp ${billTotal.toLocaleString("id-ID")}) lebih besar dari hold (Rp ${heldAmount.toLocaleString("id-ID")}), selisih dipotong`,
+                payload: { billTotal, heldAmount, diff, balance: debit.balance, forced: Boolean(debit.forced) },
               });
             }
             try {
@@ -506,6 +690,15 @@ export async function POST(req: NextRequest) {
           });
         }
       } catch (err: unknown) {
+        // - Provider sudah merespons lalu error lokal → biarkan (rekonsiliasi), hold tetap.
+        // - Status di Lunasin tidak pasti (timeout / 5xx / respons tak terbaca) →
+        //   PENDING_ADVICE, hold tetap ditahan, JANGAN dianggap gagal.
+        // - Ditolak pasti (RC bisnis, HTTP 4xx, circuit open) → FAILED, hold dikembalikan.
+        const outcomeUnknown = !providerResponded && isLunasinOutcomeUnknown(err);
+        if (!providerResponded && !outcomeUnknown) {
+          await refundHold("PROVIDER_FAILED");
+        }
+
         const message = err instanceof Error ? err.message : "Pembayaran gagal";
         const errorCode = err instanceof LunasinApiError ? err.code : "UNKNOWN_ERROR";
 
@@ -547,26 +740,50 @@ export async function POST(req: NextRequest) {
         });
 
         if (!skipMultiPayment) {
-          await pool.execute(
-            `UPDATE multi_payment_items
-                SET status = 'FAILED',
-                    provider_error_code = ?,
-                    provider_error_message = ?,
-                    failed_at = NOW()
-              WHERE transaction_code = ? AND status IN ('PENDING', 'PENDING_ADVICE')`,
-            [errorCode, message, transactionCode]
-          );
+          if (providerResponded) {
+            await pool.execute(
+              `UPDATE multi_payment_items
+                  SET provider_error_code = 'DB_FINALIZE_FAILED', provider_error_message = ?
+                WHERE transaction_code = ? AND status = 'PENDING'`,
+              [message, transactionCode]
+            );
+          } else if (outcomeUnknown) {
+            await pool.execute(
+              `UPDATE multi_payment_items
+                  SET status = 'PENDING_ADVICE',
+                      provider_error_code = 'LUNASIN_TIMEOUT',
+                      provider_error_message = ?,
+                      advice_attempts = 0
+                WHERE transaction_code = ? AND status = 'PENDING'`,
+              [`${message} — status di provider belum pasti, lakukan advice`, transactionCode]
+            );
+          } else {
+            await pool.execute(
+              `UPDATE multi_payment_items
+                  SET status = 'FAILED',
+                      provider_error_code = ?,
+                      provider_error_message = ?,
+                      failed_at = NOW()
+                WHERE transaction_code = ? AND status IN ('PENDING', 'PENDING_ADVICE')`,
+              [errorCode, message, transactionCode]
+            );
+          }
         }
 
         results.push({
           idpel: bill.idpel,
           transactionCode,
           success: false,
-          error: message,
-          errorCode,
+          error: providerResponded
+            ? "Pembayaran ke provider berhasil, tetapi pencatatan lokal gagal. Mohon hubungi admin."
+            : outcomeUnknown
+              ? "Provider tidak merespons — transaksi PENDING, cek di menu Advice Lunasin sebelum menagih ulang pelanggan"
+              : message,
+          errorCode: providerResponded ? "DB_FINALIZE_FAILED" : outcomeUnknown ? "LUNASIN_PENDING" : errorCode,
           total: bill.total,
           nama: bill.nama,
           kodeProduk: bill.kodeProduk,
+          ...(outcomeUnknown ? { finalStatus: "PENDING" } : {}),
         });
       }
     }

@@ -6,6 +6,8 @@ import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { getAuthToken } from "@/lib/api-auth";
 import { auditLog } from "@/lib/audit-log";
+import { creditLoketBalance, debitLoketBalance } from "@/lib/saldo-mutations";
+import { getHeldBalances } from "@/lib/transaction-balance";
 
 // GET: list saldo history + loket saldo info
 export async function GET(request: NextRequest) {
@@ -62,6 +64,8 @@ export async function GET(request: NextRequest) {
     historyQuery += " ORDER BY rs.tgl_request DESC LIMIT 100";
 
     const [history] = await pool.query<RowDataPacket[]>(historyQuery, params);
+    // Saldo yang sedang ditahan transaksi belum final (pulsa sudah tidak termasuk nilai ini)
+    const held = await getHeldBalances(lokets.map((l) => String(l.loket_code)));
 
     return NextResponse.json({
       lokets: lokets.map((l) => ({
@@ -69,6 +73,8 @@ export async function GET(request: NextRequest) {
         loketCode: l.loket_code,
         nama: l.nama,
         pulsa: Number(l.pulsa || 0),
+        saldoTertahan: held.get(String(l.loket_code))?.held ?? 0,
+        transaksiTertahan: held.get(String(l.loket_code))?.count ?? 0,
       })),
       history: history.map((h) => ({
         id: h.id,
@@ -100,8 +106,14 @@ export async function POST(request: NextRequest) {
   const role = (session?.user as { role?: string })?.role;
   const check = denyIfUnauthorized(role, "/api/saldo", "POST");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
+  // Lapisan kedua: mutasi saldo manual tidak boleh dilakukan selain admin, apa pun isi API_PERMISSIONS.
+  if (role !== "admin") {
+    return NextResponse.json({ error: "Hanya admin yang dapat mengubah saldo loket secara manual" }, { status: 403 });
+  }
 
-  const username = (session?.user as { name?: string })?.name || "";
+  // Catat username (bukan nama tampilan) agar riwayat & audit bisa ditelusuri ke akun.
+  const sessionUser = session?.user as { username?: string; name?: string } | undefined;
+  const username = sessionUser?.username || sessionUser?.name || "";
 
   try {
     const body = await request.json();
@@ -171,10 +183,18 @@ export async function POST(request: NextRequest) {
         ]
       );
 
-      await connection.execute(
-        "UPDATE lokets SET pulsa = ? WHERE loket_code = ?",
-        [saldoSesudah, loketCode]
-      );
+      // Baris loket sudah dikunci FOR UPDATE; mutasi relatif + tercatat di ledger.
+      const ledger = {
+        type: "MANUAL_ADJUST",
+        referenceType: "REQUEST_SALDO",
+        referenceId: requestCode,
+        note: keterangan.trim(),
+        actor: username,
+      };
+      const mutation = nominal >= 0
+        ? await creditLoketBalance({ connection, loketCode, amount: nominal, ledger })
+        : await debitLoketBalance({ connection, loketCode, amount: -nominal, ledger });
+      if (!mutation.ok) throw new Error("Gagal memperbarui saldo loket");
 
       await connection.commit();
     } catch (error) {

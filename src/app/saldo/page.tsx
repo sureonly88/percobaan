@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useSession } from "next-auth/react";
 import { Breadcrumb } from "@/ui";
 
 interface LoketOption {
@@ -31,6 +32,9 @@ function formatRupiah(amount: number): string {
 }
 
 export default function SaldoPage() {
+  const { data: session } = useSession();
+  // Mutasi saldo manual hanya admin; supervisor melihat dalam mode baca-saja
+  const canEdit = (session?.user as { role?: string } | undefined)?.role === "admin";
   const [lokets, setLokets] = useState<LoketOption[]>([]);
   const [history, setHistory] = useState<SaldoHistory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -204,6 +208,12 @@ export default function SaldoPage() {
         <div className="mt-2">
           <h1 className="text-3xl font-extrabold tracking-tight">Update Saldo Loket</h1>
           <p className="text-slate-500 mt-1">Tambah atau kurangi saldo (pulsa) loket.</p>
+          {session && !canEdit && (
+            <p className="mt-3 inline-flex items-center gap-2 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+              <span className="material-symbols-outlined text-sm">visibility</span>
+              Mode baca-saja — perubahan saldo manual hanya dapat dilakukan admin.
+            </p>
+          )}
         </div>
       </div>
 
@@ -250,8 +260,10 @@ export default function SaldoPage() {
               {paginatedLokets.map((l) => (
                 <div
                   key={l.loketCode}
-                  onClick={() => openModal(l)}
-                  className="bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-slate-200 dark:border-slate-700 p-4 cursor-pointer transition-all hover:shadow-md hover:border-primary"
+                  onClick={() => canEdit && openModal(l)}
+                  className={`bg-slate-50 dark:bg-slate-800 rounded-xl border-2 border-slate-200 dark:border-slate-700 p-4 transition-all ${
+                    canEdit ? "cursor-pointer hover:shadow-md hover:border-primary" : "cursor-default"
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-white dark:bg-slate-900 text-slate-500">

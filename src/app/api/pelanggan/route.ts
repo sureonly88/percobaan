@@ -540,44 +540,21 @@ async function updateParentTotals(multiPaymentId: number) {
   );
 }
 
-// DELETE: Hapus transaksi
+// DELETE: hard delete transaksi DINONAKTIFKAN.
+// Menghapus transaksi sukses tanpa mengembalikan saldo, membalik jurnal GL, dan
+// membatalkan komisi membuat data keuangan tidak konsisten. Gunakan alur
+// pembatalan (void) yang tercatat & butuh persetujuan: POST /api/transaksi/pembatalan.
 export async function DELETE(request: NextRequest) {
   const session = await getServerSession(authOptions);
   const role = (session?.user as { role?: string })?.role;
   const check = denyIfUnauthorized(role, "/api/pelanggan", "DELETE");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
 
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json({ error: "ID wajib diisi" }, { status: 400 });
-    }
-
-    // Get parent ID before deleting
-    const [existing] = await pool.query<RowDataPacket[]>(
-      "SELECT multi_payment_id FROM multi_payment_items WHERE id = ?", [id]
-    );
-
-    await pool.query<ResultSetHeader>("DELETE FROM multi_payment_items WHERE id = ?", [id]);
-
-    // Clean up parent if no more items
-    if (existing.length > 0) {
-      const parentId = existing[0].multi_payment_id;
-      const [remaining] = await pool.query<RowDataPacket[]>(
-        "SELECT COUNT(*) as cnt FROM multi_payment_items WHERE multi_payment_id = ?", [parentId]
-      );
-      if (Number(remaining[0]?.cnt ?? 0) === 0) {
-        await pool.query<ResultSetHeader>("DELETE FROM multi_payment_requests WHERE id = ?", [parentId]);
-      } else {
-        await updateParentTotals(parentId);
-      }
-    }
-
-    return NextResponse.json({ message: "Transaksi berhasil dihapus" });
-  } catch (error) {
-    console.error("Pelanggan DELETE Error:", error);
-    return NextResponse.json({ error: "Gagal menghapus transaksi" }, { status: 500 });
-  }
+  return NextResponse.json(
+    {
+      error: "Transaksi tidak dapat dihapus. Ajukan pembatalan transaksi (perlu persetujuan) agar saldo, jurnal, dan komisi ikut disesuaikan.",
+      code: "USE_TRANSACTION_VOID",
+    },
+    { status: 410 }
+  );
 }

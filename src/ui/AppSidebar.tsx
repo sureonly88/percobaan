@@ -5,75 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { getAccessiblePages, normalizeRole, ROLE_LABELS } from "@/lib/rbac";
+import { NAV_GROUPS, filterNavGroups } from "./nav-config";
 
-type NavItem = { label: string; href: string; icon: string };
-type NavGroup = { category: string; items: NavItem[] };
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    category: "Operasional",
-    items: [
-      { label: "Dashboard", href: "/", icon: "dashboard" },
-      { label: "Multi-Payment", href: "/pembayaran", icon: "receipt_long" },
-      { label: "Payment Link", href: "/payment-links", icon: "link" },
-      { label: "Advice Lunasin", href: "/advice-lunasin", icon: "fact_check" },
-      { label: "Advice PDAM", href: "/advice-pdam", icon: "water_drop" },
-      { label: "Transaksi Tergantung", href: "/pending-transaksi", icon: "pending_actions" },
-      { label: "Tutup Kasir", href: "/tutup-kasir", icon: "point_of_sale" },
-      { label: "Notifikasi", href: "/notifikasi", icon: "notifications" },
-    ],
-  },
-  {
-    category: "Laporan & Monitoring",
-    items: [
-      { label: "Verifikasi Kasir", href: "/verifikasi-kasir", icon: "verified" },
-      { label: "Laporan Transaksi", href: "/laporan", icon: "analytics" },
-      { label: "Riwayat", href: "/riwayat", icon: "history" },
-      { label: "Cetak Ulang Struk", href: "/cetak-ulang", icon: "print" },
-      { label: "Monitoring", href: "/monitoring", icon: "monitor_heart" },
-      { label: "Risiko Transaksi", href: "/monitoring/risiko", icon: "crisis_alert" },
-      { label: "Rekonsiliasi Data", href: "/rekonsiliasi", icon: "table_view" },
-      { label: "Health Provider", href: "/monitoring/provider-health", icon: "health_metrics" },
-    ],
-  },
-  {
-    category: "Keuangan & Akuntansi",
-    items: [
-      { label: "Ringkasan Keuangan", href: "/keuangan", icon: "account_balance" },
-      { label: "Margin & Profit", href: "/keuangan/margin", icon: "trending_up" },
-      { label: "Pengaturan Komisi", href: "/keuangan/komisi", icon: "redeem" },
-      { label: "Laporan Komisi", href: "/keuangan/komisi/laporan", icon: "payments" },
-      { label: "Settlement Loket", href: "/settlement", icon: "handshake" },
-      { label: "Jurnal Umum", href: "/keuangan/jurnal", icon: "menu_book" },
-      { label: "Buku Besar", href: "/keuangan/buku-besar", icon: "import_contacts" },
-      { label: "Neraca Saldo", href: "/keuangan/neraca-saldo", icon: "balance" },
-      { label: "Chart of Accounts", href: "/keuangan/akun", icon: "format_list_numbered" },
-    ],
-  },
-  {
-    category: "Loket & Saldo",
-    items: [
-      { label: "Manajemen Loket", href: "/loket", icon: "store" },
-      { label: "Anggota Loket", href: "/loket/members", icon: "manage_accounts" },
-      { label: "Update Saldo Loket", href: "/saldo", icon: "account_balance_wallet" },
-      { label: "Top-up Saldo", href: "/topup", icon: "add_card" },
-    ],
-  },
-  {
-    category: "Administrasi",
-    items: [
-      { label: "Manajemen Pelanggan", href: "/pelanggan", icon: "group" },
-      { label: "Biaya Admin", href: "/biaya-admin", icon: "payments" },
-      { label: "Manajemen User", href: "/users", icon: "admin_panel_settings" },
-      { label: "Pendaftaran Agen", href: "/users/registrations", icon: "how_to_reg" },
-      { label: "API Provider", href: "/provider", icon: "api" },
-      { label: "Dokumentasi API", href: "/provider/docs", icon: "menu_book" },
-      { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
-      { label: "DB Manager", href: "/db-manage", icon: "database" },
-      { label: "Import Transaksi", href: "/import-transaksi", icon: "move_to_inbox" },
-    ],
-  },
-];
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -95,14 +28,7 @@ export function AppSidebar() {
   // Filter nav items based on role
   const accessiblePages = useMemo(() => getAccessiblePages(userRole), [userRole]);
   const filteredNavGroups = useMemo(() => {
-    return NAV_GROUPS
-      .map((group) => ({
-        ...group,
-        items: group.items.filter((item) =>
-          accessiblePages.some((p) => item.href === p || (p !== "/" && item.href.startsWith(p + "/")))
-        ),
-      }))
-      .filter((group) => group.items.length > 0);
+    return filterNavGroups(NAV_GROUPS, accessiblePages);
   }, [accessiblePages]);
 
   return (

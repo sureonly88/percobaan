@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { Breadcrumb } from "@/ui";
 import { formatRupiah } from "@/data/mock";
 import InquiryMonitoringTab from "./InquiryMonitoringTab";
@@ -166,6 +167,8 @@ function getDefaultMonthRange() {
 }
 
 export default function MonitoringPage() {
+  const { data: session } = useSession();
+  const isAdmin = (session?.user as { role?: string } | undefined)?.role === "admin";
   const [data, setData] = useState<MonitoringData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<MonitoringViewTab>("transaction");
@@ -230,7 +233,10 @@ export default function MonitoringPage() {
   }, [autoRefresh, fetchData, data?.summary?.PENDING?.count, data?.stuckCount]);
 
   async function handleResolveStuck(id: number) {
-    if (!confirm("Yakin ingin meresolve transaksi gantung ini sebagai GAGAL?")) return;
+    if (!confirm(
+      "Resolve sebagai GAGAL hanya untuk permintaan yang belum pernah dikirim ke provider.\n\n" +
+      "Jika sudah dikirim, sistem akan menolak dan Anda perlu menyelesaikannya lewat Transaksi Tergantung / Review. Lanjutkan?"
+    )) return;
     setResolving(id);
     try {
       const res = await fetch("/api/monitoring", {
@@ -1129,13 +1135,23 @@ export default function MonitoringPage() {
                             <p className="text-sm text-red-700 dark:text-red-400 flex-1">
                               Transaksi ini sudah PENDING selama {timeSince(txn.createdAt)}. Kemungkinan proses server terhenti.
                             </p>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleResolveStuck(txn.id); }}
-                              disabled={resolving === txn.id}
-                              className="px-4 py-2 bg-red-600 text-white rounded-lg font-bold text-xs hover:bg-red-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+                            <Link
+                              href="/pending-transaksi"
+                              onClick={(e) => e.stopPropagation()}
+                              className="px-4 py-2 border border-red-300 text-red-700 dark:text-red-300 rounded-lg font-bold text-xs hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors whitespace-nowrap"
                             >
-                              {resolving === txn.id ? "Memproses..." : "Resolve sebagai Gagal"}
-                            </button>
+                              Buka Transaksi Tergantung
+                            </Link>
+                            {isAdmin && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleResolveStuck(txn.id); }}
+                                disabled={resolving === txn.id}
+                                title="Hanya untuk permintaan yang belum pernah dikirim ke provider"
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg font-bold text-xs hover:bg-red-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+                              >
+                                {resolving === txn.id ? "Memproses..." : "Resolve sebagai Gagal"}
+                              </button>
+                            )}
                           </div>
                         </div>
                       )}

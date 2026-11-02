@@ -410,6 +410,12 @@ export default function PelangganPage() {
 
   // PLN delete confirm
   const [plnDeleteConfirm, setPlnDeleteConfirm] = useState<PlnTransaksiData | null>(null);
+  // Pengajuan pembatalan (pengganti hapus permanen)
+  const [voidReason, setVoidReason] = useState("");
+  const [voidProviderRef, setVoidProviderRef] = useState("");
+  const [voidError, setVoidError] = useState("");
+  const [voidLoading, setVoidLoading] = useState(false);
+  const [voidNotice, setVoidNotice] = useState("");
 
   // Searchable loket dropdown (filter)
   const [filterLoketOpen, setFilterLoketOpen] = useState(false);
@@ -564,15 +570,45 @@ export default function PelangganPage() {
     }
   };
 
+  const resetVoidForm = () => {
+    setVoidReason("");
+    setVoidProviderRef("");
+    setVoidError("");
+  };
+
+  /** Ajukan pembatalan transaksi — butuh persetujuan user lain di menu Pembatalan Transaksi. */
+  const submitVoidRequest = async (transactionCode: string): Promise<boolean> => {
+    setVoidError("");
+    if (voidReason.trim().length < 10) {
+      setVoidError("Alasan pembatalan minimal 10 karakter");
+      return false;
+    }
+    setVoidLoading(true);
+    try {
+      const res = await fetch("/api/transaksi/pembatalan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionCode, reason: voidReason.trim(), providerReference: voidProviderRef.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setVoidError(json.error || "Gagal mengajukan pembatalan");
+        return false;
+      }
+      setVoidNotice(`Pengajuan pembatalan ${transactionCode} dibuat dan menunggu persetujuan di menu Pembatalan Transaksi.`);
+      resetVoidForm();
+      return true;
+    } catch {
+      setVoidError("Gagal mengajukan pembatalan");
+      return false;
+    } finally {
+      setVoidLoading(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteConfirm) return;
-    try {
-      await fetch(`/api/pelanggan?id=${deleteConfirm.id}`, { method: "DELETE" });
-      setDeleteConfirm(null);
-      fetchData();
-    } catch (err) {
-      console.error("Delete error:", err);
-    }
+    if (await submitVoidRequest(deleteConfirm.transactionCode)) setDeleteConfirm(null);
   };
 
   const openDetail = (t: TransaksiData) => {
@@ -632,13 +668,7 @@ export default function PelangganPage() {
 
   const handlePlnDelete = async () => {
     if (!plnDeleteConfirm) return;
-    try {
-      await fetch(`/api/pelanggan?id=${plnDeleteConfirm.id}&type=pln`, { method: "DELETE" });
-      setPlnDeleteConfirm(null);
-      fetchPlnData();
-    } catch (err) {
-      console.error("Delete PLN error:", err);
-    }
+    if (await submitVoidRequest(plnDeleteConfirm.transactionCode)) setPlnDeleteConfirm(null);
   };
 
   const setPlnNum = (field: string, val: string) => {
@@ -690,6 +720,19 @@ export default function PelangganPage() {
         </button>
         )}
       </header>
+
+      {voidNotice && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+          <span className="material-symbols-outlined text-lg">task_alt</span>
+          <span className="flex-1">
+            {voidNotice}{" "}
+            <a href="/pembatalan" className="font-bold underline">Buka Pembatalan Transaksi</a>
+          </span>
+          <button onClick={() => setVoidNotice("")} className="text-emerald-600" title="Tutup">
+            <span className="material-symbols-outlined text-lg">close</span>
+          </button>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className="flex flex-wrap gap-2 mb-6 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-1.5">
@@ -1005,11 +1048,11 @@ export default function PelangganPage() {
                           <span className="material-symbols-outlined text-lg">edit</span>
                         </button>
                         <button
-                          onClick={() => setDeleteConfirm(t)}
+                          onClick={() => { resetVoidForm(); setDeleteConfirm(t); }}
                           className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                          title="Hapus transaksi"
+                          title="Ajukan pembatalan transaksi"
                         >
-                          <span className="material-symbols-outlined text-lg">delete</span>
+                          <span className="material-symbols-outlined text-lg">undo</span>
                         </button>
                         </>)}
                       </div>
@@ -1335,14 +1378,38 @@ export default function PelangganPage() {
       {deleteConfirm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-6 text-center">
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full max-w-md p-6 text-center">
             <div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-500 mx-auto mb-4">
-              <span className="material-symbols-outlined text-3xl">delete_forever</span>
+              <span className="material-symbols-outlined text-3xl">undo</span>
             </div>
-            <h3 className="font-bold text-lg mb-2">Hapus Transaksi?</h3>
-            <p className="text-sm text-slate-500 mb-6">
-              Transaksi <strong>{deleteConfirm.nama}</strong> ({deleteConfirm.custId}) periode {formatPeriode(deleteConfirm.blth)} akan dihapus permanen.
+            <h3 className="font-bold text-lg mb-2">Ajukan Pembatalan Transaksi?</h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Transaksi <strong>{deleteConfirm.nama}</strong> ({deleteConfirm.custId}) kode {deleteConfirm.transactionCode}.
+              Setelah disetujui user lain, status menjadi VOID, saldo loket dikembalikan, dan jurnal dibalik.
+              Semua periode dalam kode transaksi yang sama ikut dibatalkan.
             </p>
+            <div className="text-left space-y-3 mb-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">Alasan pembatalan *</label>
+                <textarea
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                  rows={3}
+                  placeholder="Mis. pelanggan bayar ganda, sudah direversal oleh provider"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">No. referensi reversal provider</label>
+                <input
+                  value={voidProviderRef}
+                  onChange={(e) => setVoidProviderRef(e.target.value)}
+                  placeholder="Opsional, dari PDAM/Lunasin"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+              {voidError && <p className="text-xs text-red-500">{voidError}</p>}
+            </div>
             <div className="flex gap-3">
               <button
                 onClick={() => setDeleteConfirm(null)}
@@ -1352,9 +1419,10 @@ export default function PelangganPage() {
               </button>
               <button
                 onClick={handleDelete}
-                className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-all"
+                disabled={voidLoading}
+                className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-all"
               >
-                Hapus
+                {voidLoading ? "Mengajukan..." : "Ajukan"}
               </button>
             </div>
           </div>
@@ -1750,11 +1818,11 @@ export default function PelangganPage() {
                             <span className="material-symbols-outlined text-lg">edit</span>
                           </button>
                           <button
-                            onClick={() => setPlnDeleteConfirm(t)}
+                            onClick={() => { resetVoidForm(); setPlnDeleteConfirm(t); }}
                             className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                            title="Hapus transaksi"
+                            title="Ajukan pembatalan transaksi"
                           >
-                            <span className="material-symbols-outlined text-lg">delete</span>
+                            <span className="material-symbols-outlined text-lg">undo</span>
                           </button>
                           </>)}
                         </div>
@@ -2013,14 +2081,37 @@ export default function PelangganPage() {
         {plnDeleteConfirm && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPlnDeleteConfirm(null)} />
-            <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-6 text-center">
+            <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-full max-w-md p-6 text-center">
               <div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-500 mx-auto mb-4">
-                <span className="material-symbols-outlined text-3xl">delete_forever</span>
+                <span className="material-symbols-outlined text-3xl">undo</span>
               </div>
-              <h3 className="font-bold text-lg mb-2">Hapus Transaksi {LUNASIN_TABS.find(t => t.key === activeTab)?.label || "Lunasin"}?</h3>
-              <p className="text-sm text-slate-500 mb-6">
-                Transaksi <strong>{plnDeleteConfirm.nama}</strong> ({plnDeleteConfirm.custId}) produk {plnDeleteConfirm.kodeProduk || "-"} akan dihapus permanen.
+              <h3 className="font-bold text-lg mb-2">Ajukan Pembatalan Transaksi {LUNASIN_TABS.find(t => t.key === activeTab)?.label || "Lunasin"}?</h3>
+              <p className="text-sm text-slate-500 mb-4">
+                Transaksi <strong>{plnDeleteConfirm.nama}</strong> ({plnDeleteConfirm.custId}) produk {plnDeleteConfirm.kodeProduk || "-"}, kode {plnDeleteConfirm.transactionCode}.
+                Setelah disetujui user lain, status menjadi VOID, saldo loket dikembalikan, dan jurnal dibalik.
               </p>
+              <div className="text-left space-y-3 mb-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">Alasan pembatalan *</label>
+                  <textarea
+                    value={voidReason}
+                    onChange={(e) => setVoidReason(e.target.value)}
+                    rows={3}
+                    placeholder="Mis. pelanggan bayar ganda, sudah direversal oleh provider"
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">No. referensi reversal provider</label>
+                  <input
+                    value={voidProviderRef}
+                    onChange={(e) => setVoidProviderRef(e.target.value)}
+                    placeholder="Opsional, dari PDAM/Lunasin"
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm"
+                  />
+                </div>
+                {voidError && <p className="text-xs text-red-500">{voidError}</p>}
+              </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setPlnDeleteConfirm(null)}
@@ -2030,9 +2121,10 @@ export default function PelangganPage() {
                 </button>
                 <button
                   onClick={handlePlnDelete}
-                  className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-all"
+                  disabled={voidLoading}
+                  className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-all"
                 >
-                  Hapus
+                  {voidLoading ? "Mengajukan..." : "Ajukan"}
                 </button>
               </div>
             </div>
