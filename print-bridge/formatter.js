@@ -312,7 +312,8 @@ function formatEscp(data, cfg = {}) {
       if (!isBpjs && !isTelkom && !isPulsa) {
         if (b.refnum)      pairs.push(['Ref Number',   b.refnum]);
         if (b.tglLunas)    pairs.push(['Tgl Lunas',    b.tglLunas]);
-        if (b.pesanBiller) pairs.push(['Pesan Biller', b.pesanBiller.substring(0, 21)]);
+        // PLN Prabayar: pesan biller tidak dicetak agar struk muat 1 lembar
+        if (b.pesanBiller && !(b.kodeProduk || '').startsWith('pln-prepaid')) pairs.push(['Pesan Biller', b.pesanBiller.substring(0, 21)]);
       }
       }
     } else {
@@ -346,12 +347,11 @@ function formatEscp(data, cfg = {}) {
       }
     }
 
-    // Token PLN — centered, bold
+    // Token PLN — label + token dalam 1 baris, centered, bold
     if (isPln && b.tokenPln) {
       const tokenFmt = String(b.tokenPln).replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1-');
       line(LIGHT);
-      ctr('TOKEN PLN', false);
-      ctr(tokenFmt, true);
+      ctr(`TOKEN PLN : ${tokenFmt}`, true);
       line(LIGHT);
     }
 

@@ -342,7 +342,8 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
       if (!isPdamLunasin && !isBpjs && !isTelkom && !isPulsa) {
         if (b.refnum) pairs.push(["Ref Number", b.refnum]);
         if (b.tglLunas) pairs.push(["Tgl Lunas", b.tglLunas]);
-        if (b.pesanBiller) pairs.push(["Pesan Biller", b.pesanBiller.substring(0, 21)]);
+        // PLN Prabayar: pesan biller tidak dicetak agar struk muat 1 lembar
+        if (b.pesanBiller && !(b.kodeProduk ?? "").startsWith("pln-prepaid")) pairs.push(["Pesan Biller", b.pesanBiller.substring(0, 21)]);
       }
     } else {
       {
@@ -371,8 +372,7 @@ export function formatReceiptPlainText(data: ReceiptPrintData): string {
     if (isPln && b.tokenPln) {
       const tokenFmt = b.tokenPln.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1-");
       push(LIGHT);
-      pushCtr("TOKEN PLN");
-      pushCtr(tokenFmt);
+      pushCtr(`TOKEN PLN : ${tokenFmt}`);
       push(LIGHT);
     }
 
@@ -419,7 +419,7 @@ async function tryPrintBridge(data: ReceiptPrintData): Promise<boolean> {
   }
 }
 
-/** HTML fallback: opens a <pre>-based print window — faster on dot matrix than CSS layout. */
+/** HTML fallback: prints a <pre>-based hidden iframe — faster on dot matrix than CSS layout. */
 function printReceiptViaHtml(data: ReceiptPrintData): void {
   const plainText = formatReceiptPlainText(data);
   const qrHtml = data.digitalReceiptUrl ? `
@@ -460,16 +460,24 @@ function printReceiptViaHtml(data: ReceiptPrintData): void {
 <body>
 <pre>${escapeHtml(plainText)}</pre>
 ${qrHtml}
-<script>
-window.onload = function() {
-  window.print();
-  window.onafterprint = function() { window.close(); };
-};
-</script>
 </body>
 </html>`;
-  const pw = window.open("", "_blank", "width=600,height=700");
-  if (pw) { pw.document.write(html); pw.document.close(); }
+  // Iframe tersembunyi, bukan window.open: cetak otomatis setelah bayar berjalan tanpa klik
+  // pengguna, sehingga popup akan diblokir browser dan struk tidak pernah tercetak.
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  Object.assign(frame.style, { position: "fixed", right: "0", bottom: "0", width: "0", height: "0", border: "0" });
+  frame.onload = () => {
+    const win = frame.contentWindow;
+    if (!win) { frame.remove(); return; }
+    const cleanup = () => frame.remove();
+    win.addEventListener("afterprint", cleanup, { once: true });
+    setTimeout(cleanup, 120_000);
+    win.focus();
+    win.print();
+  };
+  frame.srcdoc = html;
+  document.body.appendChild(frame);
 }
 
 /**

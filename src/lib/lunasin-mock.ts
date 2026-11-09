@@ -425,6 +425,7 @@ export async function mockLunasinPayment(opts: {
   idpel: string;
   kodeProduk: string;
   idTrx: string;
+  input2?: string;
 }): Promise<LunasinPaymentResult> {
   await sleep(1_200 + Math.floor(Math.random() * 600));
 
@@ -462,7 +463,7 @@ export async function mockLunasinPayment(opts: {
     return { data: emptyData, rawResponse, isPending: true };
   }
 
-  const data = buildInquiryData(opts.idpel, opts.kodeProduk, scenario);
+  const data = buildInquiryData(opts.idpel, opts.kodeProduk, scenario, opts.input2 ? Number(opts.input2) : undefined);
 
   // Enrich with payment-specific fields
   data.tgl_lunas = nowDatetimeStr();
@@ -491,6 +492,7 @@ export async function mockLunasinAdvice(opts: {
   idpel: string;
   kodeProduk: string;
   idTrx: string;
+  input2?: string;
 }): Promise<LunasinAdviceResult> {
   await sleep(600 + Math.floor(Math.random() * 300));
 
@@ -505,7 +507,7 @@ export async function mockLunasinAdvice(opts: {
   }
 
   // PAYMENT_PENDING scenario: advice returns success (payment actually went through)
-  const data = buildInquiryData(opts.idpel, opts.kodeProduk, scenario);
+  const data = buildInquiryData(opts.idpel, opts.kodeProduk, scenario, opts.input2 ? Number(opts.input2) : undefined);
   data.tgl_lunas = nowDatetimeStr();
   data.refnum = `ADV${fakeRefnum()}`;
   data.saldo_terpotong = data.rp_total;

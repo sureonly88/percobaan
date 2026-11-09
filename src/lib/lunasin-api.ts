@@ -318,7 +318,7 @@ export async function lunasinPayment(opts: {
   input2?: string;
   input3?: string;
 }): Promise<LunasinPaymentResult> {
-  if (LUNASIN_MOCK) return mockLunasinPayment({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx: opts.idTrx });
+  if (LUNASIN_MOCK) return mockLunasinPayment({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx: opts.idTrx, input2: opts.input2 });
 
   const payload: LunasinRequest = {
     tipe_pesan: "payment",
@@ -375,7 +375,7 @@ export async function lunasinAdvice(opts: {
   input2?: string;
   input3?: string;
 }): Promise<LunasinAdviceResult> {
-  if (LUNASIN_MOCK) return mockLunasinAdvice({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx: opts.idTrx });
+  if (LUNASIN_MOCK) return mockLunasinAdvice({ idpel: opts.idpel, kodeProduk: opts.kodeProduk, idTrx: opts.idTrx, input2: opts.input2 });
 
   const payload: LunasinRequest = {
     tipe_pesan: "advice",
