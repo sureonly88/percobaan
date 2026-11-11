@@ -51,6 +51,8 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     "/db-manage", "/import-transaksi",
     "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun", "/keuangan/komisi", "/keuangan/komisi/laporan",
     "/settlement", "/pembatalan", "/review-transaksi", "/panduan",
+    // Versi mobile (PWA) — mencakup semua /m/*
+    "/m",
   ],
   supervisor: [
     // Operasional
@@ -75,6 +77,8 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     "/pelanggan", "/loket/members", "/topup",
     // Akun pribadi
     "/pengaturan", "/panduan",
+    // Versi mobile (PWA agen keliling) — mencakup semua /m/*
+    "/m",
   ],
   switcher: [
     "/provider/docs",
@@ -117,6 +121,10 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor", "kasir"],
   },
   "/api/laporan/detail": {
+    GET: ["admin", "supervisor", "kasir"],
+  },
+  // Laporan milik pengguna sendiri (versi mobile) — cakupan dibatasi di handler
+  "/api/laporan/saya": {
     GET: ["admin", "supervisor", "kasir"],
   },
   "/api/rekonsiliasi": {

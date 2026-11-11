@@ -93,6 +93,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Versi mobile (/m) punya kerangka sendiri (header + bottom nav) di src/app/m/layout.tsx
+  if (pathname === "/m" || pathname.startsWith("/m/")) {
+    return <>{children}</>;
+  }
+
   // Authenticated — show full app shell
   return (
     <>

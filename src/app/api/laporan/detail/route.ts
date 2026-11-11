@@ -11,7 +11,13 @@ export async function GET(request: NextRequest) {
   const check = denyIfUnauthorized(role, "/api/laporan/detail", "GET");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
   const { searchParams } = new URL(request.url);
-  const loketCode = searchParams.get("loketCode");
+  // Kasir hanya boleh melihat rincian loketnya sendiri, apa pun loketCode di URL
+  const canSeeAll = role === "admin" || role === "supervisor";
+  const sessionLoketCode = (session?.user as { loketCode?: string })?.loketCode || "";
+  if (!canSeeAll && !sessionLoketCode) {
+    return NextResponse.json({ error: "Akun belum terhubung ke loket" }, { status: 403 });
+  }
+  const loketCode = canSeeAll ? searchParams.get("loketCode") : sessionLoketCode;
   const username = searchParams.get("username");
   const startDate = searchParams.get("startDate");
   const endDate = searchParams.get("endDate");

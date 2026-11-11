@@ -10,7 +10,8 @@ export type MultiPaymentItemStatus =
   | "SUCCESS"
   | "FAILED"
   | "PENDING_PROVIDER"
-  | "PENDING_ADVICE";
+  | "PENDING_ADVICE"
+  | "PENDING_REVIEW";
 
 export type MultiPaymentProvider = "PDAM" | "LUNASIN";
 

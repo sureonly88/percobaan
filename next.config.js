@@ -19,7 +19,8 @@ const nextConfig = {
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       {
         key: "Permissions-Policy",
-        value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        // camera=(self): scanner barcode tagihan di versi mobile (/m) — hanya origin sendiri
+        value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
       },
       { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
       { key: "X-DNS-Prefetch-Control", value: "off" },
@@ -57,9 +58,12 @@ const nextConfig = {
     ],
   },
 
-  webpack(config) {
+  webpack(config, { nextRuntime }) {
     // Externalize ALL @opentelemetry/* packages so webpack uses Node.js
     // native require() instead of bundling them — avoids gRPC/stream errors.
+    // Hanya untuk server Node: runtime edge (middleware) tidak punya require() native,
+    // dan tracer internal Next membutuhkan @opentelemetry/api versi bundel di sana.
+    if (nextRuntime !== "nodejs") return config;
     const prev = config.externals || [];
     config.externals = [
       ...(Array.isArray(prev) ? prev : [prev]),

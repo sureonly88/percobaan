@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import { canProcessPayment } from "@/lib/rbac";
+import { canProcessPayment, normalizeRole } from "@/lib/rbac";
+
+/** Kasir hanya boleh mengakses transaksi loketnya sendiri; admin & supervisor semua loket. */
+function isOutsideKasirLoket(token: Record<string, unknown>, loketCode: string | null): boolean {
+  if (normalizeRole(String(token.role || "")) !== "kasir") return false;
+  return !token.loketCode || String(token.loketCode) !== String(loketCode || "");
+}
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 
@@ -80,7 +86,7 @@ export async function GET(
     );
 
     const requestRow = requestRows[0];
-    if (!requestRow) {
+    if (!requestRow || isOutsideKasirLoket(token, requestRow.loket_code)) {
       return NextResponse.json({ error: "Data multipay tidak ditemukan" }, { status: 404 });
     }
 
@@ -89,6 +95,7 @@ export async function GET(
               product_code, provider_ref, period_label, amount, admin_fee, total,
               status, transaction_code, provider_error_code, provider_error_message,
               CAST(provider_response AS CHAR) AS provider_response,
+              CAST(metadata_json AS CHAR) AS metadata_json,
               retry_count, advice_attempts, paid_at, failed_at, created_at, updated_at
          FROM multi_payment_items
         WHERE multi_payment_id = ?
@@ -133,6 +140,7 @@ export async function GET(
         providerErrorCode: row.provider_error_code,
         providerErrorMessage: row.provider_error_message,
         providerResponse: row.provider_response ? JSON.parse(row.provider_response) : null,
+        metadata: row.metadata_json ? safeJson(row.metadata_json) : null,
         retryCount: Number(row.retry_count || 0),
         adviceAttempts: Number(row.advice_attempts || 0),
         paidAt: row.paid_at,
@@ -181,7 +189,7 @@ export async function PATCH(
     );
 
     const requestRow = requestRows[0];
-    if (!requestRow) {
+    if (!requestRow || isOutsideKasirLoket(token, requestRow.loket_code)) {
       return NextResponse.json({ error: "Data multipay tidak ditemukan" }, { status: 404 });
     }
 
@@ -265,5 +273,12 @@ export async function PATCH(
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Gagal memproses aksi item multipay";
     return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+function safeJson(value: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return null;
   }
 }

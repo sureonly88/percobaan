@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canProcessPayment } from "@/lib/rbac";
+import { canProcessPayment, normalizeRole } from "@/lib/rbac";
 import { orchestrateMultiPayment } from "@/lib/multipay/orchestrator";
 import { MultiPaymentProgressEvent, MultiPaymentRequestInput } from "@/lib/multipay/types";
 import pool from "@/lib/db";
@@ -21,6 +21,9 @@ interface MultiPaymentListRow extends RowDataPacket {
   change_amount: number;
   paid_at: string | null;
   created_at: string;
+  first_customer_id: string | null;
+  first_customer_name: string | null;
+  first_service_type: string | null;
 }
 
 async function authorize(req: NextRequest) {
@@ -48,24 +51,38 @@ export async function GET(req: NextRequest) {
     const whereClauses: string[] = [];
     const params: Array<string | number> = [];
 
-    if (status !== "ALL") {
-      whereClauses.push("status = ?");
-      params.push(status);
+    // Kasir hanya boleh melihat transaksi loketnya sendiri (admin & supervisor: semua loket)
+    if (normalizeRole(auth.token.role) === "kasir") {
+      if (!auth.token.loketCode) {
+        return NextResponse.json({ error: "Akun belum terhubung ke loket" }, { status: 403 });
+      }
+      whereClauses.push("multi_payment_requests.loket_code = ?");
+      params.push(auth.token.loketCode);
+    }
+
+    // status boleh satu nilai atau daftar dipisah koma (mis. PENDING,PENDING_REVIEW)
+    const statuses = status === "ALL" ? [] : status.split(",").map((s) => s.trim()).filter(Boolean);
+    if (statuses.length > 0) {
+      whereClauses.push(`multi_payment_requests.status IN (${statuses.map(() => "?").join(",")})`);
+      params.push(...statuses);
     }
 
     if (search) {
-      whereClauses.push("(multi_payment_code LIKE ? OR COALESCE(username, '') LIKE ? OR COALESCE(loket_code, '') LIKE ? OR COALESCE(loket_name, '') LIKE ?)");
+      whereClauses.push(`(multi_payment_requests.multi_payment_code LIKE ? OR COALESCE(multi_payment_requests.username, '') LIKE ? OR COALESCE(multi_payment_requests.loket_code, '') LIKE ? OR COALESCE(multi_payment_requests.loket_name, '') LIKE ?
+        OR EXISTS (SELECT 1 FROM multi_payment_items si
+                    WHERE si.multi_payment_id = multi_payment_requests.id
+                      AND (si.customer_id LIKE ? OR COALESCE(si.customer_name, '') LIKE ? OR COALESCE(si.transaction_code, '') LIKE ?)))`);
       const searchValue = `%${search}%`;
-      params.push(searchValue, searchValue, searchValue, searchValue);
+      params.push(searchValue, searchValue, searchValue, searchValue, searchValue, searchValue, searchValue);
     }
 
     if (startDate) {
-      whereClauses.push("DATE(created_at) >= ?");
+      whereClauses.push("DATE(multi_payment_requests.created_at) >= ?");
       params.push(startDate);
     }
 
     if (endDate) {
-      whereClauses.push("DATE(created_at) <= ?");
+      whereClauses.push("DATE(multi_payment_requests.created_at) <= ?");
       params.push(endDate);
     }
 
@@ -80,12 +97,17 @@ export async function GET(req: NextRequest) {
 
     const totalItems = Number(countRows[0]?.total || 0);
     const [rows] = await pool.query<MultiPaymentListRow[]>(
-      `SELECT multi_payment_code, status, loket_code, loket_name, username,
-              total_items, total_amount, total_admin, grand_total,
-              paid_amount, change_amount, paid_at, created_at
+      `SELECT multi_payment_requests.multi_payment_code, multi_payment_requests.status, multi_payment_requests.loket_code, multi_payment_requests.loket_name, multi_payment_requests.username,
+              multi_payment_requests.total_items, multi_payment_requests.total_amount, multi_payment_requests.total_admin, multi_payment_requests.grand_total,
+              multi_payment_requests.paid_amount, multi_payment_requests.change_amount, multi_payment_requests.paid_at, multi_payment_requests.created_at,
+              fi.customer_id AS first_customer_id, fi.customer_name AS first_customer_name,
+              fi.service_type AS first_service_type
          FROM multi_payment_requests
+         LEFT JOIN multi_payment_items fi ON fi.id = (
+           SELECT MIN(x.id) FROM multi_payment_items x WHERE x.multi_payment_id = multi_payment_requests.id
+         )
          ${whereSql}
-        ORDER BY created_at DESC
+        ORDER BY multi_payment_requests.created_at DESC
         LIMIT ? OFFSET ?`,
       [...params, pageSize, offset]
     );
@@ -105,6 +127,9 @@ export async function GET(req: NextRequest) {
         changeAmount: Number(row.change_amount || 0),
         paidAt: row.paid_at,
         createdAt: row.created_at,
+        firstCustomerId: row.first_customer_id,
+        firstCustomerName: row.first_customer_name,
+        firstServiceType: row.first_service_type,
       })),
       pagination: {
         page,

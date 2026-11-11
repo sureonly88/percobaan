@@ -174,14 +174,67 @@ export async function createMultiPaymentItems(multiPaymentId: number, items: Pro
   );
 }
 
-export async function updateMultiPaymentItems(multiPaymentId: number, results: ProviderExecutionResult[]) {
+/**
+ * Jenis layanan berupa TAGIHAN (1 pelanggan + 1 periode = 1 kali bayar). Untuk jenis ini
+ * tagihan yang masih menunggu advice/review tidak boleh dibayar ulang. Pembelian
+ * (token PLN, pulsa, paket data) tidak termasuk — membeli lagi untuk nomor yang sama sah.
+ */
+export const ADVICE_GUARDED_SERVICE_TYPES = [
+  "PDAM_NATIVE",
+  "PDAM_LUNASIN",
+  "PLN_POSTPAID",
+  "PLN_NONREK",
+  "BPJS",
+  "TELKOM",
+];
+
+/**
+ * Cari item yang tagihannya (pelanggan + periode + provider) masih punya pembayaran lain
+ * berstatus PENDING_ADVICE / PENDING_REVIEW. Dipanggil SEBELUM saldo ditahan dan provider
+ * dihubungi, sehingga penolakannya pasti (provider belum tersentuh).
+ * Mengembalikan itemCode → transaction_code pembayaran yang masih aktif.
+ */
+export async function findItemsWithActiveAdvice(
+  multiPaymentId: number,
+  items: Array<{ itemCode: string; provider: string; serviceType: string; customerId: string; periodLabel?: string }>
+): Promise<Map<string, string>> {
+  const blocked = new Map<string, string>();
+  for (const item of items) {
+    if (!ADVICE_GUARDED_SERVICE_TYPES.includes(item.serviceType)) continue;
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT transaction_code FROM multi_payment_items
+        WHERE customer_id = ?
+          AND period_label <=> ?
+          AND provider = ?
+          AND status IN ('PENDING_ADVICE', 'PENDING_REVIEW')
+          AND multi_payment_id != ?
+        ORDER BY id DESC LIMIT 1`,
+      [item.customerId, item.periodLabel ?? null, item.provider, multiPaymentId]
+    );
+    if (rows[0]) blocked.set(item.itemCode, String(rows[0].transaction_code || ""));
+  }
+  return blocked;
+}
+
+/**
+ * Simpan hasil provider per item. Mengembalikan status efektif per itemCode — bisa berbeda
+ * dari `result.status` (mis. duplikat advice → PENDING_REVIEW) — agar status induk
+ * dihitung dari nilai yang benar-benar tersimpan.
+ */
+export async function updateMultiPaymentItems(
+  multiPaymentId: number,
+  results: ProviderExecutionResult[]
+): Promise<Map<string, { status: ProviderExecutionResult["status"]; errorCode: string | null; error: string | null }>> {
+  const effective = new Map<string, { status: ProviderExecutionResult["status"]; errorCode: string | null; error: string | null }>();
   for (const result of results) {
     let effectiveStatus = result.status;
     let effectiveErrorCode = result.errorCode || null;
     let effectiveError = result.error || null;
 
-    // Cegah duplikat PENDING_ADVICE: 1 nopelanggan + blth hanya boleh ada 1 advice aktif
-    if (result.status === "PENDING_ADVICE") {
+    // Duplikat advice yang lolos pengecekan awal (mis. dua pembayaran bersamaan): provider
+    // SUDAH dihubungi dan hasilnya tidak pasti, jadi TIDAK boleh FAILED (hold tetap ditahan).
+    // Kirim ke Review Transaksi agar diputuskan manusia (refund wajib disetujui user lain).
+    if (result.status === "PENDING_ADVICE" && ADVICE_GUARDED_SERVICE_TYPES.includes(result.serviceType)) {
       const [dupeRows] = await pool.query<RowDataPacket[]>(
         `SELECT COUNT(*) AS cnt
            FROM multi_payment_items cur
@@ -195,11 +248,13 @@ export async function updateMultiPaymentItems(multiPaymentId: number, results: P
         [multiPaymentId, result.itemCode, multiPaymentId]
       );
       if (Number(dupeRows[0]?.cnt ?? 0) > 0) {
-        effectiveStatus = "FAILED";
+        effectiveStatus = "PENDING_REVIEW";
         effectiveErrorCode = "DUPLICATE_PENDING_ADVICE";
-        effectiveError = "Sudah ada tagihan advice aktif untuk pelanggan dan periode yang sama";
+        effectiveError =
+          "Tagihan ini juga punya pembayaran lain yang menunggu konfirmasi. Status tidak pasti — saldo tetap ditahan dan diteruskan ke Review Transaksi.";
       }
     }
+    effective.set(result.itemCode, { status: effectiveStatus, errorCode: effectiveErrorCode, error: effectiveError });
 
     const paidAt = effectiveStatus === "SUCCESS" ? new Date() : null;
     const failedAt = effectiveStatus === "FAILED" ? new Date() : null;
@@ -368,6 +423,7 @@ export async function updateMultiPaymentItems(multiPaymentId: number, results: P
       // ─────────────────────────────────────────────────────────────────────────
     }
   }
+  return effective;
 }
 
 export async function finalizeMultiPaymentRequest(params: {

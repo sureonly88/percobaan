@@ -8,6 +8,7 @@ import { RowDataPacket } from "mysql2";
 import { logTransactionEventSafe, logTransactionEventFireAndForget } from "@/lib/transaction-events";
 import { reconcileTransactionHold } from "@/lib/transaction-balance";
 import { sendToReviewIfAdviceExhausted } from "@/lib/advice-policy";
+import { postTransactionSuccessEffects } from "@/lib/gl/post-transaction-success";
 
 // ── shared types ─────────────────────────────────────────────────────────────
 interface ItemRow extends RowDataPacket {
@@ -189,6 +190,24 @@ async function processAdviceTransaction(
         custId: idpel,
         message: `Gagal menyesuaikan saldo setelah advice success: ${settleError instanceof Error ? settleError.message : "unknown"}`,
         payload: { totalDeduct },
+      });
+    }
+
+    // Jurnal GL + komisi, sama seperti pembayaran yang langsung sukses (best-effort).
+    // Jurnal ditunda bila periode lain di transaksi ini masih menunggu advice/review.
+    const effects = await postTransactionSuccessEffects(transactionCode, username, { serviceType: "PDAM_TAGIHAN" });
+    if (effects.glDeferred) {
+      logTransactionEventFireAndForget({
+        idempotencyKey,
+        transactionCode,
+        provider: "PDAM",
+        eventType: "GL_POSTING_DEFERRED",
+        severity: "INFO",
+        username,
+        loketCode,
+        custId: idpel,
+        message: "Jurnal GL ditunda: masih ada periode yang menunggu advice/review",
+        payload: { finalizedCount },
       });
     }
   }

@@ -8,6 +8,7 @@ import { logTransactionEventSafe } from "@/lib/transaction-events";
 import { notifyLowBalance } from "@/lib/notifications";
 import { reconcileTransactionHold, settleTransactionBalance } from "@/lib/transaction-balance";
 import { MAX_ADVICE_ATTEMPTS, sendToReviewIfAdviceExhausted } from "@/lib/advice-policy";
+import { postTransactionSuccessEffects } from "@/lib/gl/post-transaction-success";
 
 
 function safeJsonParse<T>(value: string | null | undefined): T | null {
@@ -627,6 +628,18 @@ export async function POST(req: NextRequest) {
         } catch {
           // non-critical
         }
+
+        // Jurnal GL + komisi, sama seperti pembayaran Lunasin yang langsung sukses
+        // (best-effort; nominal otoritatif dari provider bila tersedia).
+        const providerData = (result.data ?? {}) as Record<string, unknown>;
+        await postTransactionSuccessEffects(transactionCode, username, {
+          serviceTypeFromProductCode: true,
+          providerAmounts: {
+            total: Number(providerData.rp_total ?? 0),
+            amount: Number(providerData.rp_amount ?? 0),
+            adminFee: Number(providerData.rp_admin ?? 0),
+          },
+        });
       }
 
       // ── Sync payment_requests ──

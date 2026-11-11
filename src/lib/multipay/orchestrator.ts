@@ -13,6 +13,7 @@ import {
   createMultiPaymentItems,
   createMultiPaymentRequest,
   finalizeMultiPaymentRequest,
+  findItemsWithActiveAdvice,
   updateMultiPaymentItems,
 } from "@/lib/multipay/repository";
 import { getProviderAdapter } from "@/lib/multipay/providers";
@@ -88,7 +89,7 @@ function normalizeItems(input: MultiPaymentRequestInput): ProviderExecutionItem[
 function buildFinalStatus(results: ProviderExecutionResult[]): MultiPaymentRequestStatus {
   const successCount = results.filter((item) => item.status === "SUCCESS").length;
   const pendingCount = results.filter((item) =>
-    ["PENDING", "PENDING_PROVIDER", "PENDING_ADVICE"].includes(item.status)
+    ["PENDING", "PENDING_PROVIDER", "PENDING_ADVICE", "PENDING_REVIEW"].includes(item.status)
   ).length;
 
   if (successCount === results.length && results.length > 0) return "SUCCESS";
@@ -146,8 +147,29 @@ export async function orchestrateMultiPayment(
     },
   });
 
+  // Tagihan yang masih punya pembayaran lain menunggu advice/review ditolak SEBELUM saldo
+  // ditahan dan provider dihubungi — mencegah bayar ganda dan hold yang menggantung.
+  const activeAdvice = await findItemsWithActiveAdvice(multiPaymentId, items);
+  const results: ProviderExecutionResult[] = [];
+  for (const item of items) {
+    const otherTrx = activeAdvice.get(item.itemCode);
+    if (otherTrx === undefined) continue;
+    results.push({
+      itemCode: item.itemCode,
+      provider: item.provider,
+      serviceType: item.serviceType,
+      customerId: item.customerId,
+      customerName: item.customerName,
+      success: false,
+      status: "FAILED",
+      errorCode: "ACTIVE_ADVICE_EXISTS",
+      error: `Tagihan ini masih menunggu konfirmasi dari pembayaran sebelumnya${otherTrx ? ` (No. Trx ${otherTrx})` : ""}. Jangan bayar ulang — tunggu hasil advice atau cek menu Riwayat.`,
+    });
+  }
+
   const itemsByProvider = new Map<string, ProviderExecutionItem[]>();
   for (const item of items) {
+    if (activeAdvice.has(item.itemCode)) continue;
     const grouped = itemsByProvider.get(item.provider) || [];
     grouped.push(item);
     itemsByProvider.set(item.provider, grouped);
@@ -163,7 +185,6 @@ export async function orchestrateMultiPayment(
     })),
   });
 
-  const results: ProviderExecutionResult[] = [];
   for (const [provider, providerItems] of Array.from(itemsByProvider.entries())) {
     const providerTyped = provider as MultiPaymentProvider;
     const startedAt = Date.now();
@@ -211,7 +232,17 @@ export async function orchestrateMultiPayment(
     });
   }
 
-  await updateMultiPaymentItems(multiPaymentId, results);
+  const effective = await updateMultiPaymentItems(multiPaymentId, results);
+  // Status akhir mengikuti status yang benar-benar tersimpan per item (bisa diubah repository)
+  for (const r of results) {
+    const e = effective.get(r.itemCode);
+    if (e && e.status !== r.status) {
+      r.status = e.status;
+      r.success = e.status === "SUCCESS";
+      r.errorCode = e.errorCode ?? undefined;
+      r.error = e.error ?? undefined;
+    }
+  }
 
   const finalStatus = buildFinalStatus(results);
   const successCount = results.filter((item) => item.success).length;

@@ -22,6 +22,7 @@ Komunikasi dengan pemilik proyek memakai Bahasa Indonesia.
 - Setiap mutasi saldo lewat `src/lib/saldo-mutations.ts` dan tercatat di `loket_balance_ledger` (`reference_type='TRANSACTION'`, `reference_id=transaction_code`).
 - Hasil provider yang tidak pasti (timeout, jaringan, 5xx, respons rusak — `isPdamOutcomeUnknown` / `isLunasinOutcomeUnknown`) **tidak boleh dianggap gagal**: jadikan PENDING_ADVICE dengan hold tetap.
 - Advice dibatasi `ADVICE_MAX_ATTEMPTS` (default 3, `src/lib/advice-policy.ts`); setelah habis → PENDING_REVIEW.
+- Advice yang sukses (PDAM & Lunasin) memposting jurnal GL + komisi lewat `postTransactionSuccessEffects` (`src/lib/gl/post-transaction-success.ts`); jurnal ditunda selama masih ada item PENDING/PENDING_ADVICE/PENDING_REVIEW di transaksi yang sama. Dimensi layanan jurnal mengikuti alur pay: PDAM `PDAM_TAGIHAN`, Lunasin kode produk; nominal Lunasin dari `rp_total/rp_amount/rp_admin` provider.
 - **Maker-checker**:
   - Review transaksi (`src/lib/transaction-review.ts`, `/review-transaksi`): keputusan SUCCESS langsung berlaku; keputusan FAILED (refund) harus disetujui user lain.
   - Pembatalan transaksi sukses (`src/lib/transaction-void.ts`, `/pembatalan`): pengaju ≠ penyetuju; menghasilkan refund ledger, jurnal REVERSAL, dan komisi VOID.
@@ -31,9 +32,10 @@ Komunikasi dengan pemilik proyek memakai Bahasa Indonesia.
 - Update saldo manual (`POST /api/saldo`) khusus admin, relatif (credit/debit), ledger tipe `MANUAL_ADJUST`.
 
 ## Hak akses & navigasi
-- RBAC terpusat di `src/lib/rbac.ts` (`ROLE_PAGES`, `API_PERMISSIONS`, `canAccessPage`, `canAccessApi`, `denyIfUnauthorized`); `middleware.ts` memakai `canAccessPage`.
+- RBAC terpusat di `src/lib/rbac.ts` (`ROLE_PAGES`, `API_PERMISSIONS`, `canAccessPage`, `canAccessApi`, `denyIfUnauthorized`); `src/middleware.ts` memakai `canAccessPage` (harus di `src/`, bukan root — di root Next tidak memuatnya). Middleware berjalan di runtime edge: jangan impor modul Node (mysql2, @opentelemetry/*); externals OTel di `next.config.js` hanya untuk `nextRuntime === "nodejs"`.
 - Menambah halaman/API baru → daftarkan di `rbac.ts`, lalu jalankan `npm run check:rbac`. Fetch yang di UI hanya dipanggil role tertentu ditandai komentar `// rbac-check: admin, supervisor`.
 - Susunan menu satu sumber: `src/ui/nav-config.ts` (dipakai `AppTopNav` dan `AppSidebar`). Di layar < xl menu tampil sebagai drawer kiri, bukan fullscreen.
+- Versi mobile (PWA agen keliling) di `/m` (`src/app/m`, `src/ui/mobile`, `src/lib/mobile`); HP yang membuka `/` dialihkan ke `/m` kecuali cookie `prefer_desktop=1`. Halaman `/m` jangan menautkan ke halaman desktop (kecuali tombol "Buka versi desktop"); menu Akun punya versi sendiri: `/m/topup`, `/m/tutup-kasir`, `/m/pengaturan`, `/m/panduan` (memakai API yang sama dengan desktop). Supervisor tidak punya akses `/m`.
 - Panduan pengguna in-app: `/panduan`, kontennya di `src/app/panduan/content.ts` — perbarui saat fitur berubah.
 
 ## Cetak struk
@@ -45,5 +47,5 @@ Komunikasi dengan pemilik proyek memakai Bahasa Indonesia.
 
 ## Celah yang diketahui (belum dikerjakan)
 - Halaman Pelanggan masih membolehkan admin menambah transaksi manual berstatus SUCCESS dan mengedit nominal transaksi sukses (usulan: batasi / jadikan maker-checker).
-- Route advice yang sukses belum memposting jurnal GL dan komisi.
+- Komisi bisa hilang diam-diam: `commission_ledger` punya UNIQUE `(payment_item_id, target)` tanpa FK. Bila item lama (mis. hasil import LEGACY) dihapus lalu id `multi_payment_items` terpakai ulang, INSERT komisi item baru kena `ER_DUP_ENTRY` dan di-skip tanpa log.
 - Belum ada pengaman versi Node minimum saat start aplikasi maupun di print-bridge (`engines` print-bridge masih `>=18`).

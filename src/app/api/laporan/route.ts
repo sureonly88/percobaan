@@ -17,8 +17,13 @@ export async function GET(request: NextRequest) {
   const jenis = searchParams.get("jenis") || "semua";
 
   const canSeeAll = role === "admin" || role === "supervisor";
-  const userLoketName = (session?.user as { loketName?: string })?.loketName;
-  const loket = !canSeeAll && userLoketName ? userLoketName : searchParams.get("loket");
+  // Kasir selalu dibatasi ke KODE loketnya sendiri (dulu memakai nama loket dari sesi; bila
+  // nama kosong, filter jatuh ke parameter ?loket= sehingga kasir bisa melihat semua loket).
+  const userLoketCode = (session?.user as { loketCode?: string })?.loketCode || "";
+  if (!canSeeAll && !userLoketCode) {
+    return NextResponse.json({ error: "Akun belum terhubung ke loket" }, { status: 403 });
+  }
+  const loket = canSeeAll ? searchParams.get("loket") : null;
 
   // Category filter: "semua" | "pdam" | "lunasin" | "kat:PLN" | "kat:BPJS" | ...
   const isKategoriFilter = jenis.startsWith("kat:");
@@ -66,7 +71,10 @@ export async function GET(request: NextRequest) {
 
     let loketFilter = "";
     const loketParams: (string | number)[] = [];
-    if (loket && loket !== "Semua Loket") {
+    if (!canSeeAll) {
+      loketFilter = " AND r.loket_code = ?";
+      loketParams.push(userLoketCode);
+    } else if (loket && loket !== "Semua Loket") {
       loketFilter = " AND r.loket_name = ?";
       loketParams.push(loket);
     }
@@ -198,7 +206,9 @@ export async function GET(request: NextRequest) {
         trxLunasin: Number(r.trx_lunasin),
         jenisLoket: (r.jenis_loket as string) || "-",
       })),
-      loketList: (loketList as RowDataPacket[]).map((l) => ({ nama: l.nama as string, loketCode: l.loket_code as string })),
+      loketList: (loketList as RowDataPacket[])
+        .filter((l) => canSeeAll || l.loket_code === userLoketCode)
+        .map((l) => ({ nama: l.nama as string, loketCode: l.loket_code as string })),
       rekapLoketUser: (rekapLoketUser as RowDataPacket[]).map((r) => ({
         loketCode: (r.loket_code as string) || "",
         username: (r.username as string) || "(kosong)",
