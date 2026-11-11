@@ -4,6 +4,7 @@ import { ResultSetHeader } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { getAuthToken } from "@/lib/api-auth";
 import { auditLog } from "@/lib/audit-log";
+import { voidCommissionsForItems } from "@/lib/commission/ledger-maintenance";
 
 // Vercel / edge max execution time (adjust to hosting environment)
 export const maxDuration = 300;
@@ -458,6 +459,22 @@ export async function DELETE(request: NextRequest) {
     );
     const totalRequests = (countRows[0]?.total as number) ?? 0;
 
+    // Komisi milik item yang akan dihapus harus di-VOID dulu (jurnal dibalik lewat
+    // REVERSAL). Tanpa ini baris commission_ledger jadi yatim, dan id item yang
+    // terpakai ulang membuat komisi pembayaran baru bentrok.
+    const [itemRows] = await conn.query<import("mysql2").RowDataPacket[]>(
+      `SELECT i.id, i.item_code FROM multi_payment_items i
+       INNER JOIN multi_payment_requests r ON i.multi_payment_id = r.id
+       WHERE r.request_payload = '{"source":"pedami-payment-import"}'
+         AND r.idempotency_key LIKE 'legacy-pdam-%'`
+    );
+    const commissionVoid = await voidCommissionsForItems(
+      conn,
+      itemRows.map((r) => ({ id: Number(r.id), itemCode: String(r.item_code) })),
+      "Data import LEGACY dihapus (cleanup)",
+      authToken!.username
+    );
+
     // Hapus items dulu (FK constraint), lalu requests
     const [itemDel] = await conn.execute<import("mysql2").ResultSetHeader>(
       `DELETE i FROM multi_payment_items i
@@ -489,6 +506,12 @@ export async function DELETE(request: NextRequest) {
         deletedRequests: reqDel.affectedRows,
         deletedItems:    itemDel.affectedRows,
         totalRequests,
+        commissionVoided:        commissionVoid.voided,
+        commissionVoidedAmount:  commissionVoid.voidedAmount,
+        commissionReversalIds:   commissionVoid.reversalEntryIds,
+        commissionPaidNotVoided: commissionVoid.paidNotVoided,
+        commissionPaidAmount:    commissionVoid.paidAmount,
+        commissionWarnings:      commissionVoid.warnings,
       },
     });
 
@@ -496,7 +519,14 @@ export async function DELETE(request: NextRequest) {
       success: true,
       deletedRequests: reqDel.affectedRows,
       deletedItems:    itemDel.affectedRows,
-      message: `Berhasil menghapus ${reqDel.affectedRows} transaksi (${itemDel.affectedRows} item) data legacy PDAM.`,
+      commissionVoided:        commissionVoid.voided,
+      commissionPaidNotVoided: commissionVoid.paidNotVoided,
+      message:
+        `Berhasil menghapus ${reqDel.affectedRows} transaksi (${itemDel.affectedRows} item) data legacy PDAM.` +
+        (commissionVoid.voided > 0 ? ` ${commissionVoid.voided} baris komisi di-VOID.` : "") +
+        (commissionVoid.paidNotVoided > 0
+          ? ` ${commissionVoid.paidNotVoided} baris komisi sudah dibayar (Rp ${commissionVoid.paidAmount.toLocaleString("id-ID")}) — potong manual dari pembayaran komisi berikutnya.`
+          : ""),
     });
   } catch (err) {
     try { await conn.rollback(); } catch { /* ignore */ }

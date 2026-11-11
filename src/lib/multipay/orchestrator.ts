@@ -248,6 +248,22 @@ export async function orchestrateMultiPayment(
     errorMessage: failedSample?.error || null,
   });
 
+  // Komisi dicatat di sini, setelah item tersimpan SUCCESS + transaction_code.
+  // Route /api/pembayaran/pay & lunasin/pay juga memanggil pencatatan komisi, tapi saat
+  // dipanggil dari orchestrator item belum diperbarui sehingga tidak menemukan apa pun.
+  // Idempoten (commission_ledger.dedup_key), best-effort: tidak boleh menggagalkan pembayaran.
+  if (successCount > 0) {
+    try {
+      const { recordCommissionsForMultiPaymentCode } = await import("@/lib/commission/record");
+      await recordCommissionsForMultiPaymentCode(multiPaymentCode);
+    } catch (err) {
+      console.error("[multipay] pencatatan komisi gagal:", {
+        multiPaymentCode,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   await logTransactionEventSafe({
     idempotencyKey: input.idempotencyKey,
     multiPaymentCode,

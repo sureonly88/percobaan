@@ -97,7 +97,7 @@ export default function LaporanKomisiPage() {
   const [backfillStart, setBackfillStart] = useState(defaultStart());
   const [backfillEnd, setBackfillEnd] = useState(todayStr());
   const [backfillRunning, setBackfillRunning] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<null | { ok: boolean; totalItems: number; processed: number; skipped: number; failed: number; errors: string[] }>(null);
+  const [backfillResult, setBackfillResult] = useState<null | { ok: boolean; totalItems: number; processed: number; skipped: number; failed: number; errors: string[]; alreadyRecorded?: number; noRule?: number; orphansVoided?: number; orphansPaidNotVoided?: number; orphansPaidAmount?: number }>(null);
   useEffect(() => {
     fetch("/api/loket")
       .then((r) => r.json())
@@ -258,7 +258,15 @@ export default function LaporanKomisiPage() {
                       <div className="font-semibold mb-1">Backfill selesai</div>
                       <div>Total item diperiksa: <b>{backfillResult.totalItems}</b></div>
                       <div>Komisi baru dicatat: <b className="text-emerald-700 dark:text-emerald-300">{backfillResult.processed}</b></div>
-                      <div>Di-skip (sudah ada / no rule): <b>{backfillResult.skipped}</b></div>
+                      <div>Sudah tercatat sebelumnya: <b>{backfillResult.alreadyRecorded ?? 0}</b> · Tanpa aturan cocok: <b>{backfillResult.noRule ?? 0}</b></div>
+                      {(backfillResult.orphansVoided ?? 0) > 0 && (
+                        <div>Komisi item yang sudah dihapus di-VOID: <b>{backfillResult.orphansVoided}</b></div>
+                      )}
+                      {(backfillResult.orphansPaidNotVoided ?? 0) > 0 && (
+                        <div className="text-amber-700">
+                          Komisi item terhapus yang sudah dibayar: {backfillResult.orphansPaidNotVoided} baris (Rp {(backfillResult.orphansPaidAmount ?? 0).toLocaleString("id-ID")}) — potong manual.
+                        </div>
+                      )}
                       {backfillResult.failed > 0 && <div className="text-amber-700">Gagal: {backfillResult.failed}</div>}
                     </>
                   ) : (
