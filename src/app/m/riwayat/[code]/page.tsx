@@ -22,11 +22,13 @@ interface DetailItem {
   status: string;
   transactionCode: string | null;
   providerErrorMessage: string | null;
+  adviceAttempts: number;
   providerResponse: Record<string, unknown> | null;
   metadata: Record<string, unknown> | null;
 }
 
 interface Detail {
+  maxAdviceAttempts?: number;
   multiPayment: {
     multiPaymentCode: string;
     status: string;
@@ -45,6 +47,16 @@ interface Detail {
 
 const PENDING = ["PENDING", "PENDING_PROVIDER", "PENDING_ADVICE"];
 
+/** Item yang boleh dicek ulang ke provider oleh agen (PENDING_REVIEW = wewenang admin). */
+function canRunAdvice(i: DetailItem, max: number): boolean {
+  if (!i.transactionCode || i.adviceAttempts >= max) return false;
+  if (i.provider === "PDAM") return i.status === "PENDING_ADVICE";
+  if (i.provider === "LUNASIN") return PENDING.includes(i.status);
+  return false;
+}
+
+type AdviceMsg = { tone: "ok" | "wait" | "bad"; text: string };
+
 export default function MobileRiwayatDetailPage() {
   const params = useParams<{ code: string }>();
   const code = decodeURIComponent(String(params?.code || ""));
@@ -54,8 +66,10 @@ export default function MobileRiwayatDetailPage() {
   const [data, setData] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState<string | null>(null);
+  const [adviceMsg, setAdviceMsg] = useState<Record<string, AdviceMsg>>({});
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<Detail | null> => {
     setLoading(true);
     setError("");
     try {
@@ -64,15 +78,73 @@ export default function MobileRiwayatDetailPage() {
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || "Transaksi tidak ditemukan");
-        return;
+        return null;
       }
       setData(json);
+      return json as Detail;
     } catch {
       setError("Gagal menghubungi server. Periksa koneksi.");
+      return null;
     } finally {
       setLoading(false);
     }
   }, [code]);
+
+  /**
+   * Tanya ulang status ke provider (advice). Hasil final tetap ditentukan server:
+   * lunas → SUCCESS; belum ada kepastian → tetap Diproses (hold ditahan);
+   * batas percobaan habis → diteruskan ke Review Transaksi. Agen tidak bisa me-refund.
+   */
+  async function runAdvice(item: DetailItem) {
+    const key = item.transactionCode || item.itemCode;
+    setChecking(key);
+    setAdviceMsg((m) => ({ ...m, [key]: { tone: "wait", text: "Menghubungi provider…" } }));
+    let serverError = "";
+    try {
+      let res: Response;
+      if (item.provider === "PDAM") {
+        res = await fetch("/api/pembayaran/pdam/advice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idpel: item.customerId, transactionCode: item.transactionCode }),
+        });
+      } else {
+        res = await fetch(`/api/pembayaran/multipay/${encodeURIComponent(code)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemCode: item.itemCode, action: "run_advice" }),
+        });
+      }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        serverError = String(j.error || "");
+      }
+    } catch {
+      serverError = "Koneksi terputus saat menghubungi server";
+    }
+
+    // Status sebenarnya dibaca ulang dari server, bukan ditebak dari respons advice
+    const fresh = await load();
+    const now = fresh?.items.find((x) => x.itemCode === item.itemCode);
+    const max = fresh?.maxAdviceAttempts ?? 3;
+    let msg: AdviceMsg;
+    if (!now) {
+      msg = { tone: "bad", text: serverError || "Gagal memuat status terbaru" };
+    } else if (now.status === "SUCCESS") {
+      msg = { tone: "ok", text: "Provider mengonfirmasi pembayaran LUNAS. Struk sudah bisa dikirim." };
+    } else if (now.status === "FAILED") {
+      msg = { tone: "bad", text: "Provider memastikan pembayaran GAGAL. Saldo yang ditahan dikembalikan ke loket." };
+    } else if (now.status === "PENDING_REVIEW") {
+      msg = { tone: "wait", text: "Batas pengecekan habis. Transaksi diteruskan ke supervisor/admin (Review Transaksi). Saldo tetap ditahan." };
+    } else {
+      msg = {
+        tone: "wait",
+        text: `Provider belum memberi kepastian (pengecekan ${now.adviceAttempts} dari ${max}). Coba lagi beberapa menit lagi.`,
+      };
+    }
+    setAdviceMsg((m) => ({ ...m, [key]: msg }));
+    setChecking(null);
+  }
 
   useEffect(() => {
     if (code) load();
@@ -86,7 +158,7 @@ export default function MobileRiwayatDetailPage() {
       right={
         <button
           type="button"
-          onClick={load}
+          onClick={() => load()}
           className="h-10 w-10 rounded-full flex items-center justify-center active:bg-slate-200 dark:active:bg-slate-800"
           aria-label="Muat ulang status"
         >
@@ -134,8 +206,19 @@ export default function MobileRiwayatDetailPage() {
     })),
   });
   const anyPending = data.items.some((i) => PENDING.includes(i.status));
-  const anyReview = mp.status === "PENDING_REVIEW";
+  const anyReview = mp.status === "PENDING_REVIEW" || data.items.some((i) => i.status === "PENDING_REVIEW");
   const anyNotPaid = data.items.some((i) => i.status !== "SUCCESS");
+  const maxAdvice = data.maxAdviceAttempts ?? 3;
+  // PDAM multi-bulan berbagi satu No. Trx — tombol cukup sekali per transaksi
+  const adviceButtonFor = new Set<string>();
+  {
+    const seen = new Set<string>();
+    for (const i of data.items) {
+      if (!canRunAdvice(i, maxAdvice) || !i.transactionCode || seen.has(i.transactionCode)) continue;
+      seen.add(i.transactionCode);
+      adviceButtonFor.add(i.itemCode);
+    }
+  }
 
   return (
     <div>
@@ -175,7 +258,8 @@ export default function MobileRiwayatDetailPage() {
                 ? "Transaksi sedang ditinjau supervisor/admin. "
                 : "Menunggu konfirmasi provider. "}
               Saldo ditahan sampai ada kepastian dan kembali otomatis bila dipastikan gagal.
-              <b> Jangan bayar ulang</b> tagihan yang sama. Tekan ikon muat ulang untuk cek status terbaru.
+              <b> Jangan bayar ulang</b> tagihan yang sama.
+              {adviceButtonFor.size > 0 && " Tekan \"Cek ke provider\" untuk menanyakan hasilnya."}
             </p>
           </div>
         )}
@@ -200,6 +284,30 @@ export default function MobileRiwayatDetailPage() {
                   {i.status === "FAILED" && i.providerErrorMessage && (
                     <p className="text-xs text-red-600 mt-1">{i.providerErrorMessage}</p>
                   )}
+                  {adviceButtonFor.has(i.itemCode) && (
+                    <button
+                      type="button"
+                      disabled={checking !== null}
+                      onClick={() => runAdvice(i)}
+                      className="mt-2 h-9 px-3 rounded-lg bg-primary text-white text-sm font-semibold inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+                    >
+                      <span className={`material-symbols-outlined text-lg ${checking === (i.transactionCode || i.itemCode) ? "animate-spin" : ""}`}>
+                        {checking === (i.transactionCode || i.itemCode) ? "progress_activity" : "sync"}
+                      </span>
+                      {checking === (i.transactionCode || i.itemCode) ? "Mengecek…" : "Cek ke provider"}
+                    </button>
+                  )}
+                  {PENDING.includes(i.status) && i.adviceAttempts > 0 && !adviceMsg[i.transactionCode || i.itemCode] && (
+                    <p className="text-[11px] text-slate-500 mt-1">Sudah dicek {i.adviceAttempts} dari {maxAdvice} kali</p>
+                  )}
+                  {(() => {
+                    const k = i.transactionCode || i.itemCode;
+                    const m = adviceMsg[k];
+                    // Satu pesan per No. Trx (baris pertama saja)
+                    if (!m || data.items.find((x) => (x.transactionCode || x.itemCode) === k)?.itemCode !== i.itemCode) return null;
+                    const cls = m.tone === "ok" ? "text-emerald-700 dark:text-emerald-400" : m.tone === "bad" ? "text-red-600" : "text-amber-700 dark:text-amber-400";
+                    return <p className={`text-xs mt-1 ${cls}`}>{m.text}</p>;
+                  })()}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-semibold">{formatRp(i.total)}</p>

@@ -8,6 +8,7 @@ function isOutsideKasirLoket(token: Record<string, unknown>, loketCode: string |
   return !token.loketCode || String(token.loketCode) !== String(loketCode || "");
 }
 import pool from "@/lib/db";
+import { MAX_ADVICE_ATTEMPTS } from "@/lib/advice-policy";
 import { RowDataPacket } from "mysql2";
 
 interface MultiPaymentRequestRow extends RowDataPacket {
@@ -104,6 +105,7 @@ export async function GET(
     );
 
     return NextResponse.json({
+      maxAdviceAttempts: MAX_ADVICE_ATTEMPTS,
       multiPayment: {
         multiPaymentCode: requestRow.multi_payment_code,
         idempotencyKey: requestRow.idempotency_key,

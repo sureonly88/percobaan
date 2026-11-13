@@ -402,6 +402,31 @@ export async function POST(req: NextRequest) {
   }
 
   const username = String(token.username || token.name || "");
+
+  // Kasir: wajib menyebut transactionCode milik loketnya sendiri yang masih menunggu advice.
+  // PENDING_REVIEW adalah wewenang admin/supervisor (menu Review Transaksi).
+  if (normalizeRole(String(token.role || "kasir")) === "kasir") {
+    if (!transactionCode || !token.loketCode) {
+      return NextResponse.json({ error: "Transaksi tidak ditemukan" }, { status: 404 });
+    }
+    const [own] = await pool.query<RowDataPacket[]>(
+      `SELECT i.status FROM multi_payment_items i
+         JOIN multi_payment_requests r ON r.id = i.multi_payment_id
+        WHERE i.transaction_code = ? AND i.provider = 'LUNASIN' AND r.loket_code = ?
+        LIMIT 1`,
+      [transactionCode, String(token.loketCode)]
+    );
+    if (!own[0]) {
+      return NextResponse.json({ error: "Transaksi tidak ditemukan" }, { status: 404 });
+    }
+    if (!["PENDING", "PENDING_PROVIDER", "PENDING_ADVICE"].includes(String(own[0].status))) {
+      return NextResponse.json(
+        { error: "Transaksi ini tidak lagi menunggu advice (sudah final atau sedang ditinjau admin)." },
+        { status: 409 }
+      );
+    }
+  }
+
   const relatedIdempotencyKey = transactionCode
     ? await findIdempotencyKeyByTransactionCode(transactionCode)
     : null;

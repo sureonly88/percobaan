@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { canProcessPayment } from "@/lib/rbac";
+import { canProcessPayment, normalizeRole } from "@/lib/rbac";
 import { getAuthToken, unauthorized } from "@/lib/api-auth";
 import { pdamAdvice, parsePdamNumber, PdamApiError } from "@/lib/pdam-api";
 import { CircuitOpenError } from "@/lib/circuit-breaker";
@@ -249,7 +249,12 @@ export async function GET(req: NextRequest) {
   }
 
   const idpel = req.nextUrl.searchParams.get("idpel")?.trim() || "";
-  const loketCode = req.nextUrl.searchParams.get("loketCode")?.trim() || "";
+  // Kasir hanya melihat transaksi loketnya sendiri, apa pun loketCode di URL
+  const isKasir = normalizeRole(String(token.role || "")) === "kasir";
+  if (isKasir && !token.loketCode) {
+    return NextResponse.json({ error: "Akun belum terhubung ke loket" }, { status: 403 });
+  }
+  const loketCode = isKasir ? String(token.loketCode) : req.nextUrl.searchParams.get("loketCode")?.trim() || "";
 
   const whereClauses = ["mpi.status = 'PENDING_ADVICE'", "mpi.provider = 'PDAM'"];
   const params: string[] = [];
@@ -351,14 +356,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "idpel wajib diisi" }, { status: 400 });
   }
 
+  // Kasir: hanya transaksi loketnya sendiri dan hanya PENDING_ADVICE. PENDING_REVIEW sudah
+  // menjadi wewenang admin/supervisor di menu Review Transaksi.
+  const isKasir = normalizeRole(String(token.role || "")) === "kasir";
+  if (isKasir && !token.loketCode) {
+    return NextResponse.json({ error: "Akun belum terhubung ke loket" }, { status: 403 });
+  }
+
   // Build query to find pending items
   const whereClauses = [
     // PENDING_REVIEW ikut: admin boleh cek ulang advice dari menu Review Transaksi
-    "mpi.status IN ('PENDING_ADVICE', 'PENDING_REVIEW')",
+    isKasir ? "mpi.status = 'PENDING_ADVICE'" : "mpi.status IN ('PENDING_ADVICE', 'PENDING_REVIEW')",
     "mpi.provider = 'PDAM'",
     "mpi.customer_id = ?",
   ];
   const params: (string | number)[] = [idpel];
+  if (isKasir) {
+    whereClauses.push("mpr.loket_code = ?");
+    params.push(String(token.loketCode));
+  }
 
   if (transactionCode) {
     whereClauses.push("mpi.transaction_code = ?");
