@@ -10,6 +10,7 @@ function isOutsideKasirLoket(token: Record<string, unknown>, loketCode: string |
 import pool from "@/lib/db";
 import { MAX_ADVICE_ATTEMPTS } from "@/lib/advice-policy";
 import { RowDataPacket } from "mysql2";
+import { POST as runLunasinAdvice } from "@/app/api/pembayaran/lunasin/advice/route";
 
 interface MultiPaymentRequestRow extends RowDataPacket {
   id: number;
@@ -218,9 +219,12 @@ export async function PATCH(
     }
 
     const metadata = itemRow.metadata_json ? JSON.parse(itemRow.metadata_json) as Record<string, unknown> : {};
+    // Panggil handler advice langsung (bukan HTTP ke req.nextUrl.origin): di belakang
+    // domain/reverse proxy/tunnel, server memanggil URL publiknya sendiri bisa gagal
+    // (DNS/hairpin NAT, TLS, halaman interstitial) sehingga advice dari HP gagal padahal
+    // provider tidak pernah dihubungi. Cookie sesi diteruskan agar auth & RBAC tetap sama.
     const cookieHeader = req.headers.get("cookie") || "";
-
-    const adviceRes = await fetch(`${req.nextUrl.origin}/api/pembayaran/lunasin/advice`, {
+    const adviceRes = await runLunasinAdvice(new NextRequest(new URL("/api/pembayaran/lunasin/advice", req.url), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -234,7 +238,7 @@ export async function PATCH(
         input2: String(metadata.input2 || ""),
         input3: String(metadata.input3 || ""),
       }),
-    });
+    }));
 
     const adviceData = await adviceRes.json();
     if (!adviceRes.ok) {
