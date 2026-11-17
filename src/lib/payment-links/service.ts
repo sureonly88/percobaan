@@ -66,6 +66,10 @@ export async function startInvoicePayment(publicToken: string) {
     customerName: invoice.customerName || invoice.customerPhone || invoice.invoiceCode,
     customerEmail: invoice.customerEmail || undefined,
     itemName: `Pembayaran tagihan ${invoice.invoiceCode}`,
+    // Batas bayar di Midtrans mengikuti masa berlaku invoice (bila ada)
+    expiryMinutes: invoice.expiresAt
+      ? Math.max(15, Math.floor((new Date(invoice.expiresAt).getTime() - Date.now()) / 60000))
+      : undefined,
     callbacks: {
       finish: `${appUrl}/invoice/${publicToken}/finish`,
       unfinish: `${appUrl}/invoice/${publicToken}/unfinish`,

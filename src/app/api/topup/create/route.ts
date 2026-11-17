@@ -49,7 +49,9 @@ export async function POST(request: NextRequest) {
     const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
     const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
     const requestCode = `TOPUP-${ts}-${rand}`;
-    const orderId = `TOPUP-${loketCode}-${ts}-${rand}`;
+    // order_id Midtrans maks. 50 karakter & karakter terbatas → kode loket dibersihkan & dipotong
+    const loketPart = loketCode.replace(/[^A-Za-z0-9]/g, "").slice(0, 14) || "LOKET";
+    const orderId = `TOPUP-${loketPart}-${ts}-${rand}`; // ≤ 42 karakter
 
     // Create Midtrans Snap transaction
     const snap = await createSnapTransaction({
@@ -57,9 +59,10 @@ export async function POST(request: NextRequest) {
       grossAmount: nominal,
       customerName: auth.name || auth.username,
       itemName: `Top-up Saldo ${loketName} - Rp ${nominal.toLocaleString("id-ID")}`,
+      expiryMinutes: 24 * 60, // sama dengan expires_at di bawah
     });
 
-    // Expiry: 24 hours from now
+    // Expiry: 24 hours from now (sama dengan expiry yang dikirim ke Midtrans)
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
     // Insert record

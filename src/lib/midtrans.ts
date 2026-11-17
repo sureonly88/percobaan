@@ -45,6 +45,12 @@ export interface SnapRequest {
   customerName: string;
   customerEmail?: string;
   itemName: string;
+  /**
+   * Masa berlaku pembayaran (menit) dihitung SEJAK SEKARANG. Dikirim sebagai
+   * expiry.start_time agar sama dengan catatan expires_at di DB — tanpa start_time,
+   * Midtrans baru mulai menghitung saat pelanggan memilih metode bayar.
+   */
+  expiryMinutes?: number;
   callbacks?: {
     finish?: string;
     unfinish?: string;
@@ -57,9 +63,22 @@ export interface SnapResponse {
   redirect_url: string;
 }
 
+/** order_id Midtrans: maks. 50 karakter, hanya huruf, angka, - _ ~ . */
+export const MIDTRANS_ORDER_ID_RE = /^[A-Za-z0-9\-_~.]{1,50}$/;
+
+/** Waktu "YYYY-MM-DD HH:MM:SS +0700" (WIB) untuk expiry.start_time. */
+function wibTimestamp(d: Date): string {
+  const w = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${w.getUTCFullYear()}-${p(w.getUTCMonth() + 1)}-${p(w.getUTCDate())} ${p(w.getUTCHours())}:${p(w.getUTCMinutes())}:${p(w.getUTCSeconds())} +0700`;
+}
+
 export async function createSnapTransaction(req: SnapRequest): Promise<SnapResponse> {
   const { baseUrl } = getConfig();
   const appUrl = getAppBaseUrl();
+  if (!MIDTRANS_ORDER_ID_RE.test(req.orderId)) {
+    throw new Error(`order_id Midtrans tidak valid (maks. 50 karakter, A-Z 0-9 - _ ~ .): ${req.orderId}`);
+  }
 
   const body = {
     transaction_details: {
@@ -78,6 +97,9 @@ export async function createSnapTransaction(req: SnapRequest): Promise<SnapRespo
         name: req.itemName,
       },
     ],
+    ...(req.expiryMinutes && req.expiryMinutes > 0
+      ? { expiry: { start_time: wibTimestamp(new Date()), unit: "minute", duration: Math.floor(req.expiryMinutes) } }
+      : {}),
     callbacks: {
       finish:   req.callbacks?.finish   || `${appUrl}/topup/finish`,
       unfinish: req.callbacks?.unfinish || `${appUrl}/topup/unfinish`,
@@ -179,6 +201,7 @@ export function mapMidtransStatus(
       return "PENDING";
     case "deny":
     case "cancel":
+    case "failure": // kesalahan pemrosesan di Midtrans — pembayaran tidak terjadi
       return "FAILED";
     case "expire":
       return "EXPIRED";

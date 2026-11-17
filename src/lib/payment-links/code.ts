@@ -15,7 +15,8 @@ export function generateInvoiceCode(): string {
 
 export function generateGatewayOrderId(invoiceCode: string): string {
   const rand = randomBytes(3).toString("hex").toUpperCase();
-  return `INV-${invoiceCode.replace(/[^A-Z0-9]/gi, "")}-${rand}`.slice(0, 120);
+  // order_id Midtrans maks. 50 karakter; awalan "INV-" dipakai untuk merutekan notifikasi
+  return `INV-${invoiceCode.replace(/[^A-Z0-9]/gi, "").slice(0, 38)}-${rand}`.slice(0, 50);
 }
 
 export function getAppBaseUrl(): string {

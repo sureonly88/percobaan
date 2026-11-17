@@ -4,6 +4,7 @@ import pool from "@/lib/db";
 import { getAuthToken, unauthorized } from "@/lib/api-auth";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { getMidtransClientKey } from "@/lib/midtrans";
+import { syncTopupFromGateway } from "@/lib/topup-settlement";
 
 /**
  * GET /api/topup
@@ -35,18 +36,27 @@ export async function GET(request: NextRequest) {
         queryParams.push(loketCode);
       }
 
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT id, request_code, loket_code, username, nominal, fee, total_bayar,
-                status, payment_method, gateway_order_id, snap_token, snap_url,
-                expires_at, paid_at, created_at
-         FROM topup_requests
-         WHERE ${conditions.join(" AND ")}
-         LIMIT 1`,
-        queryParams
-      );
+      const selectOne = () =>
+        pool.query<RowDataPacket[]>(
+          `SELECT id, request_code, loket_code, username, nominal, fee, total_bayar,
+                  status, payment_method, gateway_order_id, snap_token, snap_url,
+                  expires_at, paid_at, created_at
+           FROM topup_requests
+           WHERE ${conditions.join(" AND ")}
+           LIMIT 1`,
+          queryParams
+        );
+      let [rows] = await selectOne();
 
       if (rows.length === 0) {
         return NextResponse.json({ error: "Top-up tidak ditemukan" }, { status: 404 });
+      }
+
+      // Masih PENDING → tanyakan langsung ke Midtrans (cadangan bila webhook tidak sampai).
+      // Dibatasi 1x per 15 detik per order; ?sync=1 memaksa (tombol "Cek pembayaran").
+      if (rows[0].status === "PENDING" && rows[0].gateway_order_id) {
+        const outcome = await syncTopupFromGateway(String(rows[0].gateway_order_id), { force: params.get("sync") === "1" });
+        if (outcome && outcome.kind === "updated" && outcome.status !== "PENDING") [rows] = await selectOne();
       }
 
       const r = rows[0];
@@ -89,6 +99,18 @@ export async function GET(request: NextRequest) {
     }
 
     const where = conditions.join(" AND ");
+
+    // Halaman pertama: selaraskan maks. 3 top-up PENDING terbaru (7 hari) dengan Midtrans
+    if (page === 1) {
+      const [pending] = await pool.query<RowDataPacket[]>(
+        `SELECT gateway_order_id FROM topup_requests
+          WHERE ${where} AND status = 'PENDING' AND gateway_order_id IS NOT NULL
+            AND created_at >= NOW() - INTERVAL 7 DAY
+          ORDER BY created_at DESC LIMIT 3`,
+        queryParams
+      );
+      for (const p of pending) await syncTopupFromGateway(String(p.gateway_order_id));
+    }
 
     const [countRows] = await pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) as total FROM topup_requests WHERE ${where}`,

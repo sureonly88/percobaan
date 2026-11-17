@@ -64,7 +64,10 @@ export default withAuth(
         const path = req.nextUrl.pathname;
         // Allow public paths without a session token
         if (isPublicPath(path)) return true;
-        if (path.startsWith("/api/auth/register")) return true;
+        // API memeriksa auth-nya sendiri (sesi, Bearer token, signature webhook, CRON_SECRET).
+        // Jangan dialihkan ke /login: webhook Midtrans, /api/public/*, /api/cron/* dan
+        // /api/v1/* dipanggil tanpa sesi browser.
+        if (path.startsWith("/api/")) return true;
         return !!token;
       },
     },

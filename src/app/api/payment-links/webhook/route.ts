@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySignature } from "@/lib/midtrans";
-import { handlePaymentLinkWebhook } from "@/lib/payment-links/service";
+import { handleMidtransNotification } from "@/lib/midtrans-notification";
 
+/**
+ * POST /api/payment-links/webhook — URL lama, tetap dilayani lewat handler bersama
+ * (signature + Get Status, top-up & payment link). URL yang disarankan di dashboard:
+ * /api/midtrans/notification.
+ */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as Record<string, unknown>;
-    const orderId = String(body.order_id || "");
-    const statusCode = String(body.status_code || "");
-    const grossAmount = String(body.gross_amount || "");
-    const signatureKey = String(body.signature_key || "");
-    if (!verifySignature(orderId, statusCode, grossAmount, signatureKey)) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
-    }
-    const result = await handlePaymentLinkWebhook(body);
-    return NextResponse.json({ message: "OK", ...result });
+    const result = await handleMidtransNotification(await req.json().catch(() => null));
+    return NextResponse.json(result.body, { status: result.httpStatus });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Webhook error";
     return NextResponse.json({ error: message }, { status: 500 });
