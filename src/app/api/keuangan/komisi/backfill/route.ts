@@ -7,6 +7,8 @@ import {
   recordCommissionsSafe,
   type CommissionContext,
 } from "@/lib/commission/calculate";
+import { voidOrphanCommissions, type VoidCommissionsResult } from "@/lib/commission/ledger-maintenance";
+import { auditLog } from "@/lib/audit-log";
 
 interface ItemRow extends RowDataPacket {
   id: number;
@@ -67,19 +69,37 @@ export async function POST(req: NextRequest) {
     [startDate, endDate]
   );
 
+  // 1) VOID komisi yatim (item-nya sudah dihapus, mis. cleanup import LEGACY) di periode ini,
+  //    jurnalnya dibalik lewat REVERSAL. Baris PAID tidak disentuh, hanya dilaporkan.
+  let orphan: VoidCommissionsResult;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    orphan = await voidOrphanCommissions(
+      conn,
+      startDate,
+      endDate,
+      "Item pembayaran sudah tidak ada (backfill komisi)",
+      auth.username
+    );
+    await conn.commit();
+  } catch (e) {
+    try { await conn.rollback(); } catch { /* ignore */ }
+    const msg = `Gagal membersihkan komisi yatim: ${(e as Error).message}`;
+    return NextResponse.json({ ok: false, error: msg, errors: [msg] }, { status: 500 });
+  } finally {
+    conn.release();
+  }
+
+  // 2) Catat komisi yang belum ada. Idempoten: item yang sudah punya komisi
+  //    (ACCRUED/PAID) tidak diubah; jurnal yang dulu gagal diposting dilengkapi.
   let processed = 0;
-  let skipped = 0;
+  let alreadyRecorded = 0;
+  let noRule = 0;
   let failed = 0;
-  const errors: string[] = [];
+  const errors: string[] = [...orphan.warnings];
 
   for (const row of rows) {
-    // Hapus entry ACCRUED lama agar perubahan aturan komisi langsung berlaku.
-    // Entry berstatus PAID tidak dihapus karena sudah diselesaikan.
-    await pool.execute(
-      `DELETE FROM commission_ledger WHERE payment_item_id = ? AND status = 'ACCRUED'`,
-      [row.id]
-    );
-
     const ctx: CommissionContext = {
       paymentItemId: row.id,
       itemCode: row.item_code,
@@ -101,19 +121,50 @@ export async function POST(req: NextRequest) {
     if (result === null) {
       failed++;
       errors.push(`${row.item_code}: recordCommissions threw an error`);
-    } else if (result.inserted === 0) {
-      skipped++; // tidak ada rule yang cocok untuk item ini
-    } else {
+    } else if (result.errors > 0) {
+      failed++;
+      errors.push(`${row.item_code}: ${result.errors} baris komisi gagal/bentrok (lihat log server)`);
+    } else if (result.inserted > 0) {
       processed++;
+    } else if (result.alreadyRecorded > 0) {
+      alreadyRecorded++;
+    } else {
+      noRule++;
     }
   }
+
+  await auditLog({
+    actorType: "user",
+    actorUsername: auth.username,
+    actorRole: auth.role,
+    action: "COMMISSION_BACKFILL",
+    entityType: "commission_ledger",
+    context: {
+      period: { startDate, endDate },
+      totalItems: rows.length,
+      processed,
+      alreadyRecorded,
+      noRule,
+      failed,
+      orphansVoided: orphan.voided,
+      orphansVoidedAmount: orphan.voidedAmount,
+      orphanReversalIds: orphan.reversalEntryIds,
+      orphansPaidNotVoided: orphan.paidNotVoided,
+      orphansPaidAmount: orphan.paidAmount,
+    },
+  });
 
   return NextResponse.json({
     ok: true,
     totalItems: rows.length,
     processed,
-    skipped,
+    skipped: alreadyRecorded + noRule,
+    alreadyRecorded,
+    noRule,
     failed,
+    orphansVoided: orphan.voided,
+    orphansPaidNotVoided: orphan.paidNotVoided,
+    orphansPaidAmount: orphan.paidAmount,
     errors: errors.slice(0, 20),
     period: { startDate, endDate },
   });

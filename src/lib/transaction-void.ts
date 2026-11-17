@@ -207,8 +207,9 @@ export async function requestTransactionVoid(input: {
   const itemIds = successItems.map((i) => i.id);
   const [paidCommission] = await pool.query<RowDataPacket[]>(
     `SELECT COALESCE(SUM(commission_amount), 0) AS total
-       FROM commission_ledger WHERE payment_item_id IN (?) AND status = 'PAID'`,
-    [itemIds]
+       FROM commission_ledger
+      WHERE payment_item_id IN (?) AND transaction_code = ? AND status = 'PAID'`,
+    [itemIds, transactionCode]
   );
   if (Number(paidCommission[0]?.total || 0) > 0) {
     warnings.push(
@@ -296,11 +297,11 @@ async function reverseJournals(
         AND (
           (e.source_type = 'PAYMENT' AND e.source_id = ?)
           OR e.id IN (SELECT gl_entry_id FROM commission_ledger
-                       WHERE payment_item_id IN (?) AND gl_entry_id IS NOT NULL)
+                       WHERE payment_item_id IN (?) AND transaction_code = ? AND gl_entry_id IS NOT NULL)
         )
         AND NOT EXISTS (SELECT 1 FROM gl_journal_entries x WHERE x.reverses_entry_id = e.id)
       ORDER BY e.id`,
-    [voidRow.transactionCode, voidRow.itemIds.length ? voidRow.itemIds : [0]]
+    [voidRow.transactionCode, voidRow.itemIds.length ? voidRow.itemIds : [0], voidRow.transactionCode]
   );
 
   const reversalIds: number[] = [];
@@ -427,8 +428,8 @@ export async function reviewTransactionVoid(input: {
       await conn.query(
         `UPDATE commission_ledger
             SET status = 'VOID', notes = ?
-          WHERE payment_item_id IN (?) AND status = 'ACCRUED'`,
-        [`Transaksi dibatalkan (void #${voidRow.id})`, voidRow.itemIds]
+          WHERE payment_item_id IN (?) AND transaction_code = ? AND status = 'ACCRUED'`,
+        [`Transaksi dibatalkan (void #${voidRow.id})`, voidRow.itemIds, voidRow.transactionCode]
       );
     }
 

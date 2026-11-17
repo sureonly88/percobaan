@@ -1,7 +1,7 @@
 import pool from "@/lib/db";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { ACCOUNT } from "@/lib/gl/accounts";
-import { hasJournalForSource, postJournalSafe } from "@/lib/gl/journal";
+import { postJournal, type JournalLineInput } from "@/lib/gl/journal";
 
 export type CommissionTarget = "KASIR" | "LOKET";
 export type CommissionType = "PERCENT" | "FLAT";
@@ -147,18 +147,44 @@ async function selectRulesForContext(ctx: CommissionContext): Promise<RuleRow[]>
 }
 
 export interface RecordCommissionsResult {
+  /** Baris ledger baru yang dicatat pada panggilan ini. */
   inserted: number;
+  /** Baris yang sudah tercatat sebelumnya untuk item yang sama (idempoten). */
+  alreadyRecorded: number;
+  /** Bentrok kunci dengan item lain / error insert — tidak dicatat, dilog sebagai error. */
+  errors: number;
   totalKasir: number;
   totalLoket: number;
   glEntryId: number | null;
 }
 
 /**
+ * Kunci idempotensi komisi — harus sama persis dengan kolom generated
+ * `commission_ledger.dedup_key` (migrasi 20261111_commission_ledger_dedup_key.sql).
+ * Tidak memakai payment_item_id karena id multi_payment_items bisa terpakai ulang
+ * setelah item dihapus (cleanup import LEGACY).
+ */
+export function commissionDedupKey(transactionCode: string | null, itemCode: string): string {
+  return `${transactionCode ?? ""}|${itemCode}`;
+}
+
+interface ExistingLedgerRow extends RowDataPacket {
+  id: number;
+  payment_item_id: number;
+  item_code: string;
+  transaction_code: string | null;
+  item_still_exists: number;
+}
+
+/**
  * Hitung & catat komisi untuk satu item pembayaran SUKSES.
- * Idempoten via UNIQUE (payment_item_id, target) di commission_ledger,
- * dan via source_type=PAYMENT_COMMISSION + sourceId untuk jurnal GL.
  *
- * Jurnal GL (jika ada komisi > 0):
+ * Idempotensi ledger: UNIQUE (dedup_key, target) di commission_ledger, dengan
+ * dedup_key = transaction_code|item_code untuk baris non-VOID. Bila INSERT bentrok,
+ * baris yang ada diperiksa: kalau payment_item_id-nya milik item lain yang masih
+ * hidup, itu dicatat sebagai error (bukan di-skip diam-diam).
+ *
+ * Jurnal GL (jika ada komisi > 0), diposting untuk baris yang belum punya gl_entry_id:
  *   Dr Beban Komisi Kasir / Loket
  *      Cr Hutang Komisi Kasir / Loket
  */
@@ -167,10 +193,13 @@ export async function recordCommissions(
 ): Promise<RecordCommissionsResult> {
   const result: RecordCommissionsResult = {
     inserted: 0,
+    alreadyRecorded: 0,
+    errors: 0,
     totalKasir: 0,
     totalLoket: 0,
     glEntryId: null,
   };
+  const dedupKey = commissionDedupKey(ctx.transactionCode, ctx.itemCode);
 
   const rules = await selectRulesForContext(ctx);
   if (rules.length === 0) return result;
@@ -228,87 +257,165 @@ export async function recordCommissions(
       else result.totalLoket += ins.amount;
     } catch (e) {
       const err = e as { code?: string; message?: string };
-      // Sudah pernah dicatat → skip diam-diam
-      if (err.code === "ER_DUP_ENTRY") continue;
-      console.error("[Commission] insert ledger gagal:", err.message);
-    }
-  }
-
-  // Posting GL gabungan (1 entry per item, source_id = item_code-commission)
-  if (result.totalKasir > 0 || result.totalLoket > 0) {
-    const sourceId = `COMMISSION-${ctx.itemCode}`;
-    const already = await hasJournalForSource("PAYMENT", sourceId);
-    if (!already) {
-      const lines: Array<{
-        accountCode: string;
-        debit?: number;
-        credit?: number;
-        memo?: string | null;
-        dimLoket?: string | null;
-        dimProvider?: string | null;
-        dimService?: string | null;
-        dimProduct?: string | null;
-      }> = [];
-      const dim = {
-        dimLoket: ctx.loketCode,
-        dimProvider: ctx.provider,
-        dimService: ctx.serviceType,
-        dimProduct: ctx.productCode,
-      };
-      if (result.totalKasir > 0) {
-        lines.push({
-          accountCode: ACCOUNT.BEBAN_KOMISI_KASIR,
-          debit: result.totalKasir,
-          memo: `Komisi kasir ${ctx.username}`,
-          ...dim,
+      if (err.code !== "ER_DUP_ENTRY") {
+        result.errors += 1;
+        console.error("[Commission] insert ledger gagal:", {
+          itemCode: ctx.itemCode,
+          transactionCode: ctx.transactionCode,
+          target: ins.rule.target,
+          err: err.message,
         });
-        lines.push({
-          accountCode: ACCOUNT.HUTANG_KOMISI_KASIR,
-          credit: result.totalKasir,
-          memo: `Hutang komisi kasir ${ctx.username}`,
-          ...dim,
-        });
+        continue;
       }
-      if (result.totalLoket > 0) {
-        lines.push({
-          accountCode: ACCOUNT.BEBAN_KOMISI_LOKET,
-          debit: result.totalLoket,
-          memo: `Komisi loket ${ctx.loketCode}`,
-          ...dim,
+      // Bentrok kunci: pastikan baris yang ada memang milik item ini.
+      const [existing] = await pool.query<ExistingLedgerRow[]>(
+        `SELECT c.id, c.payment_item_id, c.item_code, c.transaction_code,
+                EXISTS(SELECT 1 FROM multi_payment_items i
+                        WHERE i.id = c.payment_item_id AND i.item_code = c.item_code) AS item_still_exists
+           FROM commission_ledger c
+          WHERE c.dedup_key = ? AND c.target = ?
+          LIMIT 1`,
+        [dedupKey, ins.rule.target]
+      );
+      const row = existing[0];
+      if (!row) {
+        result.errors += 1;
+        console.error("[Commission] ER_DUP_ENTRY tapi baris pemilik kunci tidak ditemukan:", {
+          itemCode: ctx.itemCode,
+          transactionCode: ctx.transactionCode,
+          target: ins.rule.target,
+          err: err.message,
         });
-        lines.push({
-          accountCode: ACCOUNT.HUTANG_KOMISI_LOKET,
-          credit: result.totalLoket,
-          memo: `Hutang komisi loket ${ctx.loketCode}`,
-          ...dim,
+      } else if (Number(row.payment_item_id) === ctx.paymentItemId || !Number(row.item_still_exists)) {
+        // Sama item (atau item lama yang dihapus lalu diimpor ulang dengan kode sama) → sudah dicatat.
+        result.alreadyRecorded += 1;
+      } else {
+        result.errors += 1;
+        console.error("[Commission] kunci komisi bentrok dengan item lain:", {
+          itemCode: ctx.itemCode,
+          transactionCode: ctx.transactionCode,
+          paymentItemId: ctx.paymentItemId,
+          target: ins.rule.target,
+          existingLedgerId: row.id,
+          existingPaymentItemId: row.payment_item_id,
         });
-      }
-      if (lines.length >= 2) {
-        const posted = await postJournalSafe({
-          entryDate: ctx.paidAt,
-          description: `Komisi ${ctx.provider} — ${ctx.itemCode}`,
-          sourceType: "PAYMENT",
-          sourceId,
-          referenceNo: ctx.itemCode,
-          loketCode: ctx.loketCode,
-          provider: ctx.provider,
-          serviceType: ctx.serviceType,
-          createdBy: ctx.username,
-          lines,
-        });
-        if (posted) {
-          result.glEntryId = posted.entryId;
-          await pool.execute(
-            `UPDATE commission_ledger SET gl_entry_id = ?
-             WHERE payment_item_id = ? AND gl_entry_id IS NULL`,
-            [posted.entryId, ctx.paymentItemId]
-          );
-        }
       }
     }
   }
 
+  result.glEntryId = await postCommissionJournal(ctx, dedupKey);
   return result;
+}
+
+interface PendingGlRow extends RowDataPacket {
+  id: number;
+  target: CommissionTarget;
+  commission_amount: string;
+}
+
+/**
+ * Posting jurnal komisi untuk baris ledger item ini yang belum punya gl_entry_id.
+ * Idempoten lewat kolom gl_entry_id (dikunci FOR UPDATE), jadi aman diulang dan
+ * melengkapi jurnal yang dulu gagal diposting. Best-effort: error hanya dilog.
+ */
+async function postCommissionJournal(
+  ctx: CommissionContext,
+  dedupKey: string
+): Promise<number | null> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query<PendingGlRow[]>(
+      `SELECT id, target, commission_amount FROM commission_ledger
+        WHERE dedup_key = ? AND gl_entry_id IS NULL
+        ORDER BY id FOR UPDATE`,
+      [dedupKey]
+    );
+    if (rows.length === 0) {
+      await conn.commit();
+      return null;
+    }
+    const ids = rows.map((r) => Number(r.id));
+
+    // Kompatibilitas data lama: jurnal format `COMMISSION-{item_code}` yang sudah
+    // diposting tapi belum ditautkan ke baris ledger mana pun → tautkan, jangan posting ulang.
+    const [legacy] = await conn.query<RowDataPacket[]>(
+      `SELECT e.id FROM gl_journal_entries e
+        WHERE e.source_type = 'PAYMENT' AND e.source_id = ? AND e.reverses_entry_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM gl_journal_entries x WHERE x.reverses_entry_id = e.id)
+          AND NOT EXISTS (SELECT 1 FROM commission_ledger c WHERE c.gl_entry_id = e.id)
+        ORDER BY e.id LIMIT 1`,
+      [`COMMISSION-${ctx.itemCode}`]
+    );
+    if (legacy[0]) {
+      const entryId = Number(legacy[0].id);
+      await conn.query(`UPDATE commission_ledger SET gl_entry_id = ? WHERE id IN (?)`, [entryId, ids]);
+      await conn.commit();
+      return entryId;
+    }
+
+    let totalKasir = 0;
+    let totalLoket = 0;
+    for (const r of rows) {
+      if (r.target === "KASIR") totalKasir += Number(r.commission_amount) || 0;
+      else totalLoket += Number(r.commission_amount) || 0;
+    }
+
+    const dim = {
+      dimLoket: ctx.loketCode,
+      dimProvider: ctx.provider,
+      dimService: ctx.serviceType,
+      dimProduct: ctx.productCode,
+    };
+    const lines: JournalLineInput[] = [];
+    if (totalKasir > 0) {
+      lines.push({ accountCode: ACCOUNT.BEBAN_KOMISI_KASIR, debit: totalKasir, memo: `Komisi kasir ${ctx.username}`, ...dim });
+      lines.push({ accountCode: ACCOUNT.HUTANG_KOMISI_KASIR, credit: totalKasir, memo: `Hutang komisi kasir ${ctx.username}`, ...dim });
+    }
+    if (totalLoket > 0) {
+      lines.push({ accountCode: ACCOUNT.BEBAN_KOMISI_LOKET, debit: totalLoket, memo: `Komisi loket ${ctx.loketCode}`, ...dim });
+      lines.push({ accountCode: ACCOUNT.HUTANG_KOMISI_LOKET, credit: totalLoket, memo: `Hutang komisi loket ${ctx.loketCode}`, ...dim });
+    }
+    if (lines.length < 2) {
+      await conn.commit();
+      return null;
+    }
+
+    // source_id unik per kelompok baris ledger (id baris pertama); item_code saja
+    // tidak unik — tagihan yang sama bisa dibayar ulang dengan transaction_code lain.
+    const posted = await postJournal(
+      {
+        entryDate: ctx.paidAt,
+        description: `Komisi ${ctx.provider} — ${ctx.itemCode}`,
+        sourceType: "PAYMENT",
+        sourceId: `COMMISSION-CL${ids[0]}`,
+        referenceNo: ctx.transactionCode || ctx.itemCode,
+        loketCode: ctx.loketCode,
+        provider: ctx.provider,
+        serviceType: ctx.serviceType,
+        createdBy: ctx.username,
+        lines,
+      },
+      conn
+    );
+    await conn.query(`UPDATE commission_ledger SET gl_entry_id = ? WHERE id IN (?)`, [posted.entryId, ids]);
+    await conn.commit();
+    return posted.entryId;
+  } catch (e) {
+    try {
+      await conn.rollback();
+    } catch {
+      /* ignore */
+    }
+    console.error("[Commission] posting jurnal komisi gagal:", {
+      itemCode: ctx.itemCode,
+      transactionCode: ctx.transactionCode,
+      err: (e as Error).message,
+    });
+    return null;
+  } finally {
+    conn.release();
+  }
 }
 
 /**
