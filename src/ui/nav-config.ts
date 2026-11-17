@@ -41,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Advice PDAM", href: "/advice-pdam", icon: "water_drop" },
       { label: "Advice Lunasin", href: "/advice-lunasin", icon: "manage_search" },
       { label: "Transaksi Tergantung", href: "/pending-transaksi", icon: "pending_actions" },
+      { label: "Laporan Masalah", href: "/laporan-masalah", icon: "forum" },
       { label: "Review Transaksi", href: "/review-transaksi", icon: "fact_check" },
       { label: "Pembatalan Transaksi", href: "/pembatalan", icon: "undo" },
     ],

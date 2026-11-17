@@ -194,7 +194,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
           "Setoran: periksa uang menurut sistem, dihitung, dan disetor; isi uang diterima lalu Terima, atau Tolak dengan catatan. Permintaan buka ulang tutup kasir juga bisa disetujui di sini.",
         ],
         notes: [
-          "Tab Masalah berisi laporan dari agen/kasir. Balas di percakapan, tekan \"Ambil laporan\" untuk menjadi penanggung jawab, dan \"Selesaikan\" dengan kesimpulan. Tindakan atas transaksinya (cek ke provider, review, pembatalan) tetap lewat menunya masing-masing.",
+          "Tab Masalah berisi laporan dari agen/kasir (di desktop: menu Penyelesaian Transaksi → Laporan Masalah, dengan tabel, filter, dan panel percakapan). Balas di percakapan, tekan \"Ambil laporan\" untuk menjadi penanggung jawab, dan \"Selesaikan\" dengan kesimpulan. Tindakan atas transaksinya (cek ke provider, review, pembatalan) tetap lewat menunya masing-masing.",
           "Pengajuan atau setoran milik Anda sendiri hanya ditampilkan tanpa tombol — harus diputuskan user lain.",
           "Setoran yang tampil hanya hari ini dan kemarin; tanggal lain lewat menu Verifikasi Kasir versi desktop.",
           "Di HP, supervisor juga bisa membuka Riwayat dan Laporan (ringkasan semua loket), tetapi tidak bisa melakukan pembayaran.",

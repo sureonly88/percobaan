@@ -50,7 +50,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     "/loket", "/loket/members", "/saldo", "/biaya-admin", "/pelanggan", "/users", "/users/registrations", "/pengaturan", "/monitoring", "/notifikasi", "/provider", "/topup",
     "/db-manage", "/import-transaksi",
     "/keuangan", "/keuangan/jurnal", "/keuangan/buku-besar", "/keuangan/neraca-saldo", "/keuangan/margin", "/keuangan/akun", "/keuangan/komisi", "/keuangan/komisi/laporan",
-    "/settlement", "/pembatalan", "/review-transaksi", "/panduan",
+    "/settlement", "/pembatalan", "/review-transaksi", "/panduan", "/laporan-masalah",
     // Versi mobile (PWA) — mencakup semua /m/*
     "/m",
   ],
@@ -58,7 +58,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     // Operasional
     "/", "/payment-links", "/advice-lunasin", "/advice-pdam", "/pending-transaksi", "/notifikasi",
     // Kasir & Laporan
-    "/tutup-kasir", "/verifikasi-kasir", "/pembatalan", "/review-transaksi", "/laporan", "/rekonsiliasi", "/riwayat", "/cetak-ulang", "/monitoring",
+    "/tutup-kasir", "/verifikasi-kasir", "/pembatalan", "/review-transaksi", "/laporan-masalah", "/laporan", "/rekonsiliasi", "/riwayat", "/cetak-ulang", "/monitoring",
     // Pelanggan & Loket
     "/pelanggan", "/loket", "/loket/members", "/saldo", "/topup",
     // Keuangan

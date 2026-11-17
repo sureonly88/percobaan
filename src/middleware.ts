@@ -40,6 +40,18 @@ export default withAuth(
       return NextResponse.redirect(new URL(mobileHome, req.url));
     }
 
+    // Laporan masalah dibuka dari HP (mis. tautan notifikasi) → versi mobile
+    if (
+      path === "/laporan-masalah" &&
+      mobileHome &&
+      MOBILE_UA.test(req.headers.get("user-agent") || "") &&
+      req.cookies.get("prefer_desktop")?.value !== "1"
+    ) {
+      const id = req.nextUrl.searchParams.get("id");
+      const target = id && /^\d+$/.test(id) ? `/m/masalah/${id}` : "/m/masalah";
+      return NextResponse.redirect(new URL(target, req.url));
+    }
+
     if (!canAccessPage(role, path)) {
       return NextResponse.redirect(new URL("/", req.url));
     }

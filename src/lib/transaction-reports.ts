@@ -95,6 +95,9 @@ async function notifyHandlers(title: string, message: string, link: string) {
     await createNotificationSafe({ recipientUsername: "", recipientRole: role, category: "transaksi", severity: "warning", title, message, link });
   }
 }
+/** Tautan untuk penangan: halaman desktop; di HP middleware mengalihkan ke /m/masalah/{id}. */
+const handlerLink = (id: number) => `/laporan-masalah?id=${id}`;
+
 async function notifyUser(username: string, title: string, message: string, link: string) {
   await createNotificationSafe({ recipientUsername: username, recipientRole: null, category: "transaksi", severity: "info", title, message, link });
 }
@@ -173,7 +176,7 @@ export async function createReport(actor: Actor, input: { multiPaymentCode: unkn
   await notifyHandlers(
     "Laporan masalah baru",
     `${actor.username} melaporkan ${REPORT_CATEGORIES[category]} untuk ${tx.customer_id || code}`,
-    `/m/masalah/${id}`
+    handlerLink(id)
   );
   return { report: mapReport(await loadReport(id)), existing: false };
 }
@@ -267,8 +270,8 @@ export async function replyReport(actor: Actor, id: number, rawBody: unknown) {
       [id]
     );
     if (reopened) await addMessage(id, actor, "Laporan dibuka kembali oleh pelapor", "EVENT");
-    if (r.assigned_to) await notifyUser(r.assigned_to, "Balasan laporan masalah", `${actor.username}: ${body.slice(0, 120)}`, `/m/masalah/${id}`);
-    else await notifyHandlers("Balasan laporan masalah", `${actor.username}: ${body.slice(0, 120)}`, `/m/masalah/${id}`);
+    if (r.assigned_to) await notifyUser(r.assigned_to, "Balasan laporan masalah", `${actor.username}: ${body.slice(0, 120)}`, handlerLink(id));
+    else await notifyHandlers("Balasan laporan masalah", `${actor.username}: ${body.slice(0, 120)}`, handlerLink(id));
   }
 }
 
