@@ -196,6 +196,10 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         ],
         notes: [
           "Pembayaran hanya bisa diproses saat online; banner merah muncul bila koneksi terputus.",
+          "Pelanggan saya (Beranda atau menu Bayar): simpan pelanggan tetap beserta nama panggilan, nomor WhatsApp, dan catatan alamat. Tekan \"Cek semua tagihan\" untuk mengecek tagihan semua pelanggan sekaligus; ketuk pelanggan untuk langsung ke layar bayar dengan ID dan nomor WA terisi. Setelah lunas, tekan \"Simpan ke Pelanggan saya\" untuk menambah pelanggan baru.",
+          "Selama aplikasi terbuka, transaksi yang masih Diproses dipantau otomatis. Saat statusnya berubah menjadi Lunas atau Gagal (mis. setelah advice atau keputusan Review), muncul pemberitahuan di aplikasi. Aktifkan juga notifikasi HP lewat Akun → Notifikasi status transaksi. Pemberitahuan tidak berjalan bila aplikasi ditutup.",
+          "Saat pertama membuka versi mobile Anda diminta membuat PIN 6 digit (perlu password akun). Aplikasi terkunci setiap dibuka ulang dan setelah 5 menit tidak disentuh; buka dengan PIN atau sidik jari/wajah bila sudah diaktifkan. Salah PIN 5 kali → keluar otomatis dan harus masuk dengan password lalu membuat PIN baru. Ganti PIN lewat menu Akun.",
+          "Bila setelah cek tagihan muncul kotak merah \"Jangan terima uang dulu\", tagihan itu masih menunggu konfirmasi dari pembayaran sebelumnya sehingga belum bisa dibayar ulang. Jangan menerima uang pelanggan; buka transaksi sebelumnya lewat tautan \"lihat transaksi\" dan gunakan \"Cek ke provider\".",
           "Bila muncul \"Status belum pasti\", tekan Cek ulang hasil — aman dan tidak membayar dua kali. Jangan mengulang transaksi baru untuk pelanggan yang sama.",
           "Tagihan berstatus Diproses tidak dimasukkan ke struk; saldo ditahan sampai provider memberi kepastian.",
           "Menu Riwayat menampilkan transaksi loket Anda per hari dengan filter periode, status, dan pencarian ID/nama pelanggan. Buka satu transaksi untuk melihat status terbaru, menyalin token PLN, atau mengirim ulang struk ke WhatsApp.",

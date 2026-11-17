@@ -193,6 +193,22 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     GET: ["admin", "supervisor"],
     PATCH: ["admin", "supervisor"],
   },
+  // Pelanggan langganan agen (versi mobile) — data per username
+  "/api/m/pelanggan": {
+    GET: ["admin", "kasir"],
+    POST: ["admin", "kasir"],
+    PATCH: ["admin", "kasir"],
+    DELETE: ["admin", "kasir"],
+  },
+  // PIN kunci aplikasi versi mobile (supervisor tidak memakai /m)
+  "/api/m/pin": {
+    GET: ["admin", "kasir"],
+    POST: ["admin", "kasir"],
+  },
+  // Peringatan tagihan pending sebelum bayar (mobile)
+  "/api/pembayaran/cek-pending": {
+    POST: ["admin", "supervisor", "kasir"],
+  },
   "/api/pembayaran/stale-pending": {
     GET: ["admin", "supervisor"],
     PATCH: ["admin", "supervisor"],

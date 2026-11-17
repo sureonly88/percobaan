@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { MOBILE_NAV, isNavActive } from "./mobile-nav";
+import { AppLock } from "./AppLock";
+import { PendingWatcher } from "./PendingWatcher";
 
 /** Kerangka versi mobile: konten + bottom nav, banner offline, dan registrasi service worker. */
 export function MobileShell({ children }: { children: React.ReactNode }) {
@@ -26,6 +28,8 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
         <main className="flex-1 pb-[calc(4.5rem+env(safe-area-inset-bottom))]">{children}</main>
+        <PendingWatcher />
+        <AppLock />
         <nav
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-800 pb-[env(safe-area-inset-bottom)]"
           aria-label="Menu utama"

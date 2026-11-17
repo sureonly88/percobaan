@@ -5,7 +5,7 @@
  * - Navigasi halaman: jaringan dulu; bila offline tampilkan halaman offline.
  * - Aset statis Next (/_next/static, /icons): cache-first (nama file sudah ber-hash).
  */
-const CACHE = "pedami-m-v1";
+const CACHE = "pedami-m-v2";
 const OFFLINE_URL = "/offline.html";
 
 self.addEventListener("install", (event) => {
@@ -51,4 +51,21 @@ self.addEventListener("fetch", (event) => {
       )
     );
   }
+});
+
+// Klik notifikasi status transaksi → buka (atau fokuskan) halaman detail transaksi
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/m/riwayat";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      for (const w of wins) {
+        if (new URL(w.url).origin === self.location.origin && "focus" in w) {
+          w.navigate(url);
+          return w.focus();
+        }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
 });
