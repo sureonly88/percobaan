@@ -14,7 +14,7 @@ Komunikasi dengan pemilik proyek memakai Bahasa Indonesia.
 ## Provider & mock
 - `PDAM_MOCK=true` / `LUNASIN_MOCK=true` memakai `src/lib/pdam-mock.ts` / `lunasin-mock.ts`. Skenario dipilih dari awalan ID pelanggan:
   - PDAM: `1111` sukses, `2222`/`3333` multi-bulan, `4444` timeout→advice sukses, `5555` timeout→advice kosong, `7777` error 406, `9999` HTTP 500→advice sukses, `9898` HTTP 500→advice kosong, `9797` timeout + konfirmasi terlambat.
-  - Lunasin: `7777` error, `8888` pending, `9191` timeout→advice sukses, `9292` timeout→advice gagal. Nominal token PLN dikirim lewat `input2`.
+  - Lunasin: `7777` error, `8888` pending, `9191` timeout→advice sukses, `9292` timeout→advice gagal, `9393` timeout→advice selalu error, `9494` timeout→advice selalu pending (keduanya: 3x advice → Review Transaksi). Nominal token PLN dikirim lewat `input2`.
 
 ## Aturan uang (jangan dilanggar)
 - **Validasi nominal di server**: total tagihan diambil dari snapshot inquiry (`src/lib/inquiry-snapshots.ts`, tabel `inquiry_snapshots`, TTL `INQUIRY_SNAPSHOT_TTL_MINUTES`), bukan dari angka kiriman browser. Snapshot dikonsumsi saat sukses.

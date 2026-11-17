@@ -26,7 +26,7 @@ export async function sendToReviewIfAdviceExhausted(
             provider_error_code = 'ADVICE_EXHAUSTED',
             provider_error_message = ?
       WHERE transaction_code = ?
-        AND status = 'PENDING_ADVICE'
+        AND status IN ('PENDING', 'PENDING_PROVIDER', 'PENDING_ADVICE')
         AND COALESCE(advice_attempts, 0) >= ?`,
     [
       `Advice ${MAX_ADVICE_ATTEMPTS}x tanpa konfirmasi dari provider — menunggu review admin`,
@@ -41,7 +41,7 @@ export async function sendToReviewIfAdviceExhausted(
       action: "ADVICE_SENT_TO_REVIEW",
       entityType: "multi_payment_item",
       entityId: transactionCode,
-      before: { status: "PENDING_ADVICE" },
+      before: { status: "PENDING/PENDING_PROVIDER/PENDING_ADVICE" },
       after: { status: "PENDING_REVIEW", reason: "ADVICE_LIMIT_REACHED", maxAdviceAttempts: MAX_ADVICE_ATTEMPTS },
       context: { provider: opts.provider ?? null, items: moved },
     });

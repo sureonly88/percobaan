@@ -14,6 +14,10 @@
  *  6666xxxxxx      → IDPEL tidak ditemukan (RC 1000) — inquiry error
  *  7777xxxxxx      → inquiry sukses, payment gagal (RC 0002)
  *  8888xxxxxx      → inquiry sukses, payment pending → advice sukses
+ *  9191xxxxxx      → payment timeout → advice sukses
+ *  9292xxxxxx      → payment timeout → advice gagal (RC 0002, hold dilepas)
+ *  9393xxxxxx      → payment timeout → advice selalu error/timeout (3x → Review Transaksi)
+ *  9494xxxxxx      → payment timeout → advice selalu pending RC 0001 (3x → Review Transaksi)
  *  9999xxxxxx      → Pulsa, sukses
  *
  * Semua skenario sukses respek kode produk aktual (pln-postpaid/bpjs/telkom/pulsa/dst).
@@ -80,6 +84,9 @@ function detectScenario(idpel: string): string {
   // Payment timeout (status tidak pasti) → advice sukses / advice gagal
   if (p4 === "9191") return "PAYMENT_TIMEOUT";
   if (p4 === "9292") return "PAYMENT_TIMEOUT_ADVICE_FAILED";
+  // Payment timeout → advice tidak pernah memberi kepastian (uji batas advice → Review Transaksi)
+  if (p4 === "9393") return "PAYMENT_TIMEOUT_ADVICE_ERROR";
+  if (p4 === "9494") return "PAYMENT_TIMEOUT_ADVICE_PENDING";
   if (p4 === "6666" || digits === "540100000000" || digits === "1022010") return "INQUIRY_ERROR";
   if (p4 === "7777" || digits === "540200000000" || digits === "1022020") return "PAYMENT_ERROR";
   if (p4 === "8888" || digits === "540300000000" || digits === "1022030") return "PAYMENT_PENDING";
@@ -442,7 +449,12 @@ export async function mockLunasinPayment(opts: {
     throw err;
   }
 
-  if (scenario === "PAYMENT_TIMEOUT" || scenario === "PAYMENT_TIMEOUT_ADVICE_FAILED") {
+  if (
+    scenario === "PAYMENT_TIMEOUT" ||
+    scenario === "PAYMENT_TIMEOUT_ADVICE_FAILED" ||
+    scenario === "PAYMENT_TIMEOUT_ADVICE_ERROR" ||
+    scenario === "PAYMENT_TIMEOUT_ADVICE_PENDING"
+  ) {
     const err = new LunasinApiError("Lunasin API timeout", "NETWORK_TIMEOUT", "Timeout", true);
     err.httpStatus = 408;
     throw err;
@@ -497,6 +509,20 @@ export async function mockLunasinAdvice(opts: {
   await sleep(600 + Math.floor(Math.random() * 300));
 
   const scenario = detectScenario(opts.idpel);
+
+  if (scenario === "PAYMENT_TIMEOUT_ADVICE_ERROR") {
+    const err = new LunasinApiError("Lunasin advice timeout", "NETWORK_TIMEOUT", "Timeout", true);
+    err.httpStatus = 408;
+    throw err;
+  }
+
+  if (scenario === "PAYMENT_TIMEOUT_ADVICE_PENDING") {
+    const pendingData: LunasinResponseData = {
+      idpel: opts.idpel, nama: "", jum_bill: "1", rp_amount: "0", rp_admin: "0", rp_total: "0", refnum_lunasin: opts.idTrx,
+    };
+    const rawResponse = makeMockRawResponse(opts.idTrx, opts.idpel, opts.kodeProduk, "advice", pendingData, "0001", "Transaksi sedang diproses");
+    return { data: pendingData, rawResponse, isSuccess: false, isFailed: false, isPending: true };
+  }
 
   if (scenario === "PAYMENT_TIMEOUT_ADVICE_FAILED") {
     const failedData: LunasinResponseData = {

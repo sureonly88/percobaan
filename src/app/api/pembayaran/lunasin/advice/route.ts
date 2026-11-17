@@ -705,6 +705,29 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : "Gagal melakukan advice";
     const errorCode = err instanceof LunasinApiError ? err.code : "UNKNOWN_ERROR";
 
+    // Advice yang error (timeout, jaringan, 5xx, respons rusak) tetap dihitung sebagai satu
+    // percobaan tanpa kepastian — sama seperti PDAM. Tanpa ini counter tidak pernah naik
+    // dan transaksi tidak pernah masuk Review Transaksi. Pengecualian: circuit breaker
+    // terbuka berarti provider tidak dihubungi sama sekali.
+    const providerContacted = !(err instanceof Error && err.name === "CircuitOpenError");
+    let movedToReview = 0;
+    if (transactionCode && providerContacted) {
+      try {
+        await pool.execute(
+          `UPDATE multi_payment_items
+              SET advice_attempts = COALESCE(advice_attempts, 0) + 1,
+                  updated_at = NOW()
+            WHERE transaction_code = ?
+              AND status IN ('PENDING', 'PENDING_ADVICE', 'PENDING_PROVIDER', 'PENDING_REVIEW')`,
+          [transactionCode]
+        );
+        movedToReview = await sendToReviewIfAdviceExhausted(transactionCode, { actor: username, provider: "LUNASIN" });
+        if (movedToReview > 0) await syncMultiPaymentParent(transactionCode).catch(() => undefined);
+      } catch (countError) {
+        console.error("[lunasin/advice] Gagal mencatat percobaan advice:", countError);
+      }
+    }
+
     await logTransactionEventSafe({
       idempotencyKey: relatedIdempotencyKey,
       transactionCode: transactionCode || null,
@@ -718,6 +741,15 @@ export async function POST(req: NextRequest) {
       payload: { kodeProduk, idTrx, transactionCode },
     });
 
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: movedToReview > 0
+          ? `${message}. Batas advice ${MAX_ADVICE_ATTEMPTS}x tercapai — transaksi diteruskan ke Review Transaksi.`
+          : message,
+        errorCode,
+        movedToReview: movedToReview > 0,
+      },
+      { status: 502 }
+    );
   }
 }
