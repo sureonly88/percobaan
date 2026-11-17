@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback } from "react";
 import { AppTopNav } from "./AppTopNav";
 import { NotificationCenter } from "./NotificationCenter";
 import { useStuckTransactionDetector } from "@/lib/useStuckDetector";
-import { normalizeRole, ROLE_LABELS } from "@/lib/rbac";
+import { mobileHomeFor, normalizeRole, ROLE_LABELS } from "@/lib/rbac";
 
 function formatRupiah(amount: number): string {
   return `Rp ${amount.toLocaleString("id-ID")}`;
@@ -101,6 +101,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Authenticated — show full app shell
   return (
     <>
+      <MobileVersionBar role={user?.role || "kasir"} />
       <AppTopNav />
       {/* Sub-header: search, notifications, loket info */}
       <div className="print:hidden sticky top-16 z-40 bg-white/80 backdrop-blur-md dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-2.5 flex items-center justify-between">
@@ -153,5 +154,60 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <main className="flex-1 p-4 lg:p-8 overflow-y-auto">{children}</main>
     </>
+  );
+}
+
+/**
+ * Di HP, versi desktop menampilkan jalan kembali ke versi mobile. Penting bila pengguna
+ * pernah memilih "Buka versi desktop" (cookie prefer_desktop berlaku 1 tahun, sehingga
+ * HP tidak lagi dialihkan otomatis ke /m).
+ */
+function MobileVersionBar({ role }: { role: string }) {
+  const [show, setShow] = useState(false);
+  const home = mobileHomeFor(role);
+
+  useEffect(() => {
+    if (!home) return;
+    const isPhone = /Android|iPhone|iPod|Mobile|Opera Mini|IEMobile/i.test(navigator.userAgent);
+    let dismissed = false;
+    try {
+      dismissed = sessionStorage.getItem("hide_mobile_bar") === "1";
+    } catch {
+      /* abaikan */
+    }
+    setShow(isPhone && !dismissed);
+  }, [home]);
+
+  if (!show || !home) return null;
+  return (
+    <div className="print:hidden bg-primary text-white text-sm px-4 py-2 flex items-center gap-3">
+      <span className="material-symbols-outlined text-lg">smartphone</span>
+      <span className="flex-1">Anda membuka versi desktop dari HP.</span>
+      <button
+        type="button"
+        onClick={() => {
+          document.cookie = "prefer_desktop=; path=/; max-age=0; samesite=lax";
+          window.location.href = home;
+        }}
+        className="font-semibold underline whitespace-nowrap"
+      >
+        Buka versi mobile
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            sessionStorage.setItem("hide_mobile_bar", "1");
+          } catch {
+            /* abaikan */
+          }
+          setShow(false);
+        }}
+        className="material-symbols-outlined text-lg opacity-80"
+        aria-label="Tutup"
+      >
+        close
+      </button>
+    </div>
   );
 }

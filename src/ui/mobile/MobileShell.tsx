@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { MOBILE_NAV, isNavActive } from "./mobile-nav";
+import { useSession } from "next-auth/react";
+import { isNavActive, navForRole } from "./mobile-nav";
+import { normalizeRole } from "@/lib/rbac";
+import { useApprovalCount } from "./useApprovalCount";
+import { useReportReplies } from "./useReportReplies";
 import { AppLock } from "./AppLock";
 import { PendingWatcher } from "./PendingWatcher";
 
@@ -11,6 +15,11 @@ import { PendingWatcher } from "./PendingWatcher";
 export function MobileShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const online = useOnline();
+  const { data: session } = useSession();
+  const role = normalizeRole((session?.user as { role?: string } | undefined)?.role || "kasir");
+  const nav = navForRole(role);
+  const approvalCount = useApprovalCount();
+  const reportReplies = useReportReplies();
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -34,9 +43,9 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-800 pb-[env(safe-area-inset-bottom)]"
           aria-label="Menu utama"
         >
-          <ul className="grid grid-cols-5">
-            {MOBILE_NAV.map((item) => {
-              const active = isNavActive(pathname, item.href);
+          <ul className={`grid ${nav.length === 4 ? "grid-cols-4" : "grid-cols-5"}`}>
+            {nav.map((item) => {
+              const active = isNavActive(pathname, item.href, nav.map((n) => n.href));
               return (
                 <li key={item.href}>
                   <Link
@@ -46,11 +55,23 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
                     }`}
                     aria-current={active ? "page" : undefined}
                   >
-                    <span
-                      className="material-symbols-outlined text-[26px]"
-                      style={active ? { fontVariationSettings: "'FILL' 1" } : undefined}
-                    >
-                      {item.icon}
+                    <span className="relative">
+                      <span
+                        className="material-symbols-outlined text-[26px]"
+                        style={active ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                      >
+                        {item.icon}
+                      </span>
+                      {item.href === "/m/akun" && reportReplies > 0 && (
+                        <span className="absolute -top-1 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center">
+                          {reportReplies}
+                        </span>
+                      )}
+                      {item.href === "/m/persetujuan" && !!approvalCount && (
+                        <span className="absolute -top-1 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center">
+                          {approvalCount > 99 ? "99+" : approvalCount}
+                        </span>
+                      )}
                     </span>
                     {item.label}
                   </Link>

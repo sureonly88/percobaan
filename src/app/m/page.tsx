@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 import { MOBILE_PRODUCTS, formatRp } from "@/lib/mobile/products";
+import { useApprovalCount } from "@/ui/mobile/useApprovalCount";
+import { useReportReplies } from "@/ui/mobile/useReportReplies";
 
 interface SaldoInfo {
   saldo: number;
@@ -24,6 +26,8 @@ interface DashboardData {
 }
 
 export default function MobileBerandaPage() {
+  const approvalCount = useApprovalCount();
+  const reportReplies = useReportReplies();
   const { data: session } = useSession();
   const user = session?.user as { name?: string | null; loketCode?: string; loketName?: string } | undefined;
   const [saldo, setSaldo] = useState<SaldoInfo | null>(null);
@@ -148,6 +152,42 @@ export default function MobileBerandaPage() {
             ))}
           </div>
         </section>
+
+        {/* Agen: laporan masalah yang sudah dibalas admin */}
+        {reportReplies > 0 && (
+          <Link
+            href="/m/masalah"
+            className="rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 flex items-center gap-3 text-amber-900 dark:text-amber-200"
+          >
+            <span className="material-symbols-outlined">mark_chat_unread</span>
+            <span className="flex-1 text-sm font-semibold">{reportReplies} laporan masalah Anda dibalas admin</span>
+            <span className="material-symbols-outlined">chevron_right</span>
+          </Link>
+        )}
+
+        {/* Persetujuan (admin) — kasir: approvalCount selalu null, kartu tidak tampil */}
+        {approvalCount !== null && (
+          <Link
+            href="/m/persetujuan"
+            className="rounded-2xl bg-white dark:bg-slate-900 p-4 flex items-center gap-3 active:bg-slate-50 dark:active:bg-slate-800"
+          >
+            <span className="relative h-11 w-11 rounded-2xl bg-red-50 text-red-600 dark:bg-red-900/30 flex items-center justify-center">
+              <span className="material-symbols-outlined">inbox</span>
+              {approvalCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center">
+                  {approvalCount}
+                </span>
+              )}
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block font-semibold">Persetujuan</span>
+              <span className="block text-xs text-slate-500">
+                {approvalCount > 0 ? `${approvalCount} menunggu tindakan Anda` : "Review, pembatalan & setoran"}
+              </span>
+            </span>
+            <span className="material-symbols-outlined text-slate-400">chevron_right</span>
+          </Link>
+        )}
 
         {/* Pelanggan langganan */}
         <Link

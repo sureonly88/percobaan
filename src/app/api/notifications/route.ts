@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
+import { NOTIF_IS_READ_SQL, NOTIF_READ_AT_SQL, NOTIF_READ_JOIN_SQL, NOTIF_VISIBLE_SQL, markNotificationsRead } from "@/lib/notification-access";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { createNotification } from "@/lib/notifications";
@@ -27,24 +28,25 @@ export async function GET(request: NextRequest) {
   const offset = (page - 1) * limit;
 
   try {
-    const whereClauses = ["(recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)"];
-    const baseParams: (string | number)[] = [username, role];
+    // Status baca per user: JOIN notification_reads (parameter username di depan)
+    const whereClauses = [NOTIF_VISIBLE_SQL];
+    const baseParams: (string | number)[] = [username, username, role];
 
-    if (readStatus === "unread") whereClauses.push("is_read = 0");
-    else if (readStatus === "read") whereClauses.push("is_read = 1");
+    if (readStatus === "unread") whereClauses.push(`NOT ${NOTIF_IS_READ_SQL}`);
+    else if (readStatus === "read") whereClauses.push(NOTIF_IS_READ_SQL);
 
     if (category !== "all") {
-      whereClauses.push("category = ?");
+      whereClauses.push("n.category = ?");
       baseParams.push(category);
     }
 
     if (severity !== "all") {
-      whereClauses.push("severity = ?");
+      whereClauses.push("n.severity = ?");
       baseParams.push(severity);
     }
 
     if (search) {
-      whereClauses.push("(title LIKE ? OR message LIKE ?)");
+      whereClauses.push("(n.title LIKE ? OR n.message LIKE ?)");
       const searchValue = `%${search}%`;
       baseParams.push(searchValue, searchValue);
     }
@@ -53,36 +55,37 @@ export async function GET(request: NextRequest) {
 
     const [countRows] = await pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) AS total
-         FROM notifications
+         FROM notifications n ${NOTIF_READ_JOIN_SQL}
          ${whereSql}`,
       baseParams
     );
 
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT id, category, severity, title, message, link, is_read, created_at, read_at
-         FROM notifications
+      `SELECT n.id, n.category, n.severity, n.title, n.message, n.link,
+              ${NOTIF_IS_READ_SQL} AS is_read_me, ${NOTIF_READ_AT_SQL} AS read_at_me, n.created_at
+         FROM notifications n ${NOTIF_READ_JOIN_SQL}
          ${whereSql}
-         ORDER BY created_at DESC
+         ORDER BY n.created_at DESC
          LIMIT ? OFFSET ?`,
       [...baseParams, limit, offset]
     );
 
     // Also get unread count
     const [unreadCountRows] = await pool.query<RowDataPacket[]>(
-      `SELECT COUNT(*) AS cnt FROM notifications
-       WHERE (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)
-         AND is_read = 0`,
-      [username, role]
+      `SELECT COUNT(*) AS cnt FROM notifications n ${NOTIF_READ_JOIN_SQL}
+       WHERE ${NOTIF_VISIBLE_SQL}
+         AND NOT ${NOTIF_IS_READ_SQL}`,
+      [username, username, role]
     );
 
     const [summaryRows] = await pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) AS unread,
-              SUM(CASE WHEN is_read = 0 AND severity = 'error' THEN 1 ELSE 0 END) AS unread_error,
-              SUM(CASE WHEN is_read = 0 AND severity = 'warning' THEN 1 ELSE 0 END) AS unread_warning
-         FROM notifications
-        WHERE (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)`,
-      [username, role]
+              SUM(CASE WHEN NOT ${NOTIF_IS_READ_SQL} THEN 1 ELSE 0 END) AS unread,
+              SUM(CASE WHEN NOT ${NOTIF_IS_READ_SQL} AND n.severity = 'error' THEN 1 ELSE 0 END) AS unread_error,
+              SUM(CASE WHEN NOT ${NOTIF_IS_READ_SQL} AND n.severity = 'warning' THEN 1 ELSE 0 END) AS unread_warning
+         FROM notifications n ${NOTIF_READ_JOIN_SQL}
+        WHERE ${NOTIF_VISIBLE_SQL}`,
+      [username, username, role]
     );
 
     const notifications = rows.map((r) => ({
@@ -92,9 +95,9 @@ export async function GET(request: NextRequest) {
       title: r.title,
       message: r.message,
       link: r.link || null,
-      isRead: r.is_read === 1,
+      isRead: Number(r.is_read_me) === 1,
       createdAt: r.created_at,
-      readAt: r.read_at || null,
+      readAt: r.read_at_me || null,
     }));
 
     return NextResponse.json({
@@ -170,7 +173,8 @@ export async function POST(request: NextRequest) {
     const recipientRole = tgt === "all" ? null : tgt;
 
     await createNotification({
-      recipientUsername: "*",
+      // Pengumuman ke satu peran tidak boleh tersimpan sebagai siaran "*"
+      recipientUsername: recipientRole ? "" : "*",
       recipientRole,
       category: "pengumuman",
       severity: sev as "info" | "warning" | "error" | "success",
@@ -201,25 +205,15 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const { ids, markAll } = body as { ids?: number[]; markAll?: boolean };
 
+    // Tandai dibaca hanya untuk user ini (notification_reads), bukan untuk semua penerima
     if (markAll) {
-      await pool.execute<ResultSetHeader>(
-        `UPDATE notifications SET is_read = 1, read_at = NOW()
-         WHERE (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)
-           AND is_read = 0`,
-        [username, role]
-      );
+      await markNotificationsRead(username, role, null);
     } else if (ids && Array.isArray(ids) && ids.length > 0) {
       const safeIds = ids.filter((id) => typeof id === "number" && Number.isInteger(id));
       if (safeIds.length === 0) {
         return NextResponse.json({ error: "ID tidak valid" }, { status: 400 });
       }
-      const placeholders = safeIds.map(() => "?").join(",");
-      await pool.execute<ResultSetHeader>(
-        `UPDATE notifications SET is_read = 1, read_at = NOW()
-         WHERE id IN (${placeholders})
-           AND (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)`,
-        [...safeIds, username, role]
-      );
+      await markNotificationsRead(username, role, safeIds);
     } else {
       return NextResponse.json({ error: "Sertakan ids atau markAll" }, { status: 400 });
     }

@@ -332,7 +332,105 @@ export default function MobileRiwayatDetailPage() {
         ) : (
           <p className="text-sm text-slate-500 text-center">Struk tersedia setelah tagihan lunas.</p>
         )}
+
+        <ReportProblem multiPaymentCode={mp.multiPaymentCode} />
       </div>
     </div>
+  );
+}
+
+const REPORT_CATEGORY_OPTIONS: Array<[string, string]> = [
+  ["BELUM_MASUK", "Pembayaran/token belum masuk menurut pelanggan"],
+  ["STATUS_LAMA", "Status lama \"Diproses\""],
+  ["SALAH_INPUT", "Salah ID atau nominal (minta pembatalan)"],
+  ["BAYAR_DOBEL", "Pelanggan terbayar dua kali"],
+  ["STRUK", "Masalah struk / token"],
+  ["LAINNYA", "Lainnya"],
+];
+
+/**
+ * Laporkan masalah transaksi ke admin/supervisor. Bila sudah ada laporan terbuka untuk
+ * transaksi ini, tampilkan tautannya (pesan baru ditambahkan ke laporan yang sama).
+ */
+function ReportProblem({ multiPaymentCode }: { multiPaymentCode: string }) {
+  const [existing, setExisting] = useState<{ id: number; status: string } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/laporan-transaksi?status=OPEN", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        const found = (j?.reports || []).find((r: { multiPaymentCode: string }) => r.multiPaymentCode === multiPaymentCode);
+        if (found) setExisting({ id: found.id, status: found.status });
+      })
+      .catch(() => {});
+  }, [multiPaymentCode]);
+
+  async function submit() {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/laporan-transaksi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ multiPaymentCode, category, message }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setError(j.error || "Gagal mengirim laporan");
+        return;
+      }
+      window.location.href = `/m/masalah/${j.report.id}`;
+    } catch {
+      setError("Koneksi terputus");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (existing) {
+    return (
+      <a href={`/m/masalah/${existing.id}`} className="flex items-center gap-2 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 text-sm text-amber-800 dark:text-amber-300">
+        <span className="material-symbols-outlined">forum</span>
+        <span className="flex-1">Ada laporan masalah untuk transaksi ini (#{existing.id}). Lihat percakapan</span>
+        <span className="material-symbols-outlined">chevron_right</span>
+      </a>
+    );
+  }
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="w-full h-11 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-semibold flex items-center justify-center gap-1.5">
+        <span className="material-symbols-outlined text-xl">report</span> Laporkan masalah ke admin
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center" onClick={() => setOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-t-3xl bg-white dark:bg-slate-900 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-3" role="dialog" aria-label="Laporkan masalah">
+            <p className="text-lg font-bold">Laporkan masalah</p>
+            <p className="text-xs text-slate-500">{multiPaymentCode}</p>
+            <div className="space-y-1.5">
+              {REPORT_CATEGORY_OPTIONS.map(([k, label]) => (
+                <button key={k} type="button" onClick={() => setCategory(k)} className={`w-full text-left rounded-xl border px-3 py-2.5 text-sm ${category === k ? "border-primary bg-primary/10 text-primary font-semibold" : "border-slate-200 dark:border-slate-700"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} maxLength={2000} placeholder="Jelaskan masalahnya, mis. pelanggan bilang token belum masuk ke meteran sejak jam 10" className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent px-3 py-2.5 text-sm" />
+            <p className="text-[11px] text-slate-500">Laporan dikirim ke admin & supervisor dan tersimpan di aplikasi. Jangan bayar ulang tagihan yang sama selama menunggu jawaban.</p>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" onClick={() => setOpen(false)} className="h-12 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold">Batal</button>
+              <button type="button" disabled={busy || !category || message.trim().length < 10} onClick={submit} className="h-12 rounded-xl bg-primary text-white font-bold disabled:opacity-40">
+                {busy ? "Mengirim…" : "Kirim laporan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

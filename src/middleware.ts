@@ -1,6 +1,6 @@
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
-import { canAccessPage } from "@/lib/rbac";
+import { canAccessPage, mobileHomeFor } from "@/lib/rbac";
 
 // Public paths that don't require authentication
 const PUBLIC_PATHS = [
@@ -29,13 +29,15 @@ export default withAuth(
     const token = req.nextauth.token;
     const role = (token?.role as string) || "kasir";
 
+    // Agen → /m, supervisor → /m/persetujuan
+    const mobileHome = mobileHomeFor(role);
     if (
       path === "/" &&
+      mobileHome &&
       MOBILE_UA.test(req.headers.get("user-agent") || "") &&
-      req.cookies.get("prefer_desktop")?.value !== "1" &&
-      canAccessPage(role, "/m")
+      req.cookies.get("prefer_desktop")?.value !== "1"
     ) {
-      return NextResponse.redirect(new URL("/m", req.url));
+      return NextResponse.redirect(new URL(mobileHome, req.url));
     }
 
     if (!canAccessPage(role, path)) {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { RowDataPacket } from "mysql2";
 import pool from "@/lib/db";
 import { getAuthToken, unauthorized } from "@/lib/api-auth";
-import { denyIfUnauthorized } from "@/lib/rbac";
+import { denyIfUnauthorized, normalizeRole } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,11 @@ export async function GET(req: NextRequest) {
   if (!token) return unauthorized();
   const check = denyIfUnauthorized(token.role, "/api/laporan/saya", "GET");
   if (!check.allowed) return NextResponse.json(check.response, { status: 403 });
-  if (!token.loketCode || !token.username) {
+  // scope=all: ringkasan SEMUA loket — hanya admin & supervisor (laporan supervisor di HP)
+  const scopeAll =
+    req.nextUrl.searchParams.get("scope") === "all" &&
+    ["admin", "supervisor"].includes(normalizeRole(String(token.role || "")));
+  if (!scopeAll && (!token.loketCode || !token.username)) {
     return NextResponse.json({ error: "Akun belum terhubung ke loket" }, { status: 403 });
   }
 
@@ -31,9 +35,9 @@ export async function GET(req: NextRequest) {
 
   const base = `FROM multi_payment_items i
     JOIN multi_payment_requests r ON r.id = i.multi_payment_id
-   WHERE r.loket_code = ? AND r.username = ?
+   WHERE ${scopeAll ? "1=1" : "r.loket_code = ? AND r.username = ?"}
      AND DATE(COALESCE(i.paid_at, i.created_at)) BETWEEN ? AND ?`;
-  const params = [token.loketCode, token.username, startDate, endDate];
+  const params = scopeAll ? [startDate, endDate] : [token.loketCode, token.username, startDate, endDate];
 
   try {
     const [[statusRows], [layananRows]] = await Promise.all([
@@ -77,8 +81,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       startDate,
       endDate,
-      loketCode: token.loketCode,
-      username: token.username,
+      scope: scopeAll ? "all" : "self",
+      loketCode: scopeAll ? null : token.loketCode,
+      username: scopeAll ? null : token.username,
       lunas: byStatus.SUCCESS,
       diproses: byStatus.PENDING,
       gagal: byStatus.FAILED,

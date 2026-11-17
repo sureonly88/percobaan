@@ -219,14 +219,20 @@ export async function processPaidInvoice(invoice: PaymentInvoice, options?: { ba
     });
   }
 
-  await createNotificationSafe({
-    recipientUsername: invoice.createdBy || undefined,
-    category: "transaksi",
-    severity: nextStatus === "SUCCESS" ? "info" : "warning",
+  // Ke pembuat invoice; bila tidak ada pembuat, ke admin & supervisor (bukan siaran ke semua)
+  const plNotice = {
+    category: "transaksi" as const,
+    severity: nextStatus === "SUCCESS" ? ("info" as const) : ("warning" as const),
     title: nextStatus === "SUCCESS" ? "Payment Link Berhasil" : "Payment Link Perlu Ditinjau",
     message: `Invoice online selesai diproses dengan status ${nextStatus}.`,
     link: "/payment-links",
-  });
+  };
+  if (invoice.createdBy) {
+    await createNotificationSafe({ ...plNotice, recipientUsername: invoice.createdBy });
+  } else {
+    await createNotificationSafe({ ...plNotice, recipientRole: "admin" });
+    await createNotificationSafe({ ...plNotice, recipientRole: "supervisor" });
+  }
 
   return result;
 }

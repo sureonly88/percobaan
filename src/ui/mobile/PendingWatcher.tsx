@@ -47,7 +47,9 @@ function describe(status: string): { word: string; detail: string } {
 
 export function PendingWatcher() {
   const { data: session, status } = useSession();
-  const username = (session?.user as { username?: string } | undefined)?.username || "";
+  const sessionUser = session?.user as { username?: string; role?: string } | undefined;
+  // Supervisor tidak membuat transaksi sendiri → tidak perlu dipantau
+  const username = sessionUser?.role === "supervisor" ? "" : sessionUser?.username || "";
   const [notices, setNotices] = useState<Notice[]>([]);
   const busy = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);

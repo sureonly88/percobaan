@@ -181,6 +181,26 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         ],
       },
       {
+        id: "persetujuan-mobile",
+        title: "Persetujuan di HP (supervisor & admin)",
+        icon: "inbox",
+        href: "/m/persetujuan",
+        roles: ADMIN_SPV,
+        summary: "Inbox persetujuan versi mobile: Review Transaksi, Pembatalan Transaksi, dan Verifikasi Setoran kasir. Aturannya sama persis dengan menu desktop.",
+        steps: [
+          "Buka aplikasi dari HP: supervisor langsung masuk ke Persetujuan; admin lewat kartu Persetujuan di Beranda. Angka merah menunjukkan jumlah yang menunggu tindakan Anda.",
+          "Review: buka transaksi, tekan \"Cek ulang ke provider\" bila perlu, lalu Nyatakan LUNAS (langsung berlaku) atau Ajukan GAGAL dengan bukti dari provider (refund baru terjadi setelah disetujui user lain).",
+          "Pembatalan: periksa alasan, nominal yang dikembalikan, dan peringatan, lalu Setujui atau Tolak (catatan wajib bila menolak).",
+          "Setoran: periksa uang menurut sistem, dihitung, dan disetor; isi uang diterima lalu Terima, atau Tolak dengan catatan. Permintaan buka ulang tutup kasir juga bisa disetujui di sini.",
+        ],
+        notes: [
+          "Tab Masalah berisi laporan dari agen/kasir. Balas di percakapan, tekan \"Ambil laporan\" untuk menjadi penanggung jawab, dan \"Selesaikan\" dengan kesimpulan. Tindakan atas transaksinya (cek ke provider, review, pembatalan) tetap lewat menunya masing-masing.",
+          "Pengajuan atau setoran milik Anda sendiri hanya ditampilkan tanpa tombol — harus diputuskan user lain.",
+          "Setoran yang tampil hanya hari ini dan kemarin; tanggal lain lewat menu Verifikasi Kasir versi desktop.",
+          "Di HP, supervisor juga bisa membuka Riwayat dan Laporan (ringkasan semua loket), tetapi tidak bisa melakukan pembayaran.",
+        ],
+      },
+      {
         id: "versi-mobile",
         title: "Versi mobile (agen keliling)",
         icon: "smartphone",
@@ -196,6 +216,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         ],
         notes: [
           "Pembayaran hanya bisa diproses saat online; banner merah muncul bila koneksi terputus.",
+          "Ada masalah dengan transaksi (token belum masuk, status lama diproses, salah input, bayar dobel)? Buka transaksinya di Riwayat lalu tekan \"Laporkan masalah ke admin\". Percakapan dengan admin/supervisor tersimpan di aplikasi (Akun → Laporan masalah saya); badge merah muncul bila dibalas. Jangan kirim data pelanggan lewat WhatsApp pribadi.",
           "Pelanggan saya (Beranda atau menu Bayar): simpan pelanggan tetap beserta nama panggilan, nomor WhatsApp, dan catatan alamat. Tekan \"Cek semua tagihan\" untuk mengecek tagihan semua pelanggan sekaligus; ketuk pelanggan untuk langsung ke layar bayar dengan ID dan nomor WA terisi. Setelah lunas, tekan \"Simpan ke Pelanggan saya\" untuk menambah pelanggan baru.",
           "Selama aplikasi terbuka, transaksi yang masih Diproses dipantau otomatis. Saat statusnya berubah menjadi Lunas atau Gagal (mis. setelah advice atau keputusan Review), muncul pemberitahuan di aplikasi. Aktifkan juga notifikasi HP lewat Akun → Notifikasi status transaksi. Pemberitahuan tidak berjalan bila aplikasi ditutup.",
           "Saat pertama membuka versi mobile Anda diminta membuat PIN 6 digit (perlu password akun). Aplikasi terkunci setiap dibuka ulang dan setelah 5 menit tidak disentuh; buka dengan PIN atau sidik jari/wajah bila sudah diaktifkan. Salah PIN 5 kali → keluar otomatis dan harus masuk dengan password lalu membuat PIN baru. Ganti PIN lewat menu Akun.",

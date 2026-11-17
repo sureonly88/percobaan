@@ -2,12 +2,10 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -30,8 +28,12 @@ export default function LoginPage() {
     if (res?.error) {
       setError("Username atau password salah");
     } else {
-      router.push("/");
-      router.refresh();
+      // Muat ulang penuh (bukan router.push) agar middleware pasti berjalan dengan sesi baru:
+      // HP diarahkan ke versi mobile (/m atau /m/persetujuan), desktop ke dashboard.
+      // callbackUrl hanya dipakai bila berupa path relatif di aplikasi ini.
+      const cb = new URLSearchParams(window.location.search).get("callbackUrl") || "/";
+      const dest = cb.startsWith("/") && !cb.startsWith("//") && !cb.startsWith("/login") ? cb : "/";
+      window.location.replace(dest);
     }
   };
 

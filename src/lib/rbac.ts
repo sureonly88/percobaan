@@ -67,6 +67,8 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     // Administrasi (view-level)
     // Biaya Admin & Pendaftaran Agen khusus admin (API-nya hanya melayani admin)
     "/pengaturan", "/panduan",
+    // Versi mobile: inbox persetujuan + Riwayat & Laporan (tanpa Bayar / Pelanggan)
+    "/m/persetujuan", "/m/riwayat", "/m/laporan", "/m/akun", "/m/pengaturan", "/m/panduan", "/m/masalah",
   ],
   kasir: [
     // Operasional
@@ -202,8 +204,14 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
   },
   // PIN kunci aplikasi versi mobile (supervisor tidak memakai /m)
   "/api/m/pin": {
-    GET: ["admin", "kasir"],
-    POST: ["admin", "kasir"],
+    GET: ["admin", "supervisor", "kasir"],
+    POST: ["admin", "supervisor", "kasir"],
+  },
+  // Laporan masalah transaksi: kasir melapor (miliknya sendiri), admin/supervisor menangani
+  "/api/laporan-transaksi": {
+    GET: ["admin", "supervisor", "kasir"],
+    POST: ["admin", "supervisor", "kasir"],
+    PATCH: ["admin", "supervisor", "kasir"],
   },
   // Peringatan tagihan pending sebelum bayar (mobile)
   "/api/pembayaran/cek-pending": {
@@ -249,12 +257,29 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
   },
 };
 
+/**
+ * Pengecualian di dalam prefix yang diizinkan. Kasir punya "/m" (mencakup semua /m/*),
+ * tetapi inbox persetujuan khusus admin & supervisor.
+ */
+const ROLE_PAGE_DENY: Partial<Record<UserRole, string[]>> = {
+  kasir: ["/m/persetujuan"],
+};
+
 // Check if a role can access a page
 export function canAccessPage(role: string, path: string): boolean {
   const r = normalizeRole(role);
   const allowed = ROLE_PAGES[r];
   if (!allowed) return false;
-  return allowed.some((p) => path === p || (p !== "/" && path.startsWith(p + "/")));
+  const match = (p: string) => path === p || (p !== "/" && path.startsWith(p + "/"));
+  if ((ROLE_PAGE_DENY[r] || []).some(match)) return false;
+  return allowed.some(match);
+}
+
+/** Halaman awal versi mobile untuk peran ini (null bila tidak punya akses /m). */
+export function mobileHomeFor(role: string): string | null {
+  if (canAccessPage(role, "/m")) return "/m";
+  if (canAccessPage(role, "/m/persetujuan")) return "/m/persetujuan";
+  return null;
 }
 
 // Check if a role can access an API route with a specific method

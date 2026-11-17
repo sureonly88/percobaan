@@ -2,8 +2,10 @@ import pool from "@/lib/db";
 import type { NotificationCategory, NotificationSeverity } from "@/types";
 
 export interface CreateNotificationInput {
-  recipientUsername?: string;  // specific user, default "*" (broadcast)
-  recipientRole?: string | null; // target role, null = user-specific
+  /** User tertentu. Tanpa nilai: "*" (siaran ke semua) — KECUALI bila recipientRole diisi. */
+  recipientUsername?: string;
+  /** Peran tujuan. Bila diisi tanpa recipientUsername, hanya peran ini yang menerima. */
+  recipientRole?: string | null;
   category: NotificationCategory;
   severity: NotificationSeverity;
   title: string;
@@ -20,7 +22,9 @@ export async function createNotification(input: CreateNotificationInput): Promis
       (recipient_username, recipient_role, category, severity, title, message, link, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
-      input.recipientUsername ?? "*",
+      // Notifikasi per peran disimpan dengan username kosong. Dulu disimpan "*" sehingga
+      // terbaca sebagai siaran dan ikut muncul untuk kasir.
+      input.recipientUsername ?? (input.recipientRole ? "" : "*"),
       input.recipientRole ?? null,
       input.category,
       input.severity,

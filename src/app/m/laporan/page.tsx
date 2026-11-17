@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MobileHeader } from "@/ui/mobile/MobileShell";
 import { formatRp, localYmd, serviceVisual } from "@/lib/mobile/products";
 import { serviceLabel } from "@/lib/mobile/receipt-share";
+import { normalizeRole } from "@/lib/rbac";
+import { useApprovalCount } from "@/ui/mobile/useApprovalCount";
 
 type PeriodKey = "today" | "yesterday" | "7d" | "month";
 const PERIODS: Array<{ key: PeriodKey; label: string }> = [
@@ -59,7 +61,10 @@ function fmtTgl(ymd: string): string {
 
 export default function MobileLaporanPage() {
   const { data: session } = useSession();
-  const user = session?.user as { name?: string | null; username?: string; loketCode?: string; loketName?: string } | undefined;
+  const user = session?.user as { name?: string | null; username?: string; loketCode?: string; loketName?: string; role?: string } | undefined;
+  // Supervisor: ringkasan semua loket (tanpa kartu setoran pribadi)
+  const isSupervisor = normalizeRole(user?.role || "kasir") === "supervisor";
+  const approvalCount = useApprovalCount();
 
   const [period, setPeriod] = useState<PeriodKey>("today");
   const [report, setReport] = useState<Report | null>(null);
@@ -77,8 +82,8 @@ export default function MobileLaporanPage() {
     setError("");
     setSetoran(null);
     try {
-      // Server membatasi ke username & loket sesi
-      const res = await fetch(`/api/laporan/saya?startDate=${startDate}&endDate=${endDate}`);
+      // Server membatasi ke username & loket sesi (scope=all hanya untuk admin/supervisor)
+      const res = await fetch(`/api/laporan/saya?startDate=${startDate}&endDate=${endDate}${isSupervisor ? "&scope=all" : ""}`);
       const data = await res.json();
       if (id !== reqId.current) return;
       if (!res.ok) {
@@ -89,7 +94,7 @@ export default function MobileLaporanPage() {
       setReport(data);
 
       // Uang yang harus disetor: angka yang sama dengan layar Tutup Kasir (per hari)
-      if (startDate === endDate && user.loketCode) {
+      if (!isSupervisor && startDate === endDate && user.loketCode) {
         const q = new URLSearchParams({ businessDate: startDate, username: user.username, loketCode: user.loketCode });
         const tk = await fetch(`/api/tutup-kasir?${q.toString()}`);
         if (id !== reqId.current) return;
@@ -107,7 +112,7 @@ export default function MobileLaporanPage() {
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [period, user?.username, user?.loketCode]);
+  }, [period, user?.username, user?.loketCode, isSupervisor]);
 
   useEffect(() => {
     load();
@@ -121,8 +126,8 @@ export default function MobileLaporanPage() {
   function shareWhatsApp() {
     if (!report) return;
     const lines = [
-      `*LAPORAN AGEN*`,
-      `${user?.name || user?.username} · ${user?.loketName || user?.loketCode || ""}`,
+      isSupervisor ? `*LAPORAN SEMUA LOKET*` : `*LAPORAN AGEN*`,
+      isSupervisor ? `${user?.name || user?.username} (supervisor)` : `${user?.name || user?.username} · ${user?.loketName || user?.loketCode || ""}`,
       `Periode: ${periodeText}`,
       `------------------------------`,
     ];
@@ -149,7 +154,7 @@ export default function MobileLaporanPage() {
     <div>
       <MobileHeader
         title="Laporan"
-        subtitle={periodeText || "Laporan saya"}
+        subtitle={`${isSupervisor ? "Semua loket" : "Laporan saya"}${periodeText ? ` · ${periodeText}` : ""}`}
         right={
           <button
             type="button"
@@ -185,7 +190,17 @@ export default function MobileLaporanPage() {
 
         {/* 2. Uang yang harus disetor */}
         <section className="rounded-2xl bg-primary text-white p-4 shadow-lg shadow-primary/20">
-          {singleDay ? (
+          {isSupervisor ? (
+            <>
+              <p className="text-sm text-white/80">Total lunas semua loket</p>
+              <p className="text-3xl font-bold mt-1">{report ? formatRp(report.lunas.total) : loading ? "…" : "-"}</p>
+              <p className="text-xs text-white/80 mt-1">{report ? `${report.lunas.count} tagihan lunas · ${report.diproses.count} masih diproses` : ""}</p>
+              <Link href="/m/persetujuan" className="mt-3 h-11 rounded-xl bg-white text-primary font-semibold flex items-center justify-center gap-1.5">
+                <span className="material-symbols-outlined text-xl">inbox</span>
+                Persetujuan{approvalCount ? ` (${approvalCount} menunggu)` : ""}
+              </Link>
+            </>
+          ) : singleDay ? (
             <>
               <p className="text-sm text-white/80">Uang tunai yang harus disetor</p>
               <p className="text-3xl font-bold mt-1">{setoran ? formatRp(setoran.total) : loading ? "…" : "-"}</p>

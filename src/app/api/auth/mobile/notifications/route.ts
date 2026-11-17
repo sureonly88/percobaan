@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
+import { NOTIF_IS_READ_SQL, NOTIF_READ_AT_SQL, NOTIF_READ_JOIN_SQL, NOTIF_VISIBLE_SQL, markNotificationsRead } from "@/lib/notification-access";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { getAuthToken } from "@/lib/api-auth";
 
@@ -29,30 +30,32 @@ export async function GET(req: NextRequest) {
   const role     = auth.role;
 
   try {
+    // Status baca per user: JOIN notification_reads (parameter username di depan)
     const where = `
-      WHERE (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)
-      ${unreadOnly ? "AND is_read = 0" : ""}
+      WHERE ${NOTIF_VISIBLE_SQL}
+      ${unreadOnly ? `AND NOT ${NOTIF_IS_READ_SQL}` : ""}
     `;
-    const baseParams: (string | number)[] = [username, role];
+    const baseParams: (string | number)[] = [username, username, role];
 
     const [countRows] = await pool.query<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total FROM notifications ${where}`,
+      `SELECT COUNT(*) AS total FROM notifications n ${NOTIF_READ_JOIN_SQL} ${where}`,
       baseParams
     );
 
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT id, category, severity, title, message, link, is_read, created_at, read_at
-         FROM notifications ${where}
-         ORDER BY created_at DESC
+      `SELECT n.id, n.category, n.severity, n.title, n.message, n.link,
+              ${NOTIF_IS_READ_SQL} AS is_read_me, ${NOTIF_READ_AT_SQL} AS read_at_me, n.created_at
+         FROM notifications n ${NOTIF_READ_JOIN_SQL} ${where}
+         ORDER BY n.created_at DESC
          LIMIT ? OFFSET ?`,
       [...baseParams, limit, offset]
     );
 
     const [unreadRows] = await pool.query<RowDataPacket[]>(
-      `SELECT COUNT(*) AS cnt FROM notifications
-       WHERE (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)
-         AND is_read = 0`,
-      [username, role]
+      `SELECT COUNT(*) AS cnt FROM notifications n ${NOTIF_READ_JOIN_SQL}
+       WHERE ${NOTIF_VISIBLE_SQL}
+         AND NOT ${NOTIF_IS_READ_SQL}`,
+      [username, username, role]
     );
 
     const totalItems = Number(countRows[0]?.total || 0);
@@ -65,9 +68,9 @@ export async function GET(req: NextRequest) {
         title:     r.title,
         message:   r.message,
         link:      r.link ?? null,
-        isRead:    r.is_read === 1,
+        isRead:    Number(r.is_read_me) === 1,
         createdAt: r.created_at,
-        readAt:    r.read_at ?? null,
+        readAt:    r.read_at_me ?? null,
       })),
       unreadCount: Number(unreadRows[0]?.cnt || 0),
       pagination: {
@@ -112,25 +115,14 @@ export async function PATCH(req: NextRequest) {
 
   try {
     if (markAll) {
-      await pool.execute<ResultSetHeader>(
-        `UPDATE notifications SET is_read = 1, read_at = NOW()
-         WHERE (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)
-           AND is_read = 0`,
-        [username, role]
-      );
+      await markNotificationsRead(username, role, null);
     } else if (Array.isArray(ids) && ids.length > 0) {
       const safeIds = ids.filter((id) => typeof id === "number" && Number.isInteger(id) && id > 0);
       if (safeIds.length === 0) {
         return NextResponse.json({ error: "ID tidak valid" }, { status: 400 });
       }
-      const placeholders = safeIds.map(() => "?").join(",");
-      // Ownership: only mark notifications addressed to this user/role
-      await pool.execute<ResultSetHeader>(
-        `UPDATE notifications SET is_read = 1, read_at = NOW()
-         WHERE id IN (${placeholders})
-           AND (recipient_username = ? OR recipient_username = '*' OR recipient_role = ?)`,
-        [...safeIds, username, role]
-      );
+      // Ownership & per user: hanya notifikasi untuk user/peran ini, dicatat untuk user ini saja
+      await markNotificationsRead(username, role, safeIds);
     } else {
       return NextResponse.json({ error: "Sertakan ids atau markAll: true" }, { status: 400 });
     }

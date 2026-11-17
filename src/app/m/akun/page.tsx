@@ -5,11 +5,13 @@ import { signOut, useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { MobileHeader } from "@/ui/mobile/MobileShell";
 import { requestNotificationPermission } from "@/ui/mobile/PendingWatcher";
-import { ROLE_LABELS, normalizeRole } from "@/lib/rbac";
+import { useReportReplies } from "@/ui/mobile/useReportReplies";
+import { ROLE_LABELS, canAccessPage, normalizeRole } from "@/lib/rbac";
 
 type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
 
 export default function MobileAkunPage() {
+  const reportReplies = useReportReplies();
   const { data: session } = useSession();
   const user = session?.user as
     | { name?: string | null; username?: string; role?: string; loketCode?: string; loketName?: string }
@@ -79,10 +81,25 @@ export default function MobileAkunPage() {
         )}
 
         <ul className="rounded-2xl bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
-          <MenuRow href="/m/topup" icon="add_card" label="Top-up saldo" />
-          <MenuRow href="/m/tutup-kasir" icon="point_of_sale" label="Tutup kasir" />
-          <MenuRow href="/m/pengaturan" icon="settings" label="Pengaturan akun" />
-          <MenuRow href="/m/panduan" icon="help_center" label="Panduan pengguna" />
+          {/* Hanya menu yang boleh dibuka peran ini (supervisor tidak punya Top-up / Tutup kasir mobile) */}
+          {([
+            ["/m/persetujuan", "inbox", "Persetujuan"],
+            ["/m/masalah", "forum", reportReplies > 0 ? `Laporan masalah saya (${reportReplies} dibalas)` : "Laporan masalah saya"],
+            ["/m/topup", "add_card", "Top-up saldo"],
+            ["/m/tutup-kasir", "point_of_sale", "Tutup kasir"],
+            ["/m/pengaturan", "settings", "Pengaturan akun"],
+            ["/m/panduan", "help_center", "Panduan pengguna"],
+          ] as const)
+            .filter(
+              ([href]) =>
+                canAccessPage(user?.role || "kasir", href) &&
+                // supervisor: Persetujuan & laporan sudah ada di menu bawah; admin: laporan lewat inbox
+                !(href === "/m/persetujuan" && normalizeRole(user?.role || "kasir") === "supervisor") &&
+                !(href === "/m/masalah" && normalizeRole(user?.role || "kasir") !== "kasir")
+            )
+            .map(([href, icon, label]) => (
+              <MenuRow key={href} href={href} icon={icon} label={label} />
+            ))}
           <li>
             <button
               type="button"
@@ -94,6 +111,7 @@ export default function MobileAkunPage() {
               <span className="material-symbols-outlined text-slate-400">chevron_right</span>
             </button>
           </li>
+          {normalizeRole(user?.role || "kasir") !== "supervisor" && (
           <li>
             <button
               type="button"
@@ -117,6 +135,7 @@ export default function MobileAkunPage() {
               {notifPerm === "granted" && <span className="material-symbols-outlined text-emerald-600">check_circle</span>}
             </button>
           </li>
+          )}
           <li>
             <button type="button" onClick={openDesktop} className="w-full flex items-center gap-3 px-4 h-14 text-left active:bg-slate-50 dark:active:bg-slate-800">
               <span className="material-symbols-outlined text-slate-500">desktop_windows</span>
