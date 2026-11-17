@@ -4,6 +4,7 @@ import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { MobileHeader } from "@/ui/mobile/MobileShell";
+import { requestNotificationPermission } from "@/ui/mobile/PendingWatcher";
 import { ROLE_LABELS, normalizeRole } from "@/lib/rbac";
 
 type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
@@ -15,8 +16,10 @@ export default function MobileAkunPage() {
     | undefined;
   const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
   const [standalone, setStandalone] = useState(false);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission | "unsupported">("default");
 
   useEffect(() => {
+    setNotifPerm(typeof Notification === "undefined" ? "unsupported" : Notification.permission);
     setStandalone(window.matchMedia("(display-mode: standalone)").matches);
     const onPrompt = (e: Event) => {
       e.preventDefault();
@@ -80,6 +83,40 @@ export default function MobileAkunPage() {
           <MenuRow href="/m/tutup-kasir" icon="point_of_sale" label="Tutup kasir" />
           <MenuRow href="/m/pengaturan" icon="settings" label="Pengaturan akun" />
           <MenuRow href="/m/panduan" icon="help_center" label="Panduan pengguna" />
+          <li>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event("m-pin-change"))}
+              className="w-full flex items-center gap-3 px-4 h-14 text-left active:bg-slate-50 dark:active:bg-slate-800"
+            >
+              <span className="material-symbols-outlined text-slate-500">password</span>
+              <span className="flex-1">Ganti PIN aplikasi</span>
+              <span className="material-symbols-outlined text-slate-400">chevron_right</span>
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              disabled={notifPerm !== "default"}
+              onClick={async () => setNotifPerm(await requestNotificationPermission())}
+              className="w-full flex items-center gap-3 px-4 h-14 text-left active:bg-slate-50 dark:active:bg-slate-800 disabled:active:bg-transparent"
+            >
+              <span className="material-symbols-outlined text-slate-500">notifications</span>
+              <span className="flex-1">
+                <span className="block">Notifikasi status transaksi</span>
+                <span className="block text-xs text-slate-500">
+                  {notifPerm === "granted"
+                    ? "Aktif — Anda diberi tahu saat transaksi diproses selesai"
+                    : notifPerm === "denied"
+                      ? "Diblokir — izinkan di pengaturan situs browser"
+                      : notifPerm === "unsupported"
+                        ? "Tidak didukung browser ini — pemberitahuan tampil di dalam aplikasi"
+                        : "Ketuk untuk mengaktifkan"}
+                </span>
+              </span>
+              {notifPerm === "granted" && <span className="material-symbols-outlined text-emerald-600">check_circle</span>}
+            </button>
+          </li>
           <li>
             <button type="button" onClick={openDesktop} className="w-full flex items-center gap-3 px-4 h-14 text-left active:bg-slate-50 dark:active:bg-slate-800">
               <span className="material-symbols-outlined text-slate-500">desktop_windows</span>

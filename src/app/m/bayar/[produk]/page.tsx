@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MobileHeader } from "@/ui/mobile/MobileShell";
 import { BarcodeScanner, isBarcodeScanSupported } from "@/ui/mobile/BarcodeScanner";
 import {
@@ -72,6 +72,8 @@ export default function MobileBayarProdukPage() {
   const [inquiryLoading, setInquiryLoading] = useState(false);
   const [error, setError] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
+  // Tagihan yang masih punya pembayaran lain menunggu konfirmasi (dicek setelah cek tagihan)
+  const [pendingWarn, setPendingWarn] = useState<Record<string, { transactionCode: string | null; multiPaymentCode: string | null; sameLoket: boolean; status: string }>>({});
 
   // Konfirmasi & bayar
   const [cashInput, setCashInput] = useState("");
@@ -110,6 +112,31 @@ export default function MobileBayarProdukPage() {
     }
   }, [recentKey]);
 
+  // Dibuka dari "Pelanggan saya": ?id=…&pdam=…&wa=…&from=pelanggan → isi otomatis lalu cek tagihan
+  const [fromPelanggan, setFromPelanggan] = useState(false);
+  const autoInquiry = useRef(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const id = q.get("id");
+    if (!id) return;
+    setCustomerId(id.replace(/\s/g, ""));
+    if (q.get("pdam")) setPdamKal(String(q.get("pdam")));
+    if (q.get("wa")) setWaNumber(String(q.get("wa")));
+    setFromPelanggan(q.get("from") === "pelanggan");
+    autoInquiry.current = true;
+  }, []);
+  useEffect(() => {
+    if (!autoInquiry.current || !customerId) return;
+    if (product?.kind === "pdam-kal" && !pdamKal) return;
+    if (product?.kind === "pln-token" || product?.kind === "pulsa" || product?.kind === "data") {
+      autoInquiry.current = false; // butuh pilihan nominal/paket dulu
+      return;
+    }
+    autoInquiry.current = false;
+    handleInquiry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, pdamKal]);
+
   // Pulsa/paket data: tebak operator dari awalan nomor
   useEffect(() => {
     if (product?.kind !== "pulsa" && product?.kind !== "data") return;
@@ -127,6 +154,7 @@ export default function MobileBayarProdukPage() {
   const paidAmount = cash > 0 ? cash : grandTotal;
   const change = Math.max(0, paidAmount - grandTotal);
   const saldoKurang = loket !== null && loket.saldo < grandTotal;
+  const blockedItems = cart.filter((i) => pendingWarn[i.itemCode]);
 
   const onScan = useCallback((value: string) => {
     setScanning(false);
@@ -178,6 +206,7 @@ export default function MobileBayarProdukPage() {
     }
 
     setInquiryLoading(true);
+    let newCart: CartItem[] = [];
     try {
       if (product.kind === "pdam") {
         const res = await fetch("/api/pembayaran/inquiry", {
@@ -227,6 +256,7 @@ export default function MobileBayarProdukPage() {
           };
         });
         setCart(items);
+        newCart = items;
         saveRecent(id, items[0].customerName);
       } else {
         const res = await fetch("/api/pembayaran/lunasin/inquiry", {
@@ -271,15 +301,47 @@ export default function MobileBayarProdukPage() {
           },
         };
         setCart([item]);
+        newCart = [item];
         saveRecent(id, nama);
       }
       setCashInput("");
       setIdempotencyKey(newIdempotencyKey());
+      setPendingWarn(await checkPendingAdvice(newCart));
       setStep("confirm");
     } catch {
       setError("Gagal menghubungi server. Periksa koneksi lalu coba lagi.");
     } finally {
       setInquiryLoading(false);
+    }
+  }
+
+  /**
+   * Peringatan dini: tagihan yang masih menunggu konfirmasi dari pembayaran sebelumnya pasti
+   * ditolak server saat dibayar. Gagal dicek → tanpa peringatan (server tetap menolak).
+   */
+  async function checkPendingAdvice(items: CartItem[]) {
+    if (items.length === 0) return {};
+    try {
+      const res = await fetch("/api/pembayaran/cek-pending", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: items.map((i) => ({
+            key: i.itemCode,
+            provider: i.provider,
+            serviceType: i.serviceType,
+            customerId: i.customerId,
+            periodLabel: i.periodLabel,
+          })),
+        }),
+      });
+      if (!res.ok) return {};
+      const j = await res.json();
+      const map: typeof pendingWarn = {};
+      for (const p of j.pending || []) map[p.key] = p;
+      return map;
+    } catch {
+      return {};
     }
   }
 
@@ -311,6 +373,8 @@ export default function MobileBayarProdukPage() {
     }
     setOutcome(result.kind === "done" ? { kind: "done", response: result.response } : { kind: "unknown", error: result.error });
     setStep("result");
+    // Transaksi yang masih diproses segera masuk pemantauan status (PendingWatcher)
+    window.dispatchEvent(new Event("m-pending-refresh"));
   }
 
   function resetAll() {
@@ -348,6 +412,9 @@ export default function MobileBayarProdukPage() {
         kasir={user?.name || user?.username || ""}
         paidAmount={paidAmount}
         waNumber={waNumber}
+        productSlug={product.slug}
+        productCode={product.kind === "pdam-kal" ? pdamKal : ""}
+        fromPelanggan={fromPelanggan}
         onRetry={handlePay}
         onNew={resetAll}
       />
@@ -372,6 +439,40 @@ export default function MobileBayarProdukPage() {
               <p className="text-sm mt-1">{String(first?.metadata.namaProduk || first?.productCode)}</p>
             )}
           </div>
+
+          {blockedItems.length > 0 && (
+            <div className="rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 text-sm text-red-800 dark:text-red-300">
+              <p className="font-bold flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-xl">block</span>
+                Jangan terima uang dulu
+              </p>
+              <p className="mt-1">
+                {blockedItems.length === cart.length ? "Tagihan ini" : `${blockedItems.length} dari ${cart.length} tagihan ini`} masih
+                menunggu konfirmasi dari pembayaran sebelumnya, sehingga belum bisa dibayar ulang. Bila nanti dinyatakan
+                lunas, pelanggan tidak perlu membayar lagi.
+              </p>
+              <ul className="mt-2 space-y-1">
+                {blockedItems.map((it) => {
+                  const w = pendingWarn[it.itemCode];
+                  return (
+                    <li key={it.itemCode} className="text-xs">
+                      • {it.provider === "PDAM" ? `Periode ${periodeLabel(it.periodLabel)}` : it.customerId}
+                      {w?.status === "PENDING_REVIEW" ? " — sedang ditinjau supervisor/admin" : " — menunggu advice"}
+                      {w?.sameLoket && w.multiPaymentCode && (
+                        <>
+                          {" "}·{" "}
+                          <Link href={`/m/riwayat/${encodeURIComponent(w.multiPaymentCode)}`} className="font-semibold underline">
+                            lihat transaksi
+                          </Link>
+                        </>
+                      )}
+                      {w && !w.sameLoket && " (dibayar di loket lain)"}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           <div className="rounded-2xl bg-white dark:bg-slate-900 p-4">
             <p className="font-semibold mb-2">Rincian</p>
@@ -439,7 +540,7 @@ export default function MobileBayarProdukPage() {
         <BottomAction>
           <button
             type="button"
-            disabled={!loket || saldoKurang || (cash > 0 && cash < grandTotal)}
+            disabled={!loket || saldoKurang || blockedItems.length > 0 || (cash > 0 && cash < grandTotal)}
             onClick={() => setConfirmOpen(true)}
             className="w-full h-14 rounded-2xl bg-primary text-white text-lg font-bold disabled:opacity-40"
           >
@@ -610,6 +711,9 @@ function ResultView({
   waNumber,
   onRetry,
   onNew,
+  productSlug,
+  productCode,
+  fromPelanggan,
 }: {
   outcome: PayOutcome;
   cart: CartItem[];
@@ -619,6 +723,9 @@ function ResultView({
   waNumber: string;
   onRetry: () => void;
   onNew: () => void;
+  productSlug: string;
+  productCode: string;
+  fromPelanggan: boolean;
 }) {
   if (outcome.kind === "unknown") {
     return (
@@ -716,6 +823,16 @@ function ResultView({
         </ul>
 
         {receipt && <ReceiptShareCard receipt={receipt} waNumber={waNumber} />}
+        {receipt && (
+          <SaveCustomerCard
+            productSlug={productSlug}
+            productCode={productCode}
+            customerId={receipt.items[0].customerId}
+            customerName={receipt.items[0].customerName}
+            waNumber={waNumber}
+            auto={fromPelanggan}
+          />
+        )}
       </div>
 
       <BottomAction>
@@ -796,4 +913,68 @@ function StatusBadge({ status }: { status: "SUCCESS" | "PENDING" | "FAILED" }) {
   } as const;
   const [label, cls] = map[status];
   return <span className={`inline-block mt-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>;
+}
+
+/**
+ * Simpan pelanggan ke "Pelanggan saya" setelah lunas. Bila pembayaran dimulai dari daftar
+ * pelanggan (auto), cukup catat waktu bayar terakhir tanpa perlu ditekan.
+ */
+function SaveCustomerCard({
+  productSlug,
+  productCode,
+  customerId,
+  customerName,
+  waNumber,
+  auto,
+}: {
+  productSlug: string;
+  productCode: string;
+  customerId: string;
+  customerName: string;
+  waNumber: string;
+  auto: boolean;
+}) {
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const done = useRef(false);
+
+  const save = useCallback(async () => {
+    setState("saving");
+    try {
+      const res = await fetch("/api/m/pelanggan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productSlug, productCode, customerId, customerName, waNumber, markPaid: true }),
+      });
+      setState(res.ok ? "saved" : "error");
+    } catch {
+      setState("error");
+    }
+  }, [productSlug, productCode, customerId, customerName, waNumber]);
+
+  useEffect(() => {
+    if (auto && !done.current) {
+      done.current = true;
+      save();
+    }
+  }, [auto, save]);
+
+  if (auto) return null; // dicatat diam-diam
+  if (state === "saved") {
+    return (
+      <p className="text-sm text-emerald-700 dark:text-emerald-400 text-center flex items-center justify-center gap-1">
+        <span className="material-symbols-outlined text-lg">check_circle</span> Tersimpan di Pelanggan saya
+      </p>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={save}
+      disabled={state === "saving"}
+      className="w-full h-11 rounded-xl border border-primary/40 text-primary font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
+    >
+      <span className="material-symbols-outlined text-xl">person_add</span>
+      {state === "saving" ? "Menyimpan…" : state === "error" ? "Gagal — coba simpan lagi" : "Simpan ke Pelanggan saya"}
+    </button>
+  );
 }

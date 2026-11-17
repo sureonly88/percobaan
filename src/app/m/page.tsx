@@ -56,6 +56,13 @@ export default function MobileBerandaPage() {
     if (user?.loketCode !== undefined) load();
   }, [load, user?.loketCode]);
 
+  // Transaksi tertunda selesai (PendingWatcher) → saldo & saldo tertahan berubah, muat ulang
+  useEffect(() => {
+    const onResolved = () => load();
+    window.addEventListener("m-pending-resolved", onResolved);
+    return () => window.removeEventListener("m-pending-resolved", onResolved);
+  }, [load]);
+
   useEffect(() => {
     try {
       setHideSaldo(localStorage.getItem("m_hide_saldo") === "1");
@@ -141,6 +148,21 @@ export default function MobileBerandaPage() {
             ))}
           </div>
         </section>
+
+        {/* Pelanggan langganan */}
+        <Link
+          href="/m/pelanggan"
+          className="rounded-2xl bg-white dark:bg-slate-900 p-4 flex items-center gap-3 active:bg-slate-50 dark:active:bg-slate-800"
+        >
+          <span className="h-11 w-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+            <span className="material-symbols-outlined">groups</span>
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block font-semibold">Pelanggan saya</span>
+            <span className="block text-xs text-slate-500">Daftar pelanggan tetap &amp; cek semua tagihan sekaligus</span>
+          </span>
+          <span className="material-symbols-outlined text-slate-400">chevron_right</span>
+        </Link>
 
         {/* Ringkasan hari ini */}
         <section className="rounded-2xl bg-white dark:bg-slate-900 p-4">

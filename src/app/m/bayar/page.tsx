@@ -6,6 +6,16 @@ export default function MobileBayarPage() {
   return (
     <div>
       <MobileHeader title="Bayar" subtitle="Pilih jenis pembayaran" />
+      <div className="px-4 pt-4">
+        <Link
+          href="/m/pelanggan"
+          className="flex items-center gap-3 rounded-2xl bg-primary/10 text-primary px-4 h-14 font-semibold active:bg-primary/20"
+        >
+          <span className="material-symbols-outlined">groups</span>
+          <span className="flex-1">Pelanggan saya</span>
+          <span className="material-symbols-outlined">chevron_right</span>
+        </Link>
+      </div>
       <ul className="p-4 grid grid-cols-1 gap-2">
         {MOBILE_PRODUCTS.map((p) => (
           <li key={p.slug}>

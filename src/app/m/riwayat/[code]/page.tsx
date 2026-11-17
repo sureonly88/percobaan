@@ -81,6 +81,9 @@ export default function MobileRiwayatDetailPage() {
         return null;
       }
       setData(json);
+      if (["SUCCESS", "PARTIAL_SUCCESS", "FAILED"].includes(String(json.multiPayment?.status))) {
+        window.dispatchEvent(new CustomEvent("m-pending-seen", { detail: code }));
+      }
       return json as Detail;
     } catch {
       setError("Gagal menghubungi server. Periksa koneksi.");

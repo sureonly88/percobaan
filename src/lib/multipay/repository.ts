@@ -454,3 +454,43 @@ export async function finalizeMultiPaymentRequest(params: {
     ]
   );
 }
+
+export interface ActiveAdviceInfo {
+  transactionCode: string;
+  multiPaymentCode: string;
+  loketCode: string;
+  status: string;
+}
+
+/**
+ * Untuk peringatan SEBELUM bayar (layar konfirmasi): tagihan mana yang masih punya pembayaran
+ * lain berstatus PENDING_ADVICE / PENDING_REVIEW. Aturan sama dengan findItemsWithActiveAdvice.
+ */
+export async function findActiveAdviceForCandidates(
+  items: Array<{ key: string; provider: string; serviceType: string; customerId: string; periodLabel?: string | null }>
+): Promise<Map<string, ActiveAdviceInfo>> {
+  const out = new Map<string, ActiveAdviceInfo>();
+  for (const item of items.slice(0, 50)) {
+    if (!ADVICE_GUARDED_SERVICE_TYPES.includes(item.serviceType)) continue;
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT i.transaction_code, i.status, r.multi_payment_code, r.loket_code
+         FROM multi_payment_items i
+         JOIN multi_payment_requests r ON r.id = i.multi_payment_id
+        WHERE i.customer_id = ?
+          AND i.period_label <=> ?
+          AND i.provider = ?
+          AND i.status IN ('PENDING_ADVICE', 'PENDING_REVIEW')
+        ORDER BY i.id DESC LIMIT 1`,
+      [item.customerId, item.periodLabel ?? null, item.provider]
+    );
+    if (rows[0]) {
+      out.set(item.key, {
+        transactionCode: String(rows[0].transaction_code || ""),
+        multiPaymentCode: String(rows[0].multi_payment_code || ""),
+        loketCode: String(rows[0].loket_code || ""),
+        status: String(rows[0].status || ""),
+      });
+    }
+  }
+  return out;
+}

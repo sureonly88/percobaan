@@ -14,6 +14,7 @@ const AKUN_SUBPAGES = ["/m/topup", "/m/tutup-kasir", "/m/pengaturan", "/m/pandua
 
 export function isNavActive(pathname: string, href: string): boolean {
   if (href === "/m") return pathname === "/m";
+  if (href === "/m/bayar" && (pathname === "/m/pelanggan" || pathname.startsWith("/m/pelanggan/"))) return true;
   if (href === "/m/akun" && AKUN_SUBPAGES.some((p) => pathname === p || pathname.startsWith(p + "/"))) return true;
   return pathname === href || pathname.startsWith(href + "/");
 }
