@@ -9,9 +9,10 @@ export const MOBILE_NAV: MobileNavItem[] = [
   { label: "Akun", href: "/m/akun", icon: "person" },
 ];
 
-/** Supervisor: inbox persetujuan + Riwayat & Laporan (tanpa Bayar / Pelanggan). */
+/** Supervisor: inbox persetujuan, Pantau Agen, Riwayat & Laporan (tanpa Bayar / Pelanggan). */
 export const SUPERVISOR_NAV: MobileNavItem[] = [
   { label: "Persetujuan", href: "/m/persetujuan", icon: "inbox" },
+  { label: "Agen", href: "/m/pantau-agen", icon: "monitoring" },
   { label: "Riwayat", href: "/m/riwayat", icon: "history" },
   { label: "Laporan", href: "/m/laporan", icon: "analytics" },
   { label: "Akun", href: "/m/akun", icon: "person" },
@@ -29,6 +30,10 @@ export function isNavActive(pathname: string, href: string, navHrefs: string[] =
   // Laporan masalah: bagian inbox untuk penangan, bagian Akun untuk agen
   if (pathname === "/m/masalah" || pathname.startsWith("/m/masalah/")) {
     return href === (navHrefs.includes("/m/persetujuan") ? "/m/persetujuan" : "/m/akun");
+  }
+  // Pantau agen: tab sendiri untuk supervisor, bagian Akun untuk admin
+  if (pathname === "/m/pantau-agen" || pathname.startsWith("/m/pantau-agen/")) {
+    return href === (navHrefs.includes("/m/pantau-agen") ? "/m/pantau-agen" : "/m/akun");
   }
   if (href === "/m/bayar" && (pathname === "/m/pelanggan" || pathname.startsWith("/m/pelanggan/"))) return true;
   if (href === "/m/akun" && AKUN_SUBPAGES.some((p) => pathname === p || pathname.startsWith(p + "/"))) return true;

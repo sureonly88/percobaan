@@ -84,6 +84,7 @@ export default function MobileAkunPage() {
           {/* Hanya menu yang boleh dibuka peran ini (supervisor tidak punya Top-up / Tutup kasir mobile) */}
           {([
             ["/m/persetujuan", "inbox", "Persetujuan"],
+            ["/m/pantau-agen", "monitoring", "Pantau agen"],
             ["/m/masalah", "forum", reportReplies > 0 ? `Laporan masalah saya (${reportReplies} dibalas)` : "Laporan masalah saya"],
             ["/m/topup", "add_card", "Top-up saldo"],
             ["/m/tutup-kasir", "point_of_sale", "Tutup kasir"],
@@ -93,8 +94,8 @@ export default function MobileAkunPage() {
             .filter(
               ([href]) =>
                 canAccessPage(user?.role || "kasir", href) &&
-                // supervisor: Persetujuan & laporan sudah ada di menu bawah; admin: laporan lewat inbox
-                !(href === "/m/persetujuan" && normalizeRole(user?.role || "kasir") === "supervisor") &&
+                // supervisor: Persetujuan, Agen & laporan sudah ada di menu bawah; admin: laporan lewat inbox
+                !((href === "/m/persetujuan" || href === "/m/pantau-agen") && normalizeRole(user?.role || "kasir") === "supervisor") &&
                 !(href === "/m/masalah" && normalizeRole(user?.role || "kasir") !== "kasir")
             )
             .map(([href, icon, label]) => (

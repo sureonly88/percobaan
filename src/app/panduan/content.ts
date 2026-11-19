@@ -201,6 +201,27 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         ],
       },
       {
+        id: "pantau-agen",
+        title: "Pantau Agen di HP (supervisor & admin)",
+        icon: "monitoring",
+        href: "/m/pantau-agen",
+        roles: ADMIN_SPV,
+        summary: "Ringkasan aktivitas setiap agen/kasir hari ini: online atau tidak, transaksi lunas, transaksi tertahan, saldo loket, laporan masalah, dan tutup kasir. Hanya untuk melihat — tidak mengubah transaksi.",
+        steps: [
+          "Supervisor membuka tab Agen di menu bawah; admin lewat kartu Pantau agen di Beranda atau menu Akun.",
+          "Bagian atas berisi jumlah agen online, transaksi lunas hari ini, transaksi tertahan beserta saldo yang ditahan, dan jumlah agen yang perlu perhatian.",
+          "Agen yang perlu perhatian (ada transaksi ditinjau, tertahan, atau laporan masalah yang menunggu tanggapan) tampil paling atas. Gunakan filter Perlu perhatian, Online, atau Belum transaksi, dan kolom cari untuk nama/loket.",
+          "Ketuk agen untuk melihat detail: transaksi tertahan (beserta jumlah advice), laporan masalah terbuka, 20 transaksi terakhir, status tutup kasir hari ini, serta tombol Telepon/WhatsApp bila nomor HP agen terisi.",
+          "Ketuk transaksi untuk membuka detailnya di Riwayat; tindakan lanjutan (review, pembatalan) tetap lewat menu Persetujuan.",
+        ],
+        notes: [
+          "\"Online\" berarti aplikasi agen (HP atau desktop) terbuka dalam 5 menit terakhir. Yang dicatat hanya waktu dan halaman terakhir — bukan lokasi.",
+          "Saldo melekat ke loket, jadi agen dalam satu loket menampilkan saldo yang sama. Tanda Saldo rendah muncul bila saldo loket di bawah Rp 500.000.",
+          "Tanda Belum tutup kasir muncul bila agen sudah punya transaksi lunas hari ini tetapi tutup kasirnya belum dikirim (atau dikembalikan verifikator).",
+          "Data diperbarui otomatis setiap menit selama halaman terbuka; tekan ikon muat ulang untuk memperbarui saat itu juga.",
+        ],
+      },
+      {
         id: "versi-mobile",
         title: "Versi mobile (agen keliling)",
         icon: "smartphone",

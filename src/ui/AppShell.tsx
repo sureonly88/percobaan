@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from "react";
 import { AppTopNav } from "./AppTopNav";
 import { NotificationCenter } from "./NotificationCenter";
 import { useStuckTransactionDetector } from "@/lib/useStuckDetector";
+import { usePresence } from "./usePresence";
 import { mobileHomeFor, normalizeRole, ROLE_LABELS } from "@/lib/rbac";
 
 function formatRupiah(amount: number): string {
@@ -59,6 +60,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Hooks must be called before any conditional returns
   useStuckTransactionDetector();
+  // "Terakhir aktif" untuk Pantau Agen (admin & supervisor)
+  usePresence(status === "authenticated" && !isPublicPath(pathname), pathname);
 
   // Redirect to login when unauthenticated (skip public pages)
   useEffect(() => {

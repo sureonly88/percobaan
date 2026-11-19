@@ -68,7 +68,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
     // Biaya Admin & Pendaftaran Agen khusus admin (API-nya hanya melayani admin)
     "/pengaturan", "/panduan",
     // Versi mobile: inbox persetujuan + Riwayat & Laporan (tanpa Bayar / Pelanggan)
-    "/m/persetujuan", "/m/riwayat", "/m/laporan", "/m/akun", "/m/pengaturan", "/m/panduan", "/m/masalah",
+    "/m/persetujuan", "/m/pantau-agen", "/m/riwayat", "/m/laporan", "/m/akun", "/m/pengaturan", "/m/panduan", "/m/masalah",
   ],
   kasir: [
     // Operasional
@@ -208,6 +208,10 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
     POST: ["admin", "supervisor", "kasir"],
   },
   // Laporan masalah transaksi: kasir melapor (miliknya sendiri), admin/supervisor menangani
+  // Pantau Agen — ringkasan aktivitas per agen (hanya baca)
+  "/api/pantau-agen": {
+    GET: ["admin", "supervisor"],
+  },
   "/api/laporan-transaksi": {
     GET: ["admin", "supervisor", "kasir"],
     POST: ["admin", "supervisor", "kasir"],
@@ -259,10 +263,10 @@ const API_PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
 
 /**
  * Pengecualian di dalam prefix yang diizinkan. Kasir punya "/m" (mencakup semua /m/*),
- * tetapi inbox persetujuan khusus admin & supervisor.
+ * tetapi inbox persetujuan dan Pantau Agen khusus admin & supervisor.
  */
 const ROLE_PAGE_DENY: Partial<Record<UserRole, string[]>> = {
-  kasir: ["/m/persetujuan"],
+  kasir: ["/m/persetujuan", "/m/pantau-agen"],
 };
 
 // Check if a role can access a page

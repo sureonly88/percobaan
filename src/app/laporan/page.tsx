@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { normalizeRole } from "@/lib/rbac";
 import { printReceipt, ReceiptPrintData, ReceiptBillItem } from "@/lib/print-receipt";
+import { parsePdamNumber } from "@/lib/pdam-number";
 
 interface SummaryData {
   pdam: { totalTrx: number; totalNominal: number };
@@ -198,7 +199,7 @@ const LUNASIN_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | 
 ];
 
 /* Known field labels for PDAM metadata */
-const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text"; discount?: boolean }> = [
+const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "text" | "number"; discount?: boolean }> = [
   { key: ["alamat"], label: "Alamat" },
   { key: ["gol", "idgol"], label: "Golongan" },
   { key: ["harga", "harga_air", "hargaAir"], label: "Harga Air", format: "rupiah" },
@@ -210,9 +211,9 @@ const PDAM_FIELDS: Array<{ key: string[]; label: string; format?: "rupiah" | "te
   { key: ["denda"], label: "Denda", format: "rupiah" },
   { key: ["diskon"], label: "Diskon", format: "rupiah", discount: true },
   { key: ["biayaMeter", "biaya_meter"], label: "Biaya Meter", format: "rupiah" },
-  { key: ["stand_l", "standLalu", "stand_lalu"], label: "Stand Lalu" },
-  { key: ["stand_i", "standKini", "stand_kini"], label: "Stand Kini" },
-  { key: ["pakai"], label: "Pemakaian (m³)" },
+  { key: ["stand_l", "standLalu", "stand_lalu"], label: "Stand Lalu", format: "number" },
+  { key: ["stand_i", "standKini", "stand_kini"], label: "Stand Kini", format: "number" },
+  { key: ["pakai"], label: "Pemakaian (m³)", format: "number" },
   { key: ["subTotal", "sub_total"], label: "Sub Total", format: "rupiah" },
   { key: ["jenis_loket", "jenisLoket"], label: "Jenis Loket" },
 ];
@@ -311,12 +312,15 @@ function getDetailFields(item: DetailItem): Array<{ label: string; value: string
   for (const f of fields) {
     const raw = pv(item, ...f.key);
     if (raw == null) continue;
-    const num = parseFloat(raw);
+    // provider_response PDAM memakai titik sebagai pemisah ribuan ("58.500" = 58500)
+    const num = isPdam ? parsePdamNumber(raw) : parseFloat(raw);
     // For non-PDAM items, skip zero-value rupiah fields; for PDAM always show even if 0
     if (!isPdam && f.format === "rupiah" && !isNaN(num) && num === 0) continue;
     let display: string;
     if (f.format === "rupiah" && !isNaN(num)) {
       display = f.discount ? `- ${formatRupiah(num)}` : formatRupiah(num);
+    } else if (f.format === "number" && isPdam) {
+      display = num.toLocaleString("id-ID");
     } else {
       display = raw;
     }
@@ -1883,7 +1887,7 @@ export default function LaporanPage() {
                           }
                           return undefined;
                         };
-                        const getNum = (...keys: string[]) => Number(get(...keys) ?? 0);
+                        const getNum = (...keys: string[]) => parsePdamNumber(get(...keys) as string | number | undefined);
 
                         if (isPdam) {
                           return {

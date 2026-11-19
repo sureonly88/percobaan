@@ -6,6 +6,8 @@ import { canAccessPage, mobileHomeFor } from "@/lib/rbac";
 const PUBLIC_PATHS = [
   "/topup/finish", "/topup/unfinish", "/topup/error", "/register",
   "/i", "/invoice", "/r", "/cek-tagihan",
+  // API migrasi untuk pedami-payment — auth lewat header report-token di handler
+  "/report/migrasi",
 ];
 
 function isPublicPath(path: string) {

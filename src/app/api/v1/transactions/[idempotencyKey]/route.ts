@@ -3,6 +3,7 @@ import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
 import { getAuthToken } from "@/lib/api-auth";
+import { parsePdamNumber } from "@/lib/pdam-number";
 
 function safeJson<T>(value: string | null): T | null {
   if (!value) return null;
@@ -113,17 +114,17 @@ export async function GET(
       if (provider === "PDAM" || serviceType === "PDAM") {
         item.alamat      = String(provData.alamat ?? "");
         item.golongan    = String(provData.gol ?? "");
-        item.hargaAir    = Number(provData.harga ?? 0);
-        item.abodemen    = Number(provData.byadmin ?? 0);
-        item.materai     = Number(provData.materai ?? 0);
-        item.limbah      = Number(provData.limbah ?? 0);
-        item.retribusi   = Number(provData.retribusi ?? 0);
-        item.denda       = Number(provData.denda ?? 0);
+        item.hargaAir    = parsePdamNumber(provData.harga as string | number | undefined);
+        item.abodemen    = parsePdamNumber(provData.byadmin as string | number | undefined);
+        item.materai     = parsePdamNumber(provData.materai as string | number | undefined);
+        item.limbah      = parsePdamNumber(provData.limbah as string | number | undefined);
+        item.retribusi   = parsePdamNumber(provData.retribusi as string | number | undefined);
+        item.denda       = parsePdamNumber(provData.denda as string | number | undefined);
         item.standLalu   = provData.stand_l ?? "0";
         item.standKini   = provData.stand_i ?? "0";
-        item.bebanTetap  = Number(provData.biaya_tetap ?? 0);
-        item.biayaMeter  = Number(provData.biaya_meter ?? 0);
-        item.diskon      = Number(provData.diskon ?? 0);
+        item.bebanTetap  = parsePdamNumber(provData.biaya_tetap as string | number | undefined);
+        item.biayaMeter  = parsePdamNumber(provData.biaya_meter as string | number | undefined);
+        item.diskon      = parsePdamNumber(provData.diskon as string | number | undefined);
         item.periode     = provData.thbln ?? row.period_label ?? null;
       }
 

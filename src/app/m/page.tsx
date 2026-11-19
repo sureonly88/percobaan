@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MOBILE_PRODUCTS, formatRp } from "@/lib/mobile/products";
 import { useApprovalCount } from "@/ui/mobile/useApprovalCount";
 import { useReportReplies } from "@/ui/mobile/useReportReplies";
+import { canAccessPage } from "@/lib/rbac";
 
 interface SaldoInfo {
   saldo: number;
@@ -29,7 +30,8 @@ export default function MobileBerandaPage() {
   const approvalCount = useApprovalCount();
   const reportReplies = useReportReplies();
   const { data: session } = useSession();
-  const user = session?.user as { name?: string | null; loketCode?: string; loketName?: string } | undefined;
+  const user = session?.user as { name?: string | null; loketCode?: string; loketName?: string; role?: string } | undefined;
+  const canMonitorAgents = !!user?.role && canAccessPage(user.role, "/m/pantau-agen");
   const [saldo, setSaldo] = useState<SaldoInfo | null>(null);
   const [dash, setDash] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -184,6 +186,23 @@ export default function MobileBerandaPage() {
               <span className="block text-xs text-slate-500">
                 {approvalCount > 0 ? `${approvalCount} menunggu tindakan Anda` : "Review, pembatalan & setoran"}
               </span>
+            </span>
+            <span className="material-symbols-outlined text-slate-400">chevron_right</span>
+          </Link>
+        )}
+
+        {/* Pantau agen (admin) — kasir tidak punya akses */}
+        {canMonitorAgents && (
+          <Link
+            href="/m/pantau-agen"
+            className="rounded-2xl bg-white dark:bg-slate-900 p-4 flex items-center gap-3 active:bg-slate-50 dark:active:bg-slate-800"
+          >
+            <span className="h-11 w-11 rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 flex items-center justify-center">
+              <span className="material-symbols-outlined">monitoring</span>
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block font-semibold">Pantau agen</span>
+              <span className="block text-xs text-slate-500">Aktivitas, saldo & transaksi tertahan per agen</span>
             </span>
             <span className="material-symbols-outlined text-slate-400">chevron_right</span>
           </Link>

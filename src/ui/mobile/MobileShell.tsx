@@ -22,8 +22,20 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
   const reportReplies = useReportReplies();
 
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
+    if (!("serviceWorker" in navigator)) return;
+    if (process.env.NODE_ENV === "production") {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
+      return;
+    }
+    // Mode dev: chunk Next tidak ber-hash (mis. app/layout.js), sedangkan sw.js menyimpan
+    // /_next/static secara cache-first → browser terus memakai JavaScript lama. Lepas SW
+    // dan cache-nya agar perubahan kode langsung terlihat.
+    navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister())).catch(() => {});
+    if ("caches" in window) {
+      caches
+        .keys()
+        .then((keys) => Promise.all(keys.filter((k) => k.startsWith("pedami-m-")).map((k) => caches.delete(k))))
+        .catch(() => {});
     }
   }, []);
 

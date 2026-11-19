@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { denyIfUnauthorized } from "@/lib/rbac";
+import { parsePdamNumber } from "@/lib/pdam-number";
 
 // GET: List transaksi from multi_payment_items with search, filter, pagination
 export async function GET(request: NextRequest) {
@@ -122,14 +123,14 @@ export async function GET(request: NextRequest) {
           nama: r.customer_name,
           alamat: String(prov.alamat ?? meta.alamat ?? ""),
           blth: r.period_label,
-          hargaAir: parseMetaNum(prov.harga ?? meta.harga_air),
+          hargaAir: parseMetaNum(prov.harga ?? meta.harga_air ?? meta.harga),
           abodemen: parseMetaNum(prov.byadmin ?? meta.abodemen),
           materai: parseMetaNum(prov.materai ?? meta.materai),
           limbah: parseMetaNum(prov.limbah ?? meta.limbah),
           retribusi: parseMetaNum(prov.retribusi ?? meta.retribusi),
           denda: parseMetaNum(prov.denda ?? meta.denda),
-          standLalu: parseMetaNum(prov.stand_l ?? meta.stand_lalu),
-          standKini: parseMetaNum(prov.stand_i ?? meta.stand_kini),
+          standLalu: parseMetaNum(prov.stand_l ?? meta.stand_lalu ?? meta.standLalu),
+          standKini: parseMetaNum(prov.stand_i ?? meta.stand_kini ?? meta.standKini),
           subTotal: Number(r.amount),
           admin: Number(r.admin_fee),
           total: Number(r.total),
@@ -138,8 +139,8 @@ export async function GET(request: NextRequest) {
           loketCode: r.loket_code,
           idgol: String(prov.gol ?? meta.idgol ?? ""),
           jenisLoket: meta.jenis_loket ?? meta.jenisLoket ?? "",
-          bebanTetap: parseMetaNum(prov.biaya_tetap ?? meta.beban_tetap),
-          biayaMeter: parseMetaNum(prov.biaya_meter ?? meta.biaya_meter),
+          bebanTetap: parseMetaNum(prov.biaya_tetap ?? meta.beban_tetap ?? meta.bebanTetap),
+          biayaMeter: parseMetaNum(prov.biaya_meter ?? meta.biaya_meter ?? meta.biayaMeter),
           flagTransaksi: r.status,
           diskon: parseMetaNum(prov.diskon ?? meta.diskon),
         };
@@ -167,11 +168,12 @@ function parseJson(val: unknown): Record<string, unknown> {
 }
 
 /** Parse a numeric value that may use Indonesian comma notation (e.g. "1600,79") */
+// provider_response PDAM memakai titik sebagai pemisah ribuan ("58.500" = 58500),
+// jadi jangan pakai parseFloat biasa.
 function parseMetaNum(val: unknown): number {
   if (val === null || val === undefined) return 0;
   if (typeof val === "number") return isNaN(val) ? 0 : val;
-  const n = parseFloat(String(val).replace(",", "."));
-  return isNaN(n) ? 0 : n;
+  return parsePdamNumber(String(val));
 }
 
 // Category prefix map for Lunasin products
