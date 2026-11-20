@@ -4,7 +4,8 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { Breadcrumb, Modal } from "@/ui";
 import { formatRupiah } from "@/data/mock";
-import { printReceipt, ReceiptBillItem } from "@/lib/print-receipt";
+import { printReceipt, ReceiptPrintData } from "@/lib/print-receipt";
+import { buildReceiptBills } from "@/lib/receipt-bills";
 import type { CustomerFavorite, FavoriteGroup } from "@/types";
 import { PULSA_OPERATORS, DATA_OPERATORS, PULSA_NOMINALS, DATA_PACKAGES, PDAM_KALIMANTAN } from "@/data/lunasin-products";
 import type { MultiPaymentProgressEvent, MultiPaymentResponse } from "@/lib/multipay/types";
@@ -260,6 +261,68 @@ interface ReceiptData {
 
 type FocusTarget = "customer" | "payment";
 
+interface ReprintTransaction {
+  multiPaymentCode: string;
+  tanggal: string;
+  loketName: string;
+  kasir: string;
+  itemCount: number;
+  totalBayar: number;
+  items: Array<{ idpel: string; nama: string; provider: string; kodeProduk: string | null; periode: string; total: number }>;
+}
+
+function formatReprintDate(value: string): string {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value || "-";
+  return d.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+
+/**
+ * Data struk setelah pembayaran lunas. Dipakai cetak otomatis DAN tombol "Cetak Struk"
+ * agar keduanya identik. Isi baris struk disusun oleh buildReceiptBills (lib/receipt-bills),
+ * yang juga dipakai API cetak ulang.
+ */
+function buildPaymentPrintData(
+  receipt: ReceiptData,
+  snapshot: PdamBill[],
+  kasir: string
+): ReceiptPrintData | null {
+  const successBills = receipt.results.filter((r) => r.success);
+  if (successBills.length === 0) return null;
+  const bills = buildReceiptBills(
+    successBills.map((r) => {
+      const isLunasin = r.provider === "LUNASIN";
+      const orig = isLunasin ? undefined : snapshot.find((b) => b.idpel === r.idpel && b.thbln === r.blth);
+      return {
+        provider: r.provider,
+        idpel: r.idpel,
+        nama: r.nama,
+        blth: r.blth,
+        kodeProduk: r.kodeProduk,
+        transactionCode: r.transactionCode,
+        adminFee: isLunasin ? r.adminFee || 0 : r.adminFee || receipt.biayaAdmin || 0,
+        total: r.total,
+        providerData: r.providerData,
+        pdamSources: [orig as unknown as Record<string, unknown> | undefined, r.providerData],
+      };
+    })
+  );
+  return {
+    loketName: receipt.loketName,
+    loketCode: receipt.loketCode,
+    kasir,
+    tanggal: receipt.paidAt,
+    bills,
+    totalTagihan: bills.reduce((s, b) => s + b.tagihan, 0),
+    totalAdmin: bills.reduce((s, b) => s + b.admin, 0),
+    totalBayar: bills.reduce((s, b) => s + b.total, 0),
+    tunai: receipt.tunai,
+    kembalian: receipt.kembalian,
+  };
+}
+
+
 export default function PembayaranPage() {
   const { data: session } = useSession();
   const userId = (session?.user as { id?: string })?.id;
@@ -336,6 +399,9 @@ export default function PembayaranPage() {
   const [reprintIdpel, setReprintIdpel] = useState("");
   const [reprintLoading, setReprintLoading] = useState(false);
   const [reprintError, setReprintError] = useState("");
+  // Daftar pembayaran untuk dipilih saat cetak ulang (null = modal tertutup)
+  const [reprintList, setReprintList] = useState<ReprintTransaction[] | null>(null);
+  const [reprintPrinting, setReprintPrinting] = useState<string | null>(null);
 
   // Modal bantuan shortcut keyboard
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
@@ -476,260 +542,12 @@ export default function PembayaranPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!receipt) return;
-    const successBills = receipt.results.filter((r) => r.success);
-    if (successBills.length === 0) return;
-    const snapshot = daftarTagihanSnapshot;
-    const printableBills = successBills.flatMap((r): ReceiptBillItem[] => {
-      if (r.provider === "LUNASIN") {
-        const pd = r.providerData || {};
-        const rpAdmin = Number(pd.rp_admin || r.adminFee || 0);
-        const isPlnPostpaid = (r.kodeProduk || "").startsWith("pln-postpaid");
-        const isPdamLunasin = (r.kodeProduk || "").startsWith("pdam");
-        const rawDetail = Array.isArray(pd.detail) ? (pd.detail as Array<Record<string, unknown>>) : [];
-
-        // PLN Pascabayar & PDAM Lunasin dengan multi-bulan: cetak 1 struk per periode
-        if ((isPlnPostpaid || isPdamLunasin) && rawDetail.length > 1) {
-          const adminFeePerPeriod = Math.round(rpAdmin / rawDetail.length);
-          return rawDetail.map((d, i) => {
-            // rp_amount = PLN Pascabayar; rp_total = PDAM Lunasin (field berbeda per docs)
-            const periodAmount = Number(d.rp_amount ?? d.rp_total ?? 0);
-            const periodAdmin =
-              i === 0
-                ? rpAdmin - adminFeePerPeriod * (rawDetail.length - 1)
-                : adminFeePerPeriod;
-            const periodTotal = periodAmount + periodAdmin;
-
-            if (isPdamLunasin) {
-              // Keterangan tambahan dinamis (retribusi dll dari nama_field_N)
-              const extraBillFields: Array<{ label: string; value: string }> = [];
-              for (let n = 1; n <= 3; n++) {
-                const nama = d[`nama_field_${n}`];
-                const val  = d[`value_field_${n}`];
-                if (nama && String(nama) !== "" && val != null) {
-                  extraBillFields.push({
-                    label: String(nama).charAt(0).toUpperCase() + String(nama).slice(1),
-                    value: !isNaN(Number(val)) ? `Rp ${Number(val).toLocaleString("id-ID")}` : String(val),
-                  });
-                }
-              }
-              return {
-                type: "pln" as const,
-                kodeProduk: r.kodeProduk || "",
-                idpel: r.idpel,
-                nama: r.nama,
-                namaPdam: String(pd.nama_pdam || ""),
-                alamat: String(pd.alamat || ""),
-                gol: String(pd.golongan || pd.gol || ""),
-                periode: String(d.periode ?? ""),
-                meterAwal: d.meter_awal != null ? Number(d.meter_awal) : undefined,
-                meterAkhir: d.meter_akhir != null ? Number(d.meter_akhir) : undefined,
-                standMeter: String(
-                  d.stand_meter ??
-                  (d.meter_awal != null && d.meter_akhir != null ? `${d.meter_awal}-${d.meter_akhir}` : "")
-                ),
-                rpAir: Number(d.rp_air ?? 0),
-                rpDanameter: Number(d.rp_danameter ?? 0),
-                rpSampah: Number(d.rp_sampah ?? 0),
-                rpAdministrasi: Number(d.rp_administrasi ?? 0),
-                materai: Number(d.rp_materai ?? 0),
-                denda: Number(d.rp_denda ?? 0),
-                extraBillFields,
-                refnumLunasin: String(pd.refnum_lunasin || ""),
-                tglLunas: String(pd.tgl_lunas || ""),
-                jumBill: "1",
-                tagihan: periodAmount,
-                admin: periodAdmin,
-                total: periodTotal,
-                transactionCode: r.transactionCode,
-              };
-            }
-
-            return {
-              type: "pln" as const,
-              idpel: r.idpel,
-              nama: r.nama,
-              kodeProduk: r.kodeProduk || "",
-              periode: String(d.periode ?? ""),
-              tarif: String(pd.tarif || ""),
-              daya: String(pd.daya || ""),
-              // stand_meter = PLN; meter_awal/meter_akhir = PDAM Lunasin
-              standMeter: String(
-                d.stand_meter ??
-                (d.meter_awal != null && d.meter_akhir != null
-                  ? `${d.meter_awal}-${d.meter_akhir}`
-                  : "")
-              ),
-              noMeter: String(pd.nometer || ""),
-              jumBill: "1",
-              tokenPln: "",
-              refnumLunasin: String(pd.refnum_lunasin || ""),
-              noreg: "",
-              tglReg: "",
-              jenisReg: "",
-              rpAmount: periodAmount,
-              rpAdmin: periodAdmin,
-              tagihan: periodAmount,
-              admin: periodAdmin,
-              total: periodTotal,
-              transactionCode: r.transactionCode,
-              kwh: String(d.kwh ?? pd.kwh ?? ""),
-              rpMaterai: Number(d.rp_materai ?? pd.rp_materai ?? 0),
-              rpPpn: Number(d.rp_ppn ?? pd.rp_ppn ?? 0),
-              rpPju: Number(d.rp_pju ?? pd.rp_pju ?? 0),
-              rpAngsuran: Number(d.rp_angsuran ?? pd.rp_angsuran ?? 0),
-              rpToken: Number(d.rp_token ?? pd.rp_token ?? 0),
-              rpTotal: periodTotal,
-              saldoTerpotong: 0,
-              refnum: String(pd.refnum || ""),
-              tglLunas: String(pd.tgl_lunas || ""),
-              pesanBiller: String(pd.pesan_biller || ""),
-              nova: "",
-              novaKepalaKeluarga: "",
-              jumPeserta: "",
-              kodeCabang: "",
-              namaCabang: "",
-              sisaSaldoBpjs: "",
-              nomor: "",
-              denom: "",
-              namaProduk: "",
-              serialNumber: "",
-              masaBerlaku: "",
-            };
-          });
-        }
-
-        // Single period: prepaid, BPJS, Telkom, Pulsa, dll
-        // Khusus PDAM Lunasin 1 bulan: gunakan field PDAM bukan PLN
-        if (isPdamLunasin) {
-          const d = rawDetail.length === 1 ? rawDetail[0] : {};
-          const extraBillFields: Array<{ label: string; value: string }> = [];
-          for (let n = 1; n <= 3; n++) {
-            const nama = d[`nama_field_${n}`];
-            const val  = d[`value_field_${n}`];
-            if (nama && String(nama) !== "" && val != null) {
-              extraBillFields.push({
-                label: String(nama).charAt(0).toUpperCase() + String(nama).slice(1),
-                value: !isNaN(Number(val)) ? `Rp ${Number(val).toLocaleString("id-ID")}` : String(val),
-              });
-            }
-          }
-          const singleAmount = Number(d.rp_total ?? pd.rp_total ?? Math.max(0, r.total - rpAdmin));
-          return [{
-            type: "pln" as const,
-            kodeProduk: r.kodeProduk || "",
-            idpel: r.idpel,
-            nama: r.nama,
-            namaPdam: String(pd.nama_pdam || ""),
-            alamat: String(pd.alamat || ""),
-            gol: String(pd.golongan || pd.gol || ""),
-            periode: String(d.periode ?? pd.periode ?? ""),
-            meterAwal: d.meter_awal != null ? Number(d.meter_awal) : undefined,
-            meterAkhir: d.meter_akhir != null ? Number(d.meter_akhir) : undefined,
-            standMeter: String(
-              d.stand_meter ??
-              (d.meter_awal != null && d.meter_akhir != null ? `${d.meter_awal}-${d.meter_akhir}` : "")
-            ),
-            rpAir: Number(d.rp_air ?? 0),
-            rpDanameter: Number(d.rp_danameter ?? 0),
-            rpSampah: Number(d.rp_sampah ?? 0),
-            rpAdministrasi: Number(d.rp_administrasi ?? 0),
-            materai: Number(d.rp_materai ?? 0),
-            denda: Number(d.rp_denda ?? 0),
-            extraBillFields,
-            refnumLunasin: String(pd.refnum_lunasin || ""),
-            tglLunas: String(pd.tgl_lunas || ""),
-            jumBill: "1",
-            tagihan: singleAmount,
-            admin: rpAdmin,
-            total: r.total,
-            transactionCode: r.transactionCode,
-          }];
-        }
-
-        const rpAmount = Number(pd.rp_amount || Math.max(0, r.total - rpAdmin));
-        return [{
-          type: "pln" as const,
-          idpel: r.idpel,
-          nama: r.nama,
-          kodeProduk: r.kodeProduk || "",
-          periode: String(pd.periode || ""),
-          tarif: String(pd.tarif || ""),
-          daya: String(pd.daya || ""),
-          standMeter: String(pd.stand_meter || ""),
-          noMeter: String(pd.nometer || ""),
-          jumBill: String(pd.jum_bill || "1"),
-          tokenPln: String(pd.token || ""),
-          refnumLunasin: String(pd.refnum_lunasin || ""),
-          noreg: String(pd.noreg || ""),
-          tglReg: String(pd.tgl_reg || ""),
-          jenisReg: String(pd.jenis_reg || ""),
-          rpAmount,
-          rpAdmin,
-          tagihan: rpAmount,
-          admin: rpAdmin,
-          total: r.total,
-          transactionCode: r.transactionCode,
-          kwh: String(pd.kwh || ""),
-          rpMaterai: Number(pd.rp_materai || 0),
-          rpPpn: Number(pd.rp_ppn || 0),
-          rpPju: Number(pd.rp_pju || 0),
-          rpAngsuran: Number(pd.rp_angsuran || 0),
-          rpToken: Number(pd.rp_token || 0),
-          rpTotal: Number(pd.rp_total || 0),
-          saldoTerpotong: Number(pd.saldo_terpotong || 0),
-          refnum: String(pd.refnum || ""),
-          tglLunas: String(pd.tgl_lunas || ""),
-          pesanBiller: String(pd.pesan_biller || ""),
-          nova: String(pd.nova || ""),
-          novaKepalaKeluarga: String(pd.nova_kepala_keluarga || ""),
-          jumPeserta: String(pd.jum_peserta || ""),
-          kodeCabang: String(pd.kode_cabang || ""),
-          namaCabang: String(pd.nama_cabang || ""),
-          sisaSaldoBpjs: String(pd.sisa || ""),
-          nomor: String(pd.nomor || ""),
-          denom: String(pd.denom || ""),
-          namaProduk: String(pd.nama_produk || ""),
-          serialNumber: String(pd.serial_number || ""),
-          masaBerlaku: String(pd.masa_berlaku || ""),
-        }];
-      }
-      const orig = snapshot.find((b) => b.idpel === r.idpel && b.thbln === r.blth);
-      return [{
-        type: "pdam" as const,
-        idpel: r.idpel,
-        nama: r.nama,
-        alamat: orig?.alamat,
-        gol: orig?.gol,
-        periode: r.blth,
-        standLalu: orig?.standLalu,
-        standKini: orig?.standKini,
-        pemakaian: orig?.pakai,
-        hargaAir: orig?.harga,
-        denda: orig?.denda,
-        materai: orig?.materai,
-        limbah: orig?.limbah,
-        retribusi: orig?.retribusi,
-        bebanTetap: orig?.bebanTetap,
-        biayaMeter: orig?.biayaMeter,
-        diskon: orig?.diskon,
-        tagihan: Math.max(0, r.total - (r.adminFee || receipt.biayaAdmin || 0)),
-        admin: r.adminFee || receipt.biayaAdmin || 0,
-        total: r.total,
-        transactionCode: r.transactionCode,
-      }];
-    });
-    printReceipt({
-      loketName: receipt.loketName,
-      loketCode: receipt.loketCode,
-      kasir: (session?.user as { name?: string })?.name || "-",
-      tanggal: receipt.paidAt,
-      bills: printableBills,
-      totalTagihan: printableBills.reduce((s, b) => s + b.tagihan, 0),
-      totalAdmin: printableBills.reduce((s, b) => s + b.admin, 0),
-      totalBayar: printableBills.reduce((s, b) => s + b.total, 0),
-      tunai: receipt.tunai,
-      kembalian: receipt.kembalian,
-    });
+    const printData = buildPaymentPrintData(
+      receipt,
+      daftarTagihanSnapshot,
+      (session?.user as { name?: string })?.name || "-"
+    );
+    if (printData) void printReceipt(printData);
   }, [receipt]); // daftarTagihanSnapshot & session intentionally read at effect-time (same render batch)
 
   const totalTagihan = useMemo(
@@ -2253,34 +2071,38 @@ export default function PembayaranPage() {
     setReprintLoading(true);
     setReprintError("");
     try {
-      const params = new URLSearchParams({ idPelanggan: reprintIdpel.trim() });
+      const params = new URLSearchParams({ idPelanggan: reprintIdpel.trim(), list: "1" });
       const res = await fetch(`/api/pembayaran/reprint?${params.toString()}`);
       const data = await res.json();
       if (!res.ok || data.error) {
         setReprintError(data.error || "Transaksi tidak ditemukan");
         return;
       }
-      printReceipt({
-        loketName: data.loketName,
-        loketCode: data.loketCode,
-        kasir: data.kasir,
-        tanggal: data.tanggal,
-        bills: data.bills,
-        totalTagihan: data.totalTagihan,
-        totalAdmin: data.totalAdmin,
-        totalBayar: data.totalBayar,
-        tunai: data.totalBayar,
-        kembalian: 0,
-        isCopy: !!data.isCopy,
-        copyNumber: data.copyNumber,
-        copyBy: data.copyBy,
-        copyAt: data.copyAt,
-      });
-      setReprintError("");
+      setReprintList((data.transactions as ReprintTransaction[]) || []);
+    } catch {
+      setReprintError("Gagal mengambil daftar transaksi");
+    } finally {
+      setReprintLoading(false);
+    }
+  }
+
+  async function handleReprintSelected(multiPaymentCode: string) {
+    setReprintPrinting(multiPaymentCode);
+    setReprintError("");
+    try {
+      const params = new URLSearchParams({ multiPaymentCode, reason: "cetak-ulang-pembayaran" });
+      const res = await fetch(`/api/pembayaran/reprint?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setReprintError(data.error || "Gagal mengambil data struk");
+        return;
+      }
+      await printReceipt(data as ReceiptPrintData);
+      setReprintList(null);
     } catch {
       setReprintError("Gagal mencetak ulang struk");
     } finally {
-      setReprintLoading(false);
+      setReprintPrinting(null);
     }
   }
 
@@ -3535,7 +3357,7 @@ export default function PembayaranPage() {
               <h4 className="text-sm font-bold">Cetak Ulang Struk</h4>
             </div>
             <p className="text-xs text-slate-500 mb-3">
-              Masukkan ID pelanggan untuk mencetak ulang struk pembayaran terakhir.
+              Masukkan ID pelanggan, lalu pilih transaksi yang struknya akan dicetak ulang.
             </p>
             <div className="flex gap-2">
               <input
@@ -3569,6 +3391,63 @@ export default function PembayaranPage() {
           </div>
         </div>
       </div>
+
+      {/* ===== PILIH TRANSAKSI CETAK ULANG ===== */}
+      <Modal
+        open={reprintList !== null}
+        onClose={() => { if (!reprintPrinting) setReprintList(null); }}
+        title={`Pilih Transaksi — ID ${reprintIdpel.trim()}`}
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500">
+            Struk dicetak sama seperti struk asli (semua tagihan dalam pembayaran itu) dan diberi tanda COPY.
+          </p>
+          {reprintError && (
+            <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+              <span className="material-symbols-outlined text-sm">error</span>
+              {reprintError}
+            </p>
+          )}
+          <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-1">
+            {(reprintList || []).map((t) => (
+              <div
+                key={t.multiPaymentCode}
+                className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 flex items-start gap-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold">{formatReprintDate(t.tanggal)}</span>
+                    <span className="text-sm font-black text-primary">{formatRupiah(t.totalBayar)}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">
+                    {t.loketName} · Kasir {t.kasir} · {t.itemCount} tagihan
+                  </div>
+                  <ul className="mt-1.5 space-y-0.5">
+                    {t.items.map((it, i) => (
+                      <li key={i} className="text-xs text-slate-600 dark:text-slate-300 truncate">
+                        <span className={it.idpel === reprintIdpel.trim() ? "font-bold" : ""}>{it.idpel}</span>
+                        {" "}· {it.nama || "-"} · {it.provider === "PDAM" ? it.periode : (it.kodeProduk || it.periode)}
+                        {" "}· {formatRupiah(it.total)}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-[10px] text-slate-400 mt-1 font-mono truncate">{t.multiPaymentCode}</div>
+                </div>
+                <button
+                  onClick={() => void handleReprintSelected(t.multiPaymentCode)}
+                  disabled={reprintPrinting !== null}
+                  className="h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  <span className={`material-symbols-outlined text-sm ${reprintPrinting === t.multiPaymentCode ? "animate-spin" : ""}`}>
+                    {reprintPrinting === t.multiPaymentCode ? "progress_activity" : "print"}
+                  </span>
+                  Cetak
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
 
       {/* ===== RECEIPT MODAL ===== */}
       {paymentLinkModalOpen && (
@@ -3767,315 +3646,12 @@ export default function PembayaranPage() {
                 <button
                   onClick={() => {
                     if (!receipt) return;
-                    const successBills = receipt.results.filter((r) => r.success);
-                    if (successBills.length === 0) return;
-                    const printableBills = successBills.flatMap((r): ReceiptBillItem[] => {
-                      if (r.provider === "LUNASIN") {
-                        const pd = r.providerData || {};
-                        const rpAdmin = Number(pd.rp_admin || r.adminFee || 0);
-                        const isPlnPostpaid = (r.kodeProduk || "").startsWith("pln-postpaid");
-                        const isPdamLunasin = (r.kodeProduk || "").startsWith("pdam");
-                        const rawDetail = Array.isArray(pd.detail) ? (pd.detail as Array<Record<string, unknown>>) : [];
-
-                        // PLN Pascabayar & PDAM Lunasin multi-periode: cetak 1 struk per periode
-                        if ((isPlnPostpaid || isPdamLunasin) && rawDetail.length > 1) {
-                          const adminFeePerPeriod = Math.round(rpAdmin / rawDetail.length);
-                          return rawDetail.map((d, i) => {
-                            const periodAmount = Number(d.rp_amount ?? d.rp_total ?? 0);
-                            const periodAdmin =
-                              i === 0
-                                ? rpAdmin - adminFeePerPeriod * (rawDetail.length - 1)
-                                : adminFeePerPeriod;
-                            const periodTotal = periodAmount + periodAdmin;
-
-                            if (isPdamLunasin) {
-                              const extraBillFields: Array<{ label: string; value: string }> = [];
-                              for (let n = 1; n <= 3; n++) {
-                                const nama = d[`nama_field_${n}`];
-                                const val  = d[`value_field_${n}`];
-                                if (nama && String(nama) !== "" && val != null) {
-                                  extraBillFields.push({
-                                    label: String(nama).charAt(0).toUpperCase() + String(nama).slice(1),
-                                    value: !isNaN(Number(val)) ? `Rp ${Number(val).toLocaleString("id-ID")}` : String(val),
-                                  });
-                                }
-                              }
-                              return {
-                                type: "pln" as const,
-                                kodeProduk: r.kodeProduk || "",
-                                idpel: r.idpel,
-                                nama: r.nama,
-                                namaPdam: String(pd.nama_pdam || ""),
-                                alamat: String(pd.alamat || ""),
-                                gol: String(pd.golongan || pd.gol || ""),
-                                periode: String(d.periode ?? ""),
-                                meterAwal: d.meter_awal != null ? Number(d.meter_awal) : undefined,
-                                meterAkhir: d.meter_akhir != null ? Number(d.meter_akhir) : undefined,
-                                standMeter: String(
-                                  d.stand_meter ??
-                                  (d.meter_awal != null && d.meter_akhir != null ? `${d.meter_awal}-${d.meter_akhir}` : "")
-                                ),
-                                rpAir: Number(d.rp_air ?? 0),
-                                rpDanameter: Number(d.rp_danameter ?? 0),
-                                rpSampah: Number(d.rp_sampah ?? 0),
-                                rpAdministrasi: Number(d.rp_administrasi ?? 0),
-                                materai: Number(d.rp_materai ?? 0),
-                                denda: Number(d.rp_denda ?? 0),
-                                extraBillFields,
-                                refnumLunasin: String(pd.refnum_lunasin || ""),
-                                tglLunas: String(pd.tgl_lunas || ""),
-                                jumBill: "1",
-                                tagihan: periodAmount,
-                                admin: periodAdmin,
-                                total: periodTotal,
-                                transactionCode: r.transactionCode,
-                              };
-                            }
-
-                            return {
-                              type: "pln" as const,
-                              idpel: r.idpel,
-                              nama: r.nama,
-                              kodeProduk: r.kodeProduk || "",
-                              periode: String(d.periode ?? ""),
-                              tarif: String(pd.tarif || ""),
-                              daya: String(pd.daya || ""),
-                              standMeter: String(
-                                d.stand_meter ??
-                                (d.meter_awal != null && d.meter_akhir != null
-                                  ? `${d.meter_awal}-${d.meter_akhir}`
-                                  : "")
-                              ),
-                              noMeter: String(pd.nometer || ""),
-                              jumBill: "1",
-                              tokenPln: "",
-                              refnumLunasin: String(pd.refnum_lunasin || ""),
-                              noreg: "",
-                              tglReg: "",
-                              jenisReg: "",
-                              rpAmount: periodAmount,
-                              rpAdmin: periodAdmin,
-                              tagihan: periodAmount,
-                              admin: periodAdmin,
-                              total: periodTotal,
-                              transactionCode: r.transactionCode,
-                              kwh: String(d.kwh ?? pd.kwh ?? ""),
-                              rpMaterai: Number(d.rp_materai ?? pd.rp_materai ?? 0),
-                              rpPpn: Number(d.rp_ppn ?? pd.rp_ppn ?? 0),
-                              rpPju: Number(d.rp_pju ?? pd.rp_pju ?? 0),
-                              rpAngsuran: Number(d.rp_angsuran ?? pd.rp_angsuran ?? 0),
-                              rpToken: Number(d.rp_token ?? pd.rp_token ?? 0),
-                              rpTotal: periodTotal,
-                              saldoTerpotong: 0,
-                              refnum: String(pd.refnum || ""),
-                              tglLunas: String(pd.tgl_lunas || ""),
-                              pesanBiller: String(pd.pesan_biller || ""),
-                              nova: "",
-                              novaKepalaKeluarga: "",
-                              jumPeserta: "",
-                              kodeCabang: "",
-                              namaCabang: "",
-                              sisaSaldoBpjs: "",
-                              nomor: "",
-                              denom: "",
-                              namaProduk: "",
-                              serialNumber: "",
-                              masaBerlaku: "",
-                            };
-                          });
-                        }
-
-                        // PDAM Lunasin 1 bulan
-                        if (isPdamLunasin) {
-                          const d = rawDetail.length === 1 ? rawDetail[0] : {};
-                          const extraBillFields: Array<{ label: string; value: string }> = [];
-                          for (let n = 1; n <= 3; n++) {
-                            const nama = d[`nama_field_${n}`];
-                            const val  = d[`value_field_${n}`];
-                            if (nama && String(nama) !== "" && val != null) {
-                              extraBillFields.push({
-                                label: String(nama).charAt(0).toUpperCase() + String(nama).slice(1),
-                                value: !isNaN(Number(val)) ? `Rp ${Number(val).toLocaleString("id-ID")}` : String(val),
-                              });
-                            }
-                          }
-                          const singleAmount = Number(d.rp_total ?? pd.rp_total ?? Math.max(0, r.total - rpAdmin));
-                          return [{
-                            type: "pln" as const,
-                            kodeProduk: r.kodeProduk || "",
-                            idpel: r.idpel,
-                            nama: r.nama,
-                            namaPdam: String(pd.nama_pdam || ""),
-                            alamat: String(pd.alamat || ""),
-                            gol: String(pd.golongan || pd.gol || ""),
-                            periode: String(d.periode ?? pd.periode ?? ""),
-                            meterAwal: d.meter_awal != null ? Number(d.meter_awal) : undefined,
-                            meterAkhir: d.meter_akhir != null ? Number(d.meter_akhir) : undefined,
-                            standMeter: String(
-                              d.stand_meter ??
-                              (d.meter_awal != null && d.meter_akhir != null ? `${d.meter_awal}-${d.meter_akhir}` : "")
-                            ),
-                            rpAir: Number(d.rp_air ?? 0),
-                            rpDanameter: Number(d.rp_danameter ?? 0),
-                            rpSampah: Number(d.rp_sampah ?? 0),
-                            rpAdministrasi: Number(d.rp_administrasi ?? 0),
-                            materai: Number(d.rp_materai ?? 0),
-                            denda: Number(d.rp_denda ?? 0),
-                            extraBillFields,
-                            refnumLunasin: String(pd.refnum_lunasin || ""),
-                            tglLunas: String(pd.tgl_lunas || ""),
-                            jumBill: "1",
-                            tagihan: singleAmount,
-                            admin: rpAdmin,
-                            total: r.total,
-                            transactionCode: r.transactionCode,
-                          }];
-                        }
-
-                        // PLN Postpaid 1 bulan
-                        if (isPlnPostpaid && rawDetail.length === 1) {
-                          const d = rawDetail[0];
-                          return [{
-                            type: "pln" as const,
-                            idpel: r.idpel,
-                            nama: r.nama,
-                            kodeProduk: r.kodeProduk || "",
-                            periode: String(d.periode ?? pd.periode ?? ""),
-                            tarif: String(pd.tarif || ""),
-                            daya: String(pd.daya || ""),
-                            standMeter: String(
-                              d.stand_meter ??
-                              (d.meter_awal != null && d.meter_akhir != null
-                                ? `${d.meter_awal}-${d.meter_akhir}`
-                                : "")
-                            ),
-                            noMeter: String(pd.nometer || ""),
-                            jumBill: "1",
-                            tokenPln: "",
-                            refnumLunasin: String(pd.refnum_lunasin || ""),
-                            noreg: "",
-                            tglReg: "",
-                            jenisReg: "",
-                            rpAmount: Number(d.rp_amount ?? Math.max(0, r.total - rpAdmin)),
-                            rpAdmin,
-                            tagihan: Number(d.rp_amount ?? Math.max(0, r.total - rpAdmin)),
-                            admin: rpAdmin,
-                            total: r.total,
-                            transactionCode: r.transactionCode,
-                            kwh: String(d.kwh ?? pd.kwh ?? ""),
-                            rpMaterai: Number(d.rp_materai ?? pd.rp_materai ?? 0),
-                            rpPpn: Number(d.rp_ppn ?? pd.rp_ppn ?? 0),
-                            rpPju: Number(d.rp_pju ?? pd.rp_pju ?? 0),
-                            rpAngsuran: Number(d.rp_angsuran ?? pd.rp_angsuran ?? 0),
-                            rpToken: Number(d.rp_token ?? pd.rp_token ?? 0),
-                            rpTotal: r.total,
-                            saldoTerpotong: 0,
-                            refnum: String(pd.refnum || ""),
-                            tglLunas: String(pd.tgl_lunas || ""),
-                            pesanBiller: String(pd.pesan_biller || ""),
-                            nova: "",
-                            novaKepalaKeluarga: "",
-                            jumPeserta: "",
-                            kodeCabang: "",
-                            namaCabang: "",
-                            sisaSaldoBpjs: "",
-                            nomor: "",
-                            denom: "",
-                            namaProduk: "",
-                            serialNumber: "",
-                            masaBerlaku: "",
-                          }];
-                        }
-
-                        // Produk lain (Prepaid, BPJS, Telkom, Pulsa, dll) - single entry
-                        const rpAmount = Number(pd.rp_amount || Math.max(0, r.total - rpAdmin));
-                        return [{
-                          type: "pln" as const,
-                          idpel: r.idpel,
-                          nama: r.nama,
-                          kodeProduk: r.kodeProduk || "",
-                          periode: String(pd.periode || ""),
-                          tarif: String(pd.tarif || ""),
-                          daya: String(pd.daya || ""),
-                          standMeter: String(pd.stand_meter || ""),
-                          noMeter: String(pd.nometer || ""),
-                          jumBill: String(pd.jum_bill || "1"),
-                          tokenPln: String(pd.token || ""),
-                          refnumLunasin: String(pd.refnum_lunasin || ""),
-                          noreg: String(pd.noreg || ""),
-                          tglReg: String(pd.tgl_reg || ""),
-                          jenisReg: String(pd.jenis_reg || ""),
-                          rpAmount,
-                          rpAdmin,
-                          tagihan: rpAmount,
-                          admin: rpAdmin,
-                          total: r.total,
-                          transactionCode: r.transactionCode,
-                          kwh: String(pd.kwh || ""),
-                          rpMaterai: Number(pd.rp_materai || 0),
-                          rpPpn: Number(pd.rp_ppn || 0),
-                          rpPju: Number(pd.rp_pju || 0),
-                          rpAngsuran: Number(pd.rp_angsuran || 0),
-                          rpToken: Number(pd.rp_token || 0),
-                          rpTotal: Number(pd.rp_total || 0),
-                          saldoTerpotong: Number(pd.saldo_terpotong || 0),
-                          refnum: String(pd.refnum || ""),
-                          tglLunas: String(pd.tgl_lunas || ""),
-                          pesanBiller: String(pd.pesan_biller || ""),
-                          nova: String(pd.nova || ""),
-                          novaKepalaKeluarga: String(pd.nova_kepala_keluarga || ""),
-                          jumPeserta: String(pd.jum_peserta || ""),
-                          kodeCabang: String(pd.kode_cabang || ""),
-                          namaCabang: String(pd.nama_cabang || ""),
-                          sisaSaldoBpjs: String(pd.sisa || ""),
-                          nomor: String(pd.nomor || ""),
-                          denom: String(pd.denom || ""),
-                          namaProduk: String(pd.nama_produk || ""),
-                          serialNumber: String(pd.serial_number || ""),
-                          masaBerlaku: String(pd.masa_berlaku || ""),
-                        }];
-                      }
-
-                      const orig = daftarTagihanSnapshot.find(
-                        (b) => b.idpel === r.idpel && b.thbln === r.blth
-                      );
-                      return [{
-                        type: "pdam" as const,
-                        idpel: r.idpel,
-                        nama: r.nama,
-                        alamat: orig?.alamat,
-                        gol: orig?.gol,
-                        periode: r.blth,
-                        standLalu: orig?.standLalu,
-                        standKini: orig?.standKini,
-                        pemakaian: orig?.pakai,
-                        hargaAir: orig?.harga,
-                        denda: orig?.denda,
-                        materai: orig?.materai,
-                        limbah: orig?.limbah,
-                        retribusi: orig?.retribusi,
-                        bebanTetap: orig?.bebanTetap,
-                        biayaMeter: orig?.biayaMeter,
-                        diskon: orig?.diskon,
-                        tagihan: Math.max(0, r.total - (r.adminFee || receipt.biayaAdmin || 0)),
-                        admin: r.adminFee || receipt.biayaAdmin || 0,
-                        total: r.total,
-                        transactionCode: r.transactionCode,
-                      }];
-                    });
-
-                    printReceipt({
-                      loketName: receipt.loketName,
-                      loketCode: receipt.loketCode,
-                      kasir: (session?.user as { name?: string })?.name || "-",
-                      tanggal: receipt.paidAt,
-                      bills: printableBills,
-                      totalTagihan: printableBills.reduce((s, bill) => s + bill.tagihan, 0),
-                      totalAdmin: printableBills.reduce((s, bill) => s + bill.admin, 0),
-                      totalBayar: printableBills.reduce((s, bill) => s + bill.total, 0),
-                      tunai: receipt.tunai,
-                      kembalian: receipt.kembalian,
-                    });
+                    const printData = buildPaymentPrintData(
+                      receipt,
+                      daftarTagihanSnapshot,
+                      (session?.user as { name?: string })?.name || "-"
+                    );
+                    if (printData) void printReceipt(printData);
                   }}
                   className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-sm flex items-center justify-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
                 >

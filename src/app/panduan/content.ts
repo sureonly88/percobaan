@@ -176,7 +176,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
           "Bila saldo loket tidak cukup, pembayaran ditolak dengan pesan “Saldo loket tidak mencukupi”.",
           "Bila muncul “Menunggu konfirmasi … saldo ditahan, jangan tagih ulang”: provider belum menjawab. Jangan menagih ulang pelanggan; status diselesaikan lewat Advice.",
           "Tagihan yang gagal tetap tinggal di keranjang agar bisa dicoba lagi.",
-          "Fitur tambahan: Simpan sbg Grup (simpan daftar pelanggan PDAM untuk inquiry sekaligus), Buat Payment Link dari hasil inquiry, dan kotak Cetak Ulang Struk (F4).",
+          "Fitur tambahan: Simpan sbg Grup (simpan daftar pelanggan PDAM untuk inquiry sekaligus), Buat Payment Link dari hasil inquiry, dan kotak Cetak Ulang Struk (F4): isi ID pelanggan, tekan Cetak, lalu pilih transaksi dari daftar.",
           "Pintasan: F1 bantuan, F2 cek tagihan, F3 pindah tab, F4 cetak ulang, F8 bayar, Alt+I kolom ID pelanggan, Alt+B kolom nominal bayar, Ctrl+Del kosongkan keranjang, Esc tutup jendela.",
         ],
       },
@@ -283,7 +283,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
           "Tekan Cetak pada baris transaksi, atau centang beberapa baris lalu tekan Cetak Pilihan.",
         ],
         notes: [
-          "Struk cetak ulang diberi tanda “COPY — BUKAN STRUK ASLI” dan setiap cetak ulang tercatat.",
+          "Struk cetak ulang diberi tanda “COPY — BUKAN STRUK ASLI” dan setiap cetak ulang tercatat. Isinya sama dengan struk asli setelah lunas — berlaku juga untuk Cetak Struk di Laporan, Riwayat, dan Detail Pelanggan.",
           "Kasir hanya melihat transaksi loketnya sendiri.",
         ],
       },

@@ -4,8 +4,19 @@ import { authOptions } from "@/lib/auth";
 import pool from "@/lib/db";
 import { RowDataPacket } from "mysql2";
 import { auditLog } from "@/lib/audit-log";
+import { buildReceiptBills } from "@/lib/receipt-bills";
 
-// GET: Fetch receipt data for reprinting a transaction
+// GET /api/pembayaran/reprint
+//
+// Mode:
+//   ?idPelanggan=X&list=1     → daftar pembayaran sukses yang memuat pelanggan X (untuk dipilih)
+//   ?multiPaymentCode=Y       → data struk satu pembayaran utuh (= struk asli setelah lunas)
+//   ?transactionCode=Z        → data struk item dengan kode transaksi Z (Laporan, Riwayat, Cetak Ulang, dll)
+//   ?idPelanggan=X            → data struk pembayaran TERAKHIR yang memuat pelanggan X
+//
+// Isi struk disusun oleh buildReceiptBills (lib/receipt-bills) — sama persis dengan
+// cetak otomatis setelah pembayaran lunas. Setiap cetak ulang ditandai COPY dan
+// dicatat di audit log (REPRINT_RECEIPT).
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) {
@@ -13,47 +24,74 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const transactionCode = searchParams.get("transactionCode");
-  const idPelanggan = searchParams.get("idPelanggan");
+  const transactionCode = searchParams.get("transactionCode")?.trim() || "";
+  const multiPaymentCodeParam = searchParams.get("multiPaymentCode")?.trim() || "";
+  const idPelanggan = searchParams.get("idPelanggan")?.trim() || "";
+  const listMode = searchParams.get("list") === "1";
 
-  if (!transactionCode && !idPelanggan) {
-    return NextResponse.json({ error: "transactionCode atau idPelanggan wajib diisi" }, { status: 400 });
+  // Sama dengan /api/cetak-ulang/list: selain admin/supervisor hanya boleh loketnya sendiri
+  const sessionRole = (session.user as { role?: string })?.role || "";
+  const sessionLoketCode = (session.user as { loketCode?: string })?.loketCode || "";
+  const canSeeAll = sessionRole === "admin" || sessionRole === "supervisor";
+  const loketScope: LoketScope = canSeeAll ? null : sessionLoketCode || "__NO_LOKET__";
+  const loketSql = loketScope ? " AND r.loket_code = ?" : "";
+  const loketParams = loketScope ? [loketScope] : [];
+
+  if (!transactionCode && !multiPaymentCodeParam && !idPelanggan) {
+    return NextResponse.json(
+      { error: "transactionCode, multiPaymentCode, atau idPelanggan wajib diisi" },
+      { status: 400 }
+    );
   }
 
   try {
-    let where = "WHERE i.status = 'SUCCESS'";
-    const params: string[] = [];
-
-    if (transactionCode) {
-      where += " AND i.transaction_code = ?";
-      params.push(transactionCode);
-    } else if (idPelanggan) {
-      where += " AND i.customer_id = ?";
-      params.push(idPelanggan);
+    if (listMode && idPelanggan) {
+      return listTransactions(idPelanggan, loketScope);
     }
 
+    let multiPaymentCode = multiPaymentCodeParam;
+    if (!transactionCode && !multiPaymentCode && idPelanggan) {
+      // Tanpa pilihan: pakai pembayaran terakhir pelanggan ini
+      const [latest] = await pool.query<RowDataPacket[]>(
+        `SELECT r.multi_payment_code
+           FROM multi_payment_items i
+           JOIN multi_payment_requests r ON r.id = i.multi_payment_id
+          WHERE i.status = 'SUCCESS' AND i.customer_id = ?${loketSql}
+          ORDER BY COALESCE(i.paid_at, i.created_at) DESC, i.id DESC
+          LIMIT 1`,
+        [idPelanggan, ...loketParams]
+      );
+      if (latest.length === 0) {
+        return NextResponse.json({ error: "Transaksi tidak ditemukan" }, { status: 404 });
+      }
+      multiPaymentCode = String(latest[0].multi_payment_code);
+    }
+
+    const where = transactionCode ? "i.transaction_code = ?" : "r.multi_payment_code = ?";
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT
-        i.id, i.transaction_code as transactionCode,
-        i.customer_id as idPelanggan,
-        i.customer_name as nama,
-        i.provider, i.product_code as productCode,
-        i.period_label as periode,
-        i.amount, i.admin_fee as adminFee, i.total,
-        i.metadata_json as metadataJson,
-        i.provider_response as providerResponse,
-        COALESCE(NULLIF(r.loket_name, ''), l.nama, '-')       as loketName,
-        COALESCE(NULLIF(r.loket_code, ''), l.loket_code, '-') as loketCode,
+        i.id, i.transaction_code AS transactionCode,
+        i.customer_id AS idPelanggan,
+        i.customer_name AS nama,
+        i.provider, i.product_code AS productCode,
+        i.period_label AS periode,
+        i.admin_fee AS adminFee, i.total,
+        CAST(i.metadata_json AS CHAR) AS metadataJson,
+        CAST(i.provider_response AS CHAR) AS providerResponse,
+        r.multi_payment_code AS multiPaymentCode,
+        COALESCE(NULLIF(r.loket_name, ''), l.nama, '-')       AS loketName,
+        COALESCE(NULLIF(r.loket_code, ''), l.loket_code, '-') AS loketCode,
         r.username,
-        COALESCE(i.paid_at, i.created_at) as tanggal,
-        i.paid_at as paidAt
+        COALESCE(NULLIF(u.name, ''), r.username, '-') AS kasir,
+        COALESCE(r.paid_at, i.paid_at, i.created_at) AS tanggal
       FROM multi_payment_items i
       JOIN multi_payment_requests r ON r.id = i.multi_payment_id
       LEFT JOIN lokets l ON l.loket_code = r.loket_code
-      ${where}
-      ORDER BY COALESCE(i.paid_at, i.created_at) DESC
-      LIMIT 50`,
-      params
+      LEFT JOIN users u ON u.username = r.username
+      WHERE i.status = 'SUCCESS' AND ${where}${loketSql}
+      ORDER BY i.id ASC
+      LIMIT 100`,
+      [transactionCode || multiPaymentCode, ...loketParams]
     );
 
     if (rows.length === 0) {
@@ -61,14 +99,11 @@ export async function GET(request: NextRequest) {
     }
 
     const first = rows[0];
-    const isPdam = first.provider === "PDAM";
 
-    // ── Audit & hitung copy number ──
-    // entityId distandarkan ke transaction_code grup (transactionCode atau pakai dari row pertama).
-    const entityIdForAudit = String(transactionCode || first.transactionCode || idPelanggan || "-");
+    // ── Audit & nomor copy ──
+    const entityIdForAudit = transactionCode || multiPaymentCode;
     const sessionUser = session.user as { name?: string; username?: string; role?: string } | undefined;
-    const actorUsername =
-      sessionUser?.username || sessionUser?.name || "unknown";
+    const actorUsername = sessionUser?.username || sessionUser?.name || "unknown";
     const actorRole = sessionUser?.role || null;
     const actorIp =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
@@ -76,8 +111,7 @@ export async function GET(request: NextRequest) {
       null;
     const reason = searchParams.get("reason") || null;
 
-    // Hitung jumlah reprint sebelumnya untuk entity ini → copyNumber = previous + 2
-    // (cetakan pertama = 1, jadi reprint pertama = 2).
+    // copyNumber = jumlah reprint sebelumnya + 2 (cetakan pertama = 1)
     let previousReprintCount = 0;
     try {
       const [auditRows] = await pool.query<RowDataPacket[]>(
@@ -89,159 +123,143 @@ export async function GET(request: NextRequest) {
     } catch {
       previousReprintCount = 0;
     }
-    const copyNumber = previousReprintCount + 2; // first print = 1
+    const copyNumber = previousReprintCount + 2;
     const copyAt = new Date().toISOString();
+    const providers = Array.from(new Set(rows.map((r) => String(r.provider))));
 
-    // Tulis audit (non-blocking, tidak menggagalkan request bila DB error).
     void auditLog({
       action: "REPRINT_RECEIPT",
-      entityType: isPdam ? "multi_payment_item_pdam" : "multi_payment_item_lunasin",
+      entityType: transactionCode
+        ? providers.length === 1 && providers[0] === "PDAM"
+          ? "multi_payment_item_pdam"
+          : "multi_payment_item_lunasin"
+        : "multi_payment_request",
       entityId: entityIdForAudit,
       actorUsername,
       actorRole,
       actorIp,
       context: {
         transactionCode: transactionCode || null,
+        multiPaymentCode: first.multiPaymentCode || null,
         idPelanggan: idPelanggan || null,
         loketCode: first.loketCode || null,
-        provider: first.provider || null,
+        provider: providers.join(",") || null,
         itemCount: rows.length,
         copyNumber,
         reason,
       },
-      after: {
-        copyNumber,
-        copyAt,
-      },
+      after: { copyNumber, copyAt },
     });
 
-    const copyMeta = { isCopy: true, copyNumber, copyBy: actorUsername, copyAt };
+    const bills = buildReceiptBills(
+      rows.map((r) => {
+        const meta = parseJson(r.metadataJson);
+        const prov = parseJson(r.providerResponse);
+        const isLunasin = r.provider === "LUNASIN";
+        return {
+          provider: String(r.provider),
+          idpel: String(r.idPelanggan || ""),
+          nama: String(r.nama || ""),
+          blth: String(r.periode || ""),
+          kodeProduk: r.productCode ? String(r.productCode) : undefined,
+          transactionCode: r.transactionCode ? String(r.transactionCode) : undefined,
+          adminFee: Number(r.adminFee || 0),
+          total: Number(r.total || 0),
+          providerData: isLunasin ? prov : undefined,
+          pdamSources: isLunasin ? undefined : [meta, prov],
+        };
+      })
+    );
 
-    if (isPdam) {
-      return reprintPdam(rows, copyMeta);
-    } else {
-      return reprintLunasin(rows, copyMeta);
-    }
+    const totalTagihan = bills.reduce((s, b) => s + b.tagihan, 0);
+    const totalAdmin = bills.reduce((s, b) => s + b.admin, 0);
+    const totalBayar = bills.reduce((s, b) => s + b.total, 0);
+
+    return NextResponse.json({
+      loketName: first.loketName || "-",
+      loketCode: first.loketCode || "-",
+      kasir: first.kasir || "-",
+      tanggal: first.tanggal || "-",
+      bills,
+      totalTagihan,
+      totalAdmin,
+      totalBayar,
+      tunai: totalBayar,
+      kembalian: 0,
+      multiPaymentCode: first.multiPaymentCode || null,
+      isCopy: true,
+      copyNumber,
+      copyBy: actorUsername,
+      copyAt,
+    });
   } catch (error) {
     console.error("Reprint Error:", error);
     return NextResponse.json({ error: "Gagal mengambil data struk" }, { status: 500 });
   }
 }
 
+/** Daftar pembayaran sukses (terbaru dulu) yang memuat pelanggan tertentu. */
+type LoketScope = string | null;
+
+async function listTransactions(idPelanggan: string, loketScope: LoketScope): Promise<NextResponse> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT r.id AS multiPaymentId, r.multi_payment_code AS multiPaymentCode,
+            COALESCE(NULLIF(r.loket_name, ''), r.loket_code, '-') AS loketName,
+            COALESCE(NULLIF(u.name, ''), r.username, '-') AS kasir,
+            COALESCE(r.paid_at, MAX(i.paid_at), MAX(i.created_at)) AS tanggal
+       FROM multi_payment_items i
+       JOIN multi_payment_requests r ON r.id = i.multi_payment_id
+       LEFT JOIN users u ON u.username = r.username
+      WHERE i.status = 'SUCCESS' AND i.customer_id = ?${loketScope ? " AND r.loket_code = ?" : ""}
+      GROUP BY r.id
+      ORDER BY tanggal DESC, r.id DESC
+      LIMIT 20`,
+    loketScope ? [idPelanggan, loketScope] : [idPelanggan]
+  );
+  if (rows.length === 0) {
+    return NextResponse.json({ error: "Transaksi tidak ditemukan" }, { status: 404 });
+  }
+
+  // Rincian item sukses tiap pembayaran (semua pelanggan dalam pembayaran itu = isi struk)
+  const ids = rows.map((r) => r.multiPaymentId);
+  const [items] = await pool.query<RowDataPacket[]>(
+    `SELECT multi_payment_id AS multiPaymentId, customer_id AS idpel, customer_name AS nama,
+            provider, product_code AS productCode, period_label AS periode, total
+       FROM multi_payment_items
+      WHERE status = 'SUCCESS' AND multi_payment_id IN (?)
+      ORDER BY id ASC`,
+    [ids]
+  );
+
+  const transactions = rows.map((r) => {
+    const own = items.filter((it) => it.multiPaymentId === r.multiPaymentId);
+    return {
+      multiPaymentCode: String(r.multiPaymentCode),
+      tanggal: r.tanggal,
+      loketName: r.loketName,
+      kasir: r.kasir,
+      itemCount: own.length,
+      totalBayar: own.reduce((s, it) => s + Number(it.total || 0), 0),
+      items: own.map((it) => ({
+        idpel: String(it.idpel || ""),
+        nama: String(it.nama || ""),
+        provider: String(it.provider || ""),
+        kodeProduk: it.productCode ? String(it.productCode) : null,
+        periode: String(it.periode || ""),
+        total: Number(it.total || 0),
+      })),
+    };
+  });
+
+  return NextResponse.json({ transactions });
+}
+
 function parseJson(val: unknown): Record<string, unknown> {
   if (!val) return {};
   try {
-    return typeof val === "string" ? JSON.parse(val) : (val as Record<string, unknown>);
+    const parsed = typeof val === "string" ? JSON.parse(val) : val;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
-}
-
-interface CopyMeta {
-  isCopy: boolean;
-  copyNumber: number;
-  copyBy: string;
-  copyAt: string;
-}
-
-function reprintPdam(rows: RowDataPacket[], copyMeta: CopyMeta): NextResponse {
-  const first = rows[0];
-
-  const bills = rows.map((r) => {
-    const meta = parseJson(r.metadataJson);
-    return {
-      idpel: r.idPelanggan,
-      nama: r.nama,
-      alamat: String(meta.alamat || ""),
-      gol: String(meta.idgol || meta.gol || ""),
-      periode: r.periode,
-      standLalu: Number(meta.standLalu ?? meta.stand_lalu ?? 0),
-      standKini: Number(meta.standKini ?? meta.stand_kini ?? 0),
-      hargaAir: Number(meta.hargaAir ?? meta.harga_air ?? 0),
-      denda: Number(meta.denda ?? 0),
-      materai: Number(meta.materai ?? 0),
-      limbah: Number(meta.limbah ?? 0),
-      retribusi: Number(meta.retribusi ?? 0),
-      bebanTetap: Number(meta.bebanTetap ?? meta.beban_tetap ?? 0),
-      biayaMeter: Number(meta.biayaMeter ?? meta.biaya_meter ?? 0),
-      diskon: Number(meta.diskon ?? 0),
-      tagihan: Number(r.amount ?? 0),
-      admin: Number(r.adminFee ?? 0),
-      total: Number(r.total ?? 0),
-      transactionCode: r.transactionCode || "",
-    };
-  });
-
-  const totalTagihan = bills.reduce((s, b) => s + b.tagihan, 0);
-  const totalAdmin = bills.reduce((s, b) => s + b.admin, 0);
-  const totalBayar = bills.reduce((s, b) => s + b.total, 0);
-
-  return NextResponse.json({
-    loketName: first.loketName || "-",
-    loketCode: first.loketCode || "-",
-    kasir: first.username || "-",
-    tanggal: first.paidAt || first.tanggal || "-",
-    bills,
-    totalTagihan,
-    totalAdmin,
-    totalBayar,
-    ...copyMeta,
-  });
-}
-
-function reprintLunasin(rows: RowDataPacket[], copyMeta: CopyMeta): NextResponse {
-  const first = rows[0];
-
-  const bills = rows.map((r) => {
-    const meta = parseJson(r.metadataJson);
-    const provData = parseJson(r.providerResponse);
-    const pd = (provData.data || provData) as Record<string, unknown>;
-
-    return {
-      type: "pln" as const,
-      idpel: r.idPelanggan,
-      nama: r.nama,
-      kodeProduk: r.productCode || "",
-      periode: r.periode || String(pd.periode || ""),
-      tarif: String(meta.tarif || pd.tarif || ""),
-      daya: String(meta.daya || pd.daya || ""),
-      standMeter: String(meta.standMeter || pd.stand_meter || ""),
-      noMeter: String(pd.nometer || ""),
-      jumBill: String(meta.jumBill || pd.jum_bill || "1"),
-      tokenPln: String(meta.tokenPln || pd.token || ""),
-      refnumLunasin: String(meta.refnumLunasin || pd.refnum_lunasin || ""),
-      rpAmount: Number(r.amount || 0),
-      rpAdmin: Number(r.adminFee || 0),
-      tagihan: Number(r.total || 0),
-      admin: 0,
-      total: Number(r.total || 0),
-      transactionCode: r.transactionCode || "",
-      kwh: String(pd.kwh || ""),
-      rpMaterai: Number(pd.rp_materai || 0),
-      rpPpn: Number(pd.rp_ppn || 0),
-      rpPju: Number(pd.rp_pju || 0),
-      rpAngsuran: Number(pd.rp_angsuran || 0),
-      rpToken: Number(pd.rp_token || 0),
-      rpTotal: Number(pd.rp_total || 0),
-      saldoTerpotong: Number(pd.saldo_terpotong || 0),
-      refnum: String(pd.refnum || ""),
-      tglLunas: String(pd.tgl_lunas || ""),
-      pesanBiller: String(pd.pesan_biller || ""),
-    };
-  });
-
-  const totalTagihan = bills.reduce((s, b) => s + b.tagihan, 0);
-
-  return NextResponse.json({
-    loketName: first.loketName || "-",
-    loketCode: first.loketCode || "-",
-    kasir: first.username || "-",
-    tanggal: first.paidAt || first.tanggal || "-",
-    bills,
-    totalTagihan,
-    totalAdmin: 0,
-    totalBayar: totalTagihan,
-    isLunasin: true,
-    ...copyMeta,
-  });
 }

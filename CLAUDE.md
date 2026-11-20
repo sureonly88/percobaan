@@ -45,6 +45,7 @@ Komunikasi dengan pemilik proyek memakai Bahasa Indonesia.
 - `GET /report/migrasi/pdambjm` (`src/app/report/migrasi/pdambjm/route.ts`, path publik di middleware): format respons sama dengan endpoint pedami-payment (baris `pdambjm_trans`), sumber `multi_payment_items` PDAM `PDAM_NATIVE` SUCCESS (+ VOID → `flag_transaksi='D'` bila `include_deleted=1`), filter `paid_at`. Auth header `report-token` vs `REPORT_API_TOKENS` di `.env`. Item LEGACY (service_type `PDAM`) tidak ikut.
 
 ## Cetak struk
+- Isi struk (ReceiptBillItem[]) disusun SATU tempat: `buildReceiptBills` di `src/lib/receipt-bills.ts` — dipakai cetak otomatis/tombol setelah lunas (`buildPaymentPrintData` di `pembayaran/page.tsx`) dan API `/api/pembayaran/reprint` (Pembayaran, Laporan, Riwayat, Cetak Ulang, Monitoring, Detail Pelanggan). Jangan menyusun field struk sendiri di halaman. Cetak ulang selalu `isCopy` + audit `REPRINT_RECEIPT`; kasir dibatasi loketnya sendiri. Cetak ulang di Pembayaran: `?idPelanggan=&list=1` → pilih → `?multiPaymentCode=` (seluruh pembayaran, seperti struk asli).
 - Dua formatter harus selalu diubah bersamaan: `print-bridge/formatter.js` (ESC/P via print-bridge di PC kasir) dan `src/lib/print-receipt.ts` (cetak dari browser).
 - Kertas continuous form 9½" × 11"/3: **1 tagihan = 1 lembar = 22 baris** (`pageLines` di `print-bridge/config.json`). Baris berlebih dipangkas menurut prioritas `drop`.
 - PLN Prabayar: Pesan Biller tidak dicetak; token satu baris `TOKEN PLN : xxxx-xxxx-…`.
